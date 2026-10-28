@@ -39,13 +39,14 @@ jobs:
         run: bun run test:e2e:advanced
 
   publish:
-    name: Build, Release & Publish to NPM
+    name: Build, Release & Publish
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     permissions:
       contents: write
       id-token: write
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -68,11 +69,31 @@ jobs:
         run: bun run build
 
       - name: Publish to NPM
-        run: npm publish --access public --provenance
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version >/dev/null 2>&1; then
+            echo "Version ${CURRENT_VERSION} is already published to npmjs.org, skipping."
+          else
+            npm publish --access public --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Publish to GitHub Packages
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "@netrunner714:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "Version ${CURRENT_VERSION} is already published to GitHub Packages, skipping."
+          else
+            npm publish --registry=https://npm.pkg.github.com
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         run: gh release create ${{ github.ref_name }} --generate-notes --title "Release ${{ github.ref_name }}" || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
