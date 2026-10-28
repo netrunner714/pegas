@@ -1,0 +1,38 @@
+# pegas
+
+> Agent-native zero-config Caddy reverse proxy for Docker multi-app VPS setups.
+
+## Core Concepts
+- Manages a single lightweight Caddy 2 container listening on host ports :80 and :443.
+- All Docker projects attach to a shared Docker bridge network named `pegas-network`.
+- Never expose ports 80:80 or 443:443 in application compose files.
+- Each project gets an isolated declarative drop-in configuration snippet in `conf.d/<projectName>.caddy`.
+- Hot-reloads Caddy via API with zero downtime and automatic validation rollback.
+- Automatically provisions and renews Let's Encrypt SSL on first incoming request.
+
+## CLI Usage for AI Agents
+- `npx pegas init` — Initialize gateway and Docker network on a clean VPS, or init project contract `pegas.json`.
+- `npx pegas dev -- <command>` — Local HTTPS development proxy with auto-assigned unprivileged ports.
+- `npx pegas deploy` — Declaratively orchestrate Caddy routes from `pegas.json` and start containers.
+- `npx pegas down` — Cleanly teardown containers and remove project routes.
+- `npx pegas add <domain> --upstream <service:port>` — Route a new domain to a container service.
+- `npx pegas add <domain> --spa --upstream <client:80> --api-upstream <api:8000>` — Route SPA + API.
+- `npx pegas list --json` — List all active routes in machine-readable JSON.
+- `npx pegas remove <domain>` — Remove route and hot-reload Caddy.
+- `npx pegas status --json` — Check Docker, network, and Caddy health.
+
+## Example Docker Compose Patch for Any App
+```yaml
+services:
+  web:
+    expose:
+      - "3000"
+    networks:
+      pegas-network:
+        aliases:
+          - <projectName>-web
+
+networks:
+  pegas-network:
+    external: true
+```

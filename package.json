@@ -1,0 +1,50 @@
+{
+  "name": "pegas",
+  "version": "1.0.0",
+  "description": "Agent-native zero-config L7 reverse proxy orchestrator for Docker",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "pegas": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --outfile=dist/index.js && chmod +x dist/index.js",
+    "dev": "bun run src/index.ts",
+    "test": "bun test",
+    "test:e2e": "bun scripts/e2e.ts",
+    "test:e2e:advanced": "bun scripts/e2e-advanced.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "docker",
+    "caddy",
+    "reverse proxy",
+    "agent-native",
+    "cli",
+    "deployment",
+    "orchestration",
+    "zero-config",
+    "self-hosted",
+    "gateway"
+  ],
+  "author": "NETRUNNER714 <admin@netrunner714.ru>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/netrunner714/pegas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/netrunner714/pegas/issues"
+  },
+  "homepage": "https://netrunner714.ru/pegas",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
