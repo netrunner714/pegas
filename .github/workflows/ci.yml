@@ -1,10 +1,8 @@
-name: CI/CD
+name: CI
 
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -34,67 +32,3 @@ jobs:
 
       - name: Run E2E tests
         run: bun run test:e2e
-
-  publish:
-    name: Build, Release & Publish
-    needs: test
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: write
-      id-token: write
-      packages: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build dist bundle
-        run: bun run build
-
-      - name: Publish to NPM
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version >/dev/null 2>&1; then
-            echo "Version ${CURRENT_VERSION} is already published to npmjs.org, skipping."
-          else
-            npm publish --access public --provenance
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish to GitHub Packages
-        run: |
-          RC_FILE="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          echo "@netrunner714:registry=https://npm.pkg.github.com" >> "$RC_FILE"
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> "$RC_FILE"
-          echo "@netrunner714:registry=https://npm.pkg.github.com" >> ~/.npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
-
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
-            echo "Version ${CURRENT_VERSION} is already published to GitHub Packages, skipping."
-          else
-            npm publish --registry=https://npm.pkg.github.com
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: gh release create ${{ github.ref_name }} --generate-notes --title "Release ${{ github.ref_name }}" || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
