@@ -1,5 +1,5 @@
 {
-  "name": "pegas",
+  "name": "@netrunner714/pegas",
   "version": "1.0.0",
   "description": "Agent-native zero-config L7 reverse proxy orchestrator for Docker",
   "main": "dist/index.js",

@@ -68,8 +68,10 @@ function tryLocalDelegation(): void {
     return;
   }
 
-  const localPegas = path.join(process.cwd(), "node_modules", "pegas", "dist", "index.js");
-  if (!fs.existsSync(localPegas)) {
+  const scopedTarget = path.join(process.cwd(), "node_modules", "@netrunner714", "pegas", "dist", "index.js");
+  const unscopedTarget = path.join(process.cwd(), "node_modules", "pegas", "dist", "index.js");
+  const localPegas = fs.existsSync(scopedTarget) ? scopedTarget : (fs.existsSync(unscopedTarget) ? unscopedTarget : null);
+  if (!localPegas) {
     return;
   }
 

@@ -207,9 +207,9 @@ export async function updatePackageJson(
     if (!pkg.devDependencies) {
       pkg.devDependencies = {};
     }
-    if (!pkg.devDependencies.pegas) {
-      pkg.devDependencies.pegas = "^1.0.0";
-      actions.push("Добавлен 'pegas' в devDependencies в package.json");
+    if (!pkg.devDependencies["@netrunner714/pegas"] && !pkg.devDependencies.pegas) {
+      pkg.devDependencies["@netrunner714/pegas"] = "^1.0.0";
+      actions.push("Добавлен '@netrunner714/pegas' в devDependencies в package.json");
     }
 
     await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");

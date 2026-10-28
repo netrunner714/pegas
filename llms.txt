@@ -11,7 +11,7 @@
 - Automatically provisions and renews Let's Encrypt SSL on first incoming request.
 
 ## CLI Usage for AI Agents
-- `npx pegas init` — Initialize gateway and Docker network on a clean VPS, or init project contract `pegas.json`.
+- `npx @netrunner714/pegas init` — Initialize gateway and Docker network on a clean VPS, or init project contract `pegas.json`.
 - `npx pegas dev -- <command>` — Local HTTPS development proxy with auto-assigned unprivileged ports.
 - `npx pegas deploy` — Declaratively orchestrate Caddy routes from `pegas.json` and start containers.
 - `npx pegas down` — Cleanly teardown containers and remove project routes.

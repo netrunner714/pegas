@@ -204,8 +204,8 @@ async function runE2E() {
     if (updatedPkg.scripts?.deploy !== "pegas deploy") {
       throw new Error(`package.json deploy script mismatch: ${updatedPkg.scripts?.deploy}`);
     }
-    if (!updatedPkg.devDependencies?.pegas) {
-      throw new Error("package.json is missing pegas devDependency");
+    if (!updatedPkg.devDependencies?.["@netrunner714/pegas"] && !updatedPkg.devDependencies?.pegas) {
+      throw new Error("package.json is missing @netrunner714/pegas devDependency");
     }
     logSuccess("package.json scripts wrapping & devDependency verified");
 

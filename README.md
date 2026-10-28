@@ -3,7 +3,7 @@
 > **Agent-native zero-config L7 reverse proxy orchestrator for Docker.**  
 > Host unlimited websites and APIs on a single VPS with zero port conflicts, automatic Let's Encrypt SSL, and zero-downtime hot reloads. Built specifically to be rock-solid for human developers and autonomous AI coding agents (Cursor, Claude Code, Cline, Copilot).
 
-[![npm version](https://img.shields.io/npm/v/pegas.svg?color=cb3837)](https://www.npmjs.com/package/pegas)
+[![npm version](https://img.shields.io/npm/v/@netrunner714/pegas.svg?color=cb3837)](https://www.npmjs.com/package/@netrunner714/pegas)
 [![CI](https://github.com/netrunner714/pegas/actions/workflows/ci.yml/badge.svg)](https://github.com/netrunner714/pegas/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
@@ -65,7 +65,8 @@ Pegas standardizes your multi-app VPS around a unified, ultra-lightweight **Cadd
 Run inside any web application directory with a `package.json` or `docker-compose.yml`:
 
 ```bash
-npx pegas init
+npx @netrunner714/pegas init
+# or: pnpm add -D @netrunner714/pegas && pnpm pegas init
 ```
 
 **What `pegas init` does automatically:**

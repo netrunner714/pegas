@@ -11,7 +11,7 @@ export const LLMS_TXT_CONTENT = `# pegas
 - Auto-provisions Let's Encrypt SSL on first request.
 
 ## CLI Usage for Agents
-- \`npx pegas init\` — Initialize gateway and Docker network on a clean VPS, or initialize a project with \`pegas.json\`.
+- \`npx @netrunner714/pegas init\` — Initialize gateway and Docker network on a clean VPS, or initialize a project with \`pegas.json\`.
 - \`npx pegas dev -- <command>\` — Local HTTPS proxy for dev domains without Docker.
 - \`npx pegas deploy\` — Declaratively deploy project containers and route Caddy domains from \`pegas.json\`.
 - \`npx pegas down\` — Tear down project containers and unbind Caddy routes.
