@@ -1,13 +1,16 @@
-name: CI
+name: CI/CD
 
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
-  ci:
+  test:
     name: Lint, Test & E2E
     runs-on: ubuntu-latest
     steps:
@@ -32,5 +35,44 @@ jobs:
       - name: Run E2E tests
         run: bun run test:e2e
 
-      - name: Run Advanced E2E tests (Multi-tenant & Delegation)
+      - name: Run Advanced E2E tests
         run: bun run test:e2e:advanced
+
+  publish:
+    name: Build, Release & Publish to NPM
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build dist bundle
+        run: bun run build
+
+      - name: Publish to NPM
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        run: gh release create ${{ github.ref_name }} --generate-notes --title "Release ${{ github.ref_name }}" || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
