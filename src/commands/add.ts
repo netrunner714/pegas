@@ -39,7 +39,10 @@ export async function handleAdd(options: AddOptions): Promise<void> {
     } else {
       console.error("❌ Error: Missing domain name. Usage: pegas add <domain> --upstream <service:port>");
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   if (!options.upstream) {
@@ -48,7 +51,10 @@ export async function handleAdd(options: AddOptions): Promise<void> {
     } else {
       console.error("❌ Error: Missing --upstream argument. Usage: pegas add <domain> --upstream <service:port>");
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   const gatewayDir = await findGatewayDir(options.gatewayDir);
@@ -82,7 +88,10 @@ export async function handleAdd(options: AddOptions): Promise<void> {
       console.error(`⚠️  Route for '${options.domain}' already exists at: ${routeFilePath}`);
       console.error(`   Use '--force' flag to overwrite.`);
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   if (options.dryRun) {

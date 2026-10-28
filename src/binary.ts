@@ -8,6 +8,35 @@ export interface FindCaddyOptions {
   cacheDir?: string;
 }
 
+export function getCaddyReleaseInfo(
+  platform = process.platform,
+  arch = process.arch,
+  version = "2.9.1"
+): { plat: string; arch: string; ext: string; filename: string; url: string } {
+  const platformMap: Record<string, string> = {
+    linux: "linux",
+    darwin: "mac",
+    win32: "windows",
+  };
+  const archMap: Record<string, string> = {
+    x64: "amd64",
+    arm64: "arm64",
+    arm: "armv7",
+  };
+
+  const plat = platformMap[platform];
+  const archName = archMap[arch];
+  if (!plat || !archName) {
+    throw new Error(`Unsupported platform or architecture for Caddy: ${platform}/${arch}`);
+  }
+
+  const ext = platform === "win32" ? "zip" : "tar.gz";
+  const filename = `caddy_${version}_${plat}_${archName}.${ext}`;
+  const url = `https://github.com/caddyserver/caddy/releases/download/v${version}/${filename}`;
+
+  return { plat, arch: archName, ext, filename, url };
+}
+
 export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promise<string> {
   const isWin = process.platform === "win32";
   const binaryName = isWin ? "caddy.exe" : "caddy";
@@ -73,27 +102,7 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   }
   await fs.mkdir(primaryCacheDir, { recursive: true });
 
-  const platformMap: Record<string, string> = {
-    linux: "linux",
-    darwin: "mac",
-    win32: "windows",
-  };
-  const archMap: Record<string, string> = {
-    x64: "amd64",
-    arm64: "arm64",
-    arm: "armv7",
-  };
-
-  const plat = platformMap[process.platform];
-  const arch = archMap[process.arch];
-  if (!plat || !arch) {
-    throw new Error(`Unsupported platform or architecture for Caddy: ${process.platform}/${process.arch}`);
-  }
-
-  const version = "2.9.1";
-  const ext = isWin ? "zip" : "tar.gz";
-  const filename = `caddy_${version}_${plat}_${arch}.${ext}`;
-  const url = `https://github.com/caddyserver/caddy/releases/download/v${version}/${filename}`;
+  const { filename, url } = getCaddyReleaseInfo();
 
   const archivePath = path.join(primaryCacheDir, filename);
 

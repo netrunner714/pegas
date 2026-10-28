@@ -115,11 +115,11 @@ function tryLocalDelegation(): void {
   process.exit(result.status ?? (result.signal ? 1 : 0));
 }
 
-async function main() {
+export async function main(argv = process.argv.slice(2), options: { noExit?: boolean } = {}) {
   ensureNodeVersion();
   tryLocalDelegation();
 
-  const rawArgs = process.argv.slice(2);
+  const rawArgs = argv;
   const doubleDashIdx = rawArgs.indexOf("--");
   const pegasArgs = doubleDashIdx !== -1 ? rawArgs.slice(0, doubleDashIdx) : rawArgs;
 
@@ -276,12 +276,25 @@ async function main() {
 
     default: {
       console.error(`Unknown command: '${command}'. Run 'pegas --help' for usage.`);
-      process.exit(1);
+      if (!options.noExit) {
+        process.exit(1);
+      }
+      return;
     }
   }
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+const isDirectCli = Boolean(
+  process.argv[1] &&
+    (process.argv[1].endsWith("dist/index.js") ||
+      process.argv[1].endsWith("src/index.ts") ||
+      process.argv[1].endsWith("bin/pegas") ||
+      process.argv[1].endsWith("bin/pegas.js"))
+);
+
+if (isDirectCli) {
+  main().catch((err) => {
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
+}

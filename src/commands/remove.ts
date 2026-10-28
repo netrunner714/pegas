@@ -2,7 +2,13 @@ import fs from "node:fs/promises";
 import { findGatewayDir, getRouteFilePath } from "../gateway.js";
 import { reloadCaddyConfig } from "../docker.js";
 
-export async function handleRemove(options: { domain: string; gatewayDir?: string; json?: boolean }): Promise<void> {
+export async function handleRemove(options: {
+  domain: string;
+  gatewayDir?: string;
+  json?: boolean;
+  skipReload?: boolean;
+  noExit?: boolean;
+}): Promise<void> {
   const isJson = options.json ?? false;
 
   if (!options.domain) {
@@ -11,7 +17,10 @@ export async function handleRemove(options: { domain: string; gatewayDir?: strin
     } else {
       console.error("❌ Error: Missing domain argument. Usage: pegas remove <domain>");
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   const gatewayDir = await findGatewayDir(options.gatewayDir);
@@ -25,17 +34,25 @@ export async function handleRemove(options: { domain: string; gatewayDir?: strin
     } else {
       console.error(`❌ Route for '${options.domain}' not found at: ${routeFilePath}`);
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
-  const reloadRes = await reloadCaddyConfig(gatewayDir);
-  if (!reloadRes.success) {
-    if (isJson) {
-      console.log(JSON.stringify({ error: "Failed to reload Caddy.", details: reloadRes.stderr }));
-    } else {
-      console.error("❌ Failed to reload Caddy:", reloadRes.stderr);
+  if (!options.skipReload) {
+    const reloadRes = await reloadCaddyConfig(gatewayDir);
+    if (!reloadRes.success) {
+      if (isJson) {
+        console.log(JSON.stringify({ error: "Failed to reload Caddy.", details: reloadRes.stderr }));
+      } else {
+        console.error("❌ Failed to reload Caddy:", reloadRes.stderr);
+      }
+      if (!options.noExit) {
+        process.exit(1);
+      }
+      return;
     }
-    process.exit(1);
   }
 
   if (isJson) {

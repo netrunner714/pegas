@@ -15,6 +15,7 @@ export interface AddOptions {
   dryRun?: boolean;
   gatewayDir?: string;
   json?: boolean;
+  noExit?: boolean;
 }
 
 export interface InitOptions {

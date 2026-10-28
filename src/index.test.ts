@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
+import child_process from "node:child_process";
 import { findProjectRoot } from "./gateway.js";
 import { validateNodeVersion } from "./index.js";
 
@@ -48,5 +49,49 @@ describe("findProjectRoot", () => {
     expect(root).toBeNull();
 
     await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+});
+
+describe("cli entry point", () => {
+  const binPath = path.resolve(import.meta.dir, "../dist/index.js");
+
+  it("prints help on --help or -h", () => {
+    const res = child_process.spawnSync("node", [binPath, "--help"], { encoding: "utf-8" });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("pegas v1.0.1");
+    expect(res.stdout).toContain("USAGE:");
+  });
+
+  it("prints version on --version or -v", () => {
+    const res = child_process.spawnSync("node", [binPath, "--version"], { encoding: "utf-8" });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("1.0.1");
+  });
+
+  it("runs llms command via CLI", () => {
+    const res = child_process.spawnSync("node", [binPath, "llms", "--json"], { encoding: "utf-8" });
+    expect(res.status).toBe(0);
+    const json = JSON.parse(res.stdout);
+    expect(json.llms).toContain("# pegas");
+  });
+
+  it("main function dispatches commands directly", async () => {
+    const { main } = await import("./index.js");
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+
+    try {
+      await main(["--help"]);
+      await main(["--version"]);
+      await main(["llms", "--json"]);
+      await main(["unknown-command"], { noExit: true });
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(logs.some((l) => typeof l === "string" && l.includes("USAGE:"))).toBe(true);
+    expect(logs.some((l) => typeof l === "string" && l.includes("pegas v1.0.1"))).toBe(true);
+    expect(logs.some((l) => typeof l === "string" && l.includes("# pegas"))).toBe(true);
   });
 });
