@@ -79,7 +79,7 @@ EXAMPLES:
   $ pegas list
 `;
 
-function tryLocalDelegation(): void {
+export function tryLocalDelegation(): void {
   if (process.env.PEGAS_DELEGATED) {
     return;
   }
@@ -115,9 +115,40 @@ function tryLocalDelegation(): void {
   process.exit(result.status ?? (result.signal ? 1 : 0));
 }
 
-export async function main(argv = process.argv.slice(2), options: { noExit?: boolean } = {}) {
+export interface MainDispatchers {
+  handleInit?: typeof handleInit;
+  handleDeploy?: typeof handleDeploy;
+  handleDown?: typeof handleDown;
+  handleDev?: typeof handleDev;
+  handleAdd?: typeof handleAdd;
+  handleList?: typeof handleList;
+  handleRemove?: typeof handleRemove;
+  handleReload?: typeof handleReload;
+  handleStatus?: typeof handleStatus;
+  handleLlms?: typeof handleLlms;
+}
+
+export interface MainOptions {
+  noExit?: boolean;
+  dispatchers?: MainDispatchers;
+}
+
+export async function main(argv = process.argv.slice(2), options: MainOptions = {}) {
   ensureNodeVersion();
   tryLocalDelegation();
+
+  const dispatch = {
+    handleInit: options.dispatchers?.handleInit || handleInit,
+    handleDeploy: options.dispatchers?.handleDeploy || handleDeploy,
+    handleDown: options.dispatchers?.handleDown || handleDown,
+    handleDev: options.dispatchers?.handleDev || handleDev,
+    handleAdd: options.dispatchers?.handleAdd || handleAdd,
+    handleList: options.dispatchers?.handleList || handleList,
+    handleRemove: options.dispatchers?.handleRemove || handleRemove,
+    handleReload: options.dispatchers?.handleReload || handleReload,
+    handleStatus: options.dispatchers?.handleStatus || handleStatus,
+    handleLlms: options.dispatchers?.handleLlms || handleLlms,
+  };
 
   const rawArgs = argv;
   const doubleDashIdx = rawArgs.indexOf("--");
@@ -167,7 +198,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
 
   switch (command) {
     case "init": {
-      await handleInit({
+      await dispatch.handleInit({
         gatewayDir: values["gateway-dir"] as string | undefined,
         server: values.server as boolean | undefined,
         project: values.project as boolean | undefined,
@@ -186,7 +217,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
       } else if (values.infra) {
         infra = true;
       }
-      await handleDev({
+      await dispatch.handleDev({
         command: userCmd,
         infra,
       });
@@ -194,7 +225,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
     }
 
     case "deploy": {
-      await handleDeploy({
+      await dispatch.handleDeploy({
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         skipUp: values["skip-up"] as boolean | undefined,
@@ -207,7 +238,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
     }
 
     case "down": {
-      await handleDown({
+      await dispatch.handleDown({
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
       });
@@ -216,7 +247,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
 
     case "add": {
       const domain = positionals[1];
-      await handleAdd({
+      await dispatch.handleAdd({
         domain: domain || "",
         upstream: values.upstream as string | undefined,
         spa: values.spa as boolean | undefined,
@@ -233,7 +264,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
 
     case "list":
     case "ls": {
-      await handleList({
+      await dispatch.handleList({
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
       });
@@ -243,7 +274,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
     case "remove":
     case "rm": {
       const domain = positionals[1];
-      await handleRemove({
+      await dispatch.handleRemove({
         domain: domain || "",
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
@@ -252,7 +283,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
     }
 
     case "reload": {
-      await handleReload({
+      await dispatch.handleReload({
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
       });
@@ -260,7 +291,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
     }
 
     case "status": {
-      await handleStatus({
+      await dispatch.handleStatus({
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
       });
@@ -268,7 +299,7 @@ export async function main(argv = process.argv.slice(2), options: { noExit?: boo
     }
 
     case "llms": {
-      handleLlms({
+      dispatch.handleLlms({
         json: values.json as boolean | undefined,
       });
       break;

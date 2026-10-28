@@ -75,8 +75,8 @@ export async function runCoverageCheck(opts?: { minTotal?: number; minFile?: num
 
   // Parse CLI args or environment variables for thresholds
   const args = process.argv.slice(2);
-  let minTotal = opts?.minTotal ?? parseFloat(process.env.COVERAGE_MIN_TOTAL || "65");
-  let minFile = opts?.minFile ?? parseFloat(process.env.COVERAGE_MIN_FILE || "35");
+  let minTotal = opts?.minTotal ?? parseFloat(process.env.COVERAGE_MIN_TOTAL || "80");
+  let minFile = opts?.minFile ?? parseFloat(process.env.COVERAGE_MIN_FILE || "60");
 
   for (const arg of args) {
     if (arg.startsWith("--min-total=")) {

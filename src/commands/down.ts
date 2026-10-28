@@ -10,6 +10,7 @@ export interface DownOptions {
   cwd?: string;
   json?: boolean;
   skipComposeDown?: boolean;
+  noExit?: boolean;
 }
 
 export async function handleDown(options: DownOptions = {}): Promise<void> {
@@ -76,7 +77,10 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
       } else {
         console.error("❌ Error: Failed to execute 'docker compose down':", err.message);
       }
-      process.exit(1);
+      if (!options.noExit) {
+        process.exit(1);
+      }
+      return;
     }
   }
 
