@@ -1,6 +1,6 @@
 {
   "name": "@netrunner714/pegas",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Agent-native zero-config L7 reverse proxy orchestrator for Docker",
   "main": "dist/index.js",
   "type": "module",
@@ -45,6 +45,6 @@
     "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   }
 }

@@ -3,6 +3,20 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import { findProjectRoot } from "../src/gateway.js";
+import { validateNodeVersion } from "../src/index.js";
+
+describe("validateNodeVersion", () => {
+  it("validates Node version correctly", () => {
+    expect(validateNodeVersion("24.0.0")).toBe(true);
+    expect(validateNodeVersion("24.19.0")).toBe(true);
+    expect(validateNodeVersion("25.0.0")).toBe(true);
+    expect(validateNodeVersion("26.0.0")).toBe(true);
+
+    expect(validateNodeVersion("22.0.0")).toBe(false);
+    expect(validateNodeVersion("20.10.0")).toBe(false);
+    expect(validateNodeVersion("18.17.0")).toBe(false);
+  });
+});
 
 describe("findProjectRoot", () => {
   it("finds git root from a nested subfolder", async () => {

@@ -32,7 +32,7 @@ Internet (HTTP :80 / HTTPS :443)
 1. **Zero Host Port Collisions**: Web containers never bind `:80` or `:443` on the host. Host ports are exclusively handled by the single Caddy gateway container.
 2. **Project-Scoped Network Aliases**: All web services attach to `pegas-network` with unique aliases prefixed by the project name (`<projectName>-<serviceName>`). This prevents Docker DNS round-robin poisoning across separate projects.
 3. **Automatic SSL / Zero Downtime**: Caddy manages Let's Encrypt certificates automatically on first request. Configuration changes are hot-reloaded via API without dropping connections.
-4. **Zero Runtime Dependencies**: The `pegas` CLI has 0 npm dependencies, utilizing only Node.js 18+ standard libraries (`node:fs`, `node:child_process`, `node:path`, `node:net`, `node:util`).
+4. **Zero Runtime Dependencies**: The `pegas` CLI has 0 npm dependencies, utilizing only Node.js 24+ standard libraries (`node:fs`, `node:child_process`, `node:path`, `node:net`, `node:util`).
 5. **No Docker Socket in Gateway**: The proxy container does not mount `/var/run/docker.sock`, completely eliminating privilege escalation risks.
 
 ---

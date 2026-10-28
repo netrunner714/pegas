@@ -2,7 +2,7 @@
 
 CLI-утилита на TypeScript для управления обратным прокси-сервером Caddy 2 в связке с Docker на VPS.
 
-* **Рантайм-зависимости:** 0 (ноль сторонних npm-пакетов, только стандартные модули Node 18+: `node:util`, `node:fs`, `node:path`, `node:child_process`).
+* **Рантайм-зависимости:** 0 (ноль сторонних npm-пакетов, только стандартные модули Node 24+: `node:util`, `node:fs`, `node:path`, `node:child_process`).
 * **Размер бандла:** ~30 КБ (`dist/index.js`).
 * **Инструменты разработки:** Bun 1.4+ (`bun build`, `bun test`, `tsc`).
 * **Выходной формат:** исполняемый файл Node.js (`bin/pegas.js`).

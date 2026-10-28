@@ -14,7 +14,23 @@ import { handleReload } from "./commands/reload.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
+
+export function validateNodeVersion(current = process.versions.node): boolean {
+  if (!current) return true;
+  const major = parseInt(current.split(".")[0], 10);
+  if (isNaN(major)) return true;
+  return major >= 24;
+}
+
+export function ensureNodeVersion(): void {
+  const current = process.versions.node;
+  if (!validateNodeVersion(current)) {
+    console.error(`\x1b[31m❌ Error: Pegas requires Node.js >= 24.0.0 (detected v${current || "unknown"}).\x1b[0m`);
+    console.error(`Please upgrade Node.js to version 24 or newer: https://nodejs.org/\n`);
+    process.exit(1);
+  }
+}
 
 const HELP_TEXT = `pegas v${VERSION} — Agent-native Caddy gateway for multi-app VPS
 
@@ -100,6 +116,7 @@ function tryLocalDelegation(): void {
 }
 
 async function main() {
+  ensureNodeVersion();
   tryLocalDelegation();
 
   const rawArgs = process.argv.slice(2);

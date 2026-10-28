@@ -125,7 +125,7 @@ api.multi-app.com {
       {
         id: "abc12345",
         name: "my-shop-web-1",
-        image: "node:18",
+        image: "node:24",
         state: "running",
         status: "Up 3 hours",
         networks: ["pegas-network"],
