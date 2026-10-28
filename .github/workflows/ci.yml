@@ -81,9 +81,13 @@ jobs:
 
       - name: Publish to GitHub Packages
         run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          RC_FILE="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "@netrunner714:registry=https://npm.pkg.github.com" >> "$RC_FILE"
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> "$RC_FILE"
           echo "@netrunner714:registry=https://npm.pkg.github.com" >> ~/.npmrc
           echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
           if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
             echo "Version ${CURRENT_VERSION} is already published to GitHub Packages, skipping."
           else
