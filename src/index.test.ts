@@ -10,6 +10,7 @@ import {
   ensureNodeVersion,
   tryLocalDelegation,
   main,
+  VERSION,
   type MainDispatchers,
 } from "./index.js";
 
@@ -212,7 +213,7 @@ describe("main CLI command routing", () => {
       console.log = origLog;
     }
 
-    expect(logs.every((l) => l.includes("USAGE:") && l.includes("pegas v1.0.1"))).toBe(true);
+    expect(logs.every((l) => l.includes("USAGE:") && l.includes(`pegas v${VERSION}`))).toBe(true);
   });
 
   it("prints version on --version or -v", async () => {
@@ -226,7 +227,7 @@ describe("main CLI command routing", () => {
       console.log = origLog;
     }
 
-    expect(logs.every((l) => l.includes("pegas v1.0.1"))).toBe(true);
+    expect(logs.every((l) => l.includes(`pegas v${VERSION}`))).toBe(true);
   });
 
   it("handles unknown commands with error message and exit code", async () => {
