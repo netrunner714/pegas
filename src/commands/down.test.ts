@@ -18,13 +18,23 @@ describe("pegas down", () => {
 
     expect(await fs.access(routeFile).then(() => true).catch(() => false)).toBe(true);
 
-    // Run handleDown with skipComposeDown: true (for unit test)
-    await handleDown({
-      cwd: tmpProj,
-      gatewayDir: tmpGateway,
-      skipComposeDown: true,
-      json: true,
-    });
+    const origLog = console.log;
+    const origError = console.error;
+    console.log = () => {};
+    console.error = () => {};
+
+    try {
+      // Run handleDown with skipComposeDown: true (for unit test)
+      await handleDown({
+        cwd: tmpProj,
+        gatewayDir: tmpGateway,
+        skipComposeDown: true,
+        json: true,
+      });
+    } finally {
+      console.log = origLog;
+      console.error = origError;
+    }
 
     // Verify route file was removed
     const existsAfter = await fs.access(routeFile).then(() => true).catch(() => false);
@@ -38,13 +48,23 @@ describe("pegas down", () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
 
-    // Should not throw even if no route file exists
-    await handleDown({
-      cwd: tmpProj,
-      gatewayDir: tmpGateway,
-      skipComposeDown: true,
-      json: true,
-    });
+    const origLog = console.log;
+    const origError = console.error;
+    console.log = () => {};
+    console.error = () => {};
+
+    try {
+      // Should not throw even if no route file exists
+      await handleDown({
+        cwd: tmpProj,
+        gatewayDir: tmpGateway,
+        skipComposeDown: true,
+        json: true,
+      });
+    } finally {
+      console.log = origLog;
+      console.error = origError;
+    }
 
     await fs.rm(tmpProj, { recursive: true, force: true });
     await fs.rm(tmpGateway, { recursive: true, force: true });

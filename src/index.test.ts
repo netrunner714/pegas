@@ -79,7 +79,9 @@ describe("cli entry point", () => {
     const { main } = await import("./index.js");
     const logs: string[] = [];
     const origLog = console.log;
+    const origError = console.error;
     console.log = (...args) => logs.push(args.join(" "));
+    console.error = (...args) => logs.push(args.join(" "));
 
     try {
       await main(["--help"]);
@@ -88,6 +90,7 @@ describe("cli entry point", () => {
       await main(["unknown-command"], { noExit: true });
     } finally {
       console.log = origLog;
+      console.error = origError;
     }
 
     expect(logs.some((l) => typeof l === "string" && l.includes("USAGE:"))).toBe(true);

@@ -159,13 +159,18 @@ services:
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
 
     // Execute handleDev with a fast-terminating command
-    await handleDev({
-      cwd: tmpProj,
-      noExit: true,
-      command: ["node", "-e", "process.exit(0)"],
-    });
-
-    await fs.rm(tmpProj, { recursive: true, force: true });
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await handleDev({
+        cwd: tmpProj,
+        noExit: true,
+        command: ["node", "-e", "process.exit(0)"],
+      });
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
   });
 
   it("respects skipInfra option in handleDev", async () => {
@@ -186,14 +191,19 @@ services:
       "utf-8"
     );
 
-    await handleDev({
-      cwd: tmpProj,
-      skipInfra: true,
-      noExit: true,
-      command: ["node", "-e", "process.exit(0)"],
-    });
-
-    await fs.rm(tmpProj, { recursive: true, force: true });
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await handleDev({
+        cwd: tmpProj,
+        skipInfra: true,
+        noExit: true,
+        command: ["node", "-e", "process.exit(0)"],
+      });
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
   });
 
   it("outputs smart hint by default when infra services exist without bootInfra", async () => {
@@ -217,7 +227,6 @@ services:
     const origLog = console.log;
     console.log = (...args) => {
       logs.push(args.join(" "));
-      origLog(...args);
     };
 
     try {
@@ -260,7 +269,6 @@ services:
     const origLog = console.log;
     console.log = (...args) => {
       logs.push(args.join(" "));
-      origLog(...args);
     };
 
     try {

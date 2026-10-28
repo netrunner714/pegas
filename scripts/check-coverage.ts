@@ -16,7 +16,7 @@ interface FileCoverage {
   percentage: number;
 }
 
-async function runCoverageCheck() {
+export async function runCoverageCheck(opts?: { minTotal?: number; minFile?: number }) {
   const lcovPath = path.resolve(import.meta.dir, "../coverage/lcov.info");
 
   let lcovContent = "";
@@ -29,8 +29,8 @@ async function runCoverageCheck() {
 
   // Parse CLI args or environment variables for thresholds
   const args = process.argv.slice(2);
-  let minTotal = parseFloat(process.env.COVERAGE_MIN_TOTAL || "65");
-  let minFile = parseFloat(process.env.COVERAGE_MIN_FILE || "35");
+  let minTotal = opts?.minTotal ?? parseFloat(process.env.COVERAGE_MIN_TOTAL || "65");
+  let minFile = opts?.minFile ?? parseFloat(process.env.COVERAGE_MIN_FILE || "35");
 
   for (const arg of args) {
     if (arg.startsWith("--min-total=")) {
@@ -124,7 +124,9 @@ async function runCoverageCheck() {
   console.log(bold(green(`\n✨ All code coverage thresholds passed! (${totalPercentage}% >= ${minTotal}%)\n`)));
 }
 
-runCoverageCheck().catch((err) => {
-  console.error("Coverage check error:", err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  runCoverageCheck().catch((err) => {
+    console.error("Coverage check error:", err);
+    process.exit(1);
+  });
+}

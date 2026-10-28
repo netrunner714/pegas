@@ -47,15 +47,23 @@ describe("pegas deploy", () => {
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
 
     // Run deploy in dry-run mode
-    await handleDeploy({
-      cwd: tmpProj,
-      gatewayDir: tmpGateway,
-      dryRun: true,
-      skipUp: true,
-    });
-
-    await fs.rm(tmpProj, { recursive: true, force: true });
-    await fs.rm(tmpGateway, { recursive: true, force: true });
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = () => {};
+    console.warn = () => {};
+    try {
+      await handleDeploy({
+        cwd: tmpProj,
+        gatewayDir: tmpGateway,
+        dryRun: true,
+        skipUp: true,
+      });
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+      await fs.rm(tmpGateway, { recursive: true, force: true });
+    }
   });
 
   it("skips placeholder domain 'yourdomain.com' and services without prod domains in dry-run", async () => {
@@ -79,15 +87,23 @@ describe("pegas deploy", () => {
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract), "utf-8");
 
-    await handleDeploy({
-      cwd: tmpProj,
-      gatewayDir: tmpGateway,
-      dryRun: true,
-      skipUp: true,
-    });
-
-    await fs.rm(tmpProj, { recursive: true, force: true });
-    await fs.rm(tmpGateway, { recursive: true, force: true });
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = () => {};
+    console.warn = () => {};
+    try {
+      await handleDeploy({
+        cwd: tmpProj,
+        gatewayDir: tmpGateway,
+        dryRun: true,
+        skipUp: true,
+      });
+    } finally {
+      console.log = origLog;
+      console.warn = origWarn;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+      await fs.rm(tmpGateway, { recursive: true, force: true });
+    }
   });
 
   it("prevents domain hijacking when another project already owns the domain", async () => {
@@ -123,7 +139,6 @@ describe("pegas deploy", () => {
     const origError = console.error;
     console.error = (...args) => {
       errors.push(args.join(" "));
-      origError(...args);
     };
 
     try {
@@ -174,9 +189,12 @@ describe("pegas deploy", () => {
 
     const errors: string[] = [];
     const origError = console.error;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    console.log = () => {};
+    console.warn = () => {};
     console.error = (...args) => {
       errors.push(args.join(" "));
-      origError(...args);
     };
 
     try {
@@ -189,6 +207,8 @@ describe("pegas deploy", () => {
       });
     } finally {
       console.error = origError;
+      console.log = origLog;
+      console.warn = origWarn;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }
@@ -232,9 +252,10 @@ describe("pegas deploy", () => {
 
     const errors: string[] = [];
     const origError = console.error;
+    const origWarn = console.warn;
+    console.warn = () => {};
     console.error = (...args) => {
       errors.push(args.join(" "));
-      origError(...args);
     };
 
     try {
@@ -248,6 +269,7 @@ describe("pegas deploy", () => {
       });
     } finally {
       console.error = origError;
+      console.warn = origWarn;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }
