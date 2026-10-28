@@ -8,13 +8,13 @@ import {
   formatDockerStatus,
   handleList,
   DockerContainerInfo,
-} from "../src/commands/list.js";
+} from "./list.js";
 import {
   stripAnsi,
   stringVisualWidth,
   padEndVisual,
   renderTable,
-} from "../src/table.js";
+} from "../table.js";
 
 describe("table utility", () => {
   it("strips ANSI escape sequences", () => {

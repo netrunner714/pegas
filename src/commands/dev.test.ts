@@ -3,12 +3,12 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import net from "node:net";
-import { generateDevCaddyfile, handleDev } from "../src/commands/dev.js";
-import { findOrDownloadCaddy } from "../src/binary.js";
-import { findAvailablePort, isPortAvailable } from "../src/ports.js";
-import { detectInfraServices } from "../src/compose.js";
-import { PegasContract } from "../src/types.js";
-import { CONTRACT_FILENAME } from "../src/contract.js";
+import { generateDevCaddyfile, handleDev } from "./dev.js";
+import { findOrDownloadCaddy } from "../binary.js";
+import { findAvailablePort, isPortAvailable } from "../ports.js";
+import { detectInfraServices } from "../compose.js";
+import { PegasContract } from "../types.js";
+import { CONTRACT_FILENAME } from "../contract.js";
 
 describe("pegas dev", () => {
   it("generates local dev Caddyfile from pegas.json contract with custom ports", () => {

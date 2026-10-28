@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { handleDeploy, resolveScopedUpstream, waitForContainerReadiness } from "../src/commands/deploy.js";
-import { CONTRACT_FILENAME } from "../src/contract.js";
+import { handleDeploy, resolveScopedUpstream, waitForContainerReadiness } from "./deploy.js";
+import { CONTRACT_FILENAME } from "../contract.js";
 
 describe("pegas deploy", () => {
   it("resolveScopedUpstream correctly scopes container host to avoid Round-Robin collisions", () => {

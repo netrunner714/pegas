@@ -12,8 +12,8 @@ import {
   detectComposeWebService,
   createDefaultContract,
   CONTRACT_FILENAME,
-} from "../src/contract.js";
-import { getRouteFilePath } from "../src/gateway.js";
+} from "./contract.js";
+import { getRouteFilePath } from "./gateway.js";
 
 describe("contract & package.json integration", () => {
   it("toAsciiDomain handles IDN Cyrillic and unicode domains with Punycode", () => {

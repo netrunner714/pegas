@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { isPublicDomain, getPublicIp, validateDomains } from "../src/dns.js";
+import { isPublicDomain, getPublicIp, validateDomains } from "./dns.js";
 
 describe("DNS pre-flight validation", () => {
   const origEnv = process.env.PEGAS_SERVER_IP;

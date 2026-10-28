@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { findProjectRoot } from "../src/gateway.js";
-import { validateNodeVersion } from "../src/index.js";
+import { findProjectRoot } from "./gateway.js";
+import { validateNodeVersion } from "./index.js";
 
 describe("validateNodeVersion", () => {
   it("validates Node version correctly", () => {
@@ -21,7 +21,7 @@ describe("validateNodeVersion", () => {
 describe("findProjectRoot", () => {
   it("finds git root from a nested subfolder", async () => {
     // pegas repo has a .git folder in its root
-    const nestedDir = path.resolve(import.meta.dir, "../src/commands");
+    const nestedDir = path.resolve(import.meta.dir, "commands");
     const root = await findProjectRoot(nestedDir);
 
     expect(root).toBe(path.resolve(import.meta.dir, ".."));

@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { handleDown } from "../src/commands/down.js";
-import { getProjectRouteFilePath } from "../src/gateway.js";
+import { handleDown } from "./down.js";
+import { getProjectRouteFilePath } from "../gateway.js";
 
 describe("pegas down", () => {
   it("removes project route file conf.d/<projectName>.caddy and cleans up", async () => {

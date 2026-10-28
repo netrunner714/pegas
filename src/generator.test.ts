@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { generateCaddyfileSnippet } from "../src/generator.js";
+import { generateCaddyfileSnippet } from "./generator.js";
 
 describe("Caddyfile snippet generator", () => {
   it("generates standard proxy config with www redirect and security headers", () => {

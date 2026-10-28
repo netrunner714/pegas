@@ -6,7 +6,7 @@ import {
   patchExistingCompose,
   setupProjectCompose,
   DEFAULT_COMPOSE_CONTENT,
-} from "../src/compose.js";
+} from "./compose.js";
 
 describe("compose surgery", () => {
   it("removes public web ports, adds expose, and connects web service to pegas-network with project-scoped alias", () => {
