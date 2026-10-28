@@ -207,7 +207,7 @@ describe("pegas deploy", () => {
     expect(res.ready).toBe(false);
     expect(res.reason).toContain("Timed out waiting for service");
     await fs.rm(tmpProj, { recursive: true, force: true });
-  });
+  }, 15000);
 
   it("aborts deploy when strictDns is true and domain does not match server IP", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dns-proj-"));

@@ -60,7 +60,7 @@ export async function waitForContainerReadiness(
       const psRes = child_process.execFileSync(
         "docker",
         ["compose", "ps", "-q", serviceName],
-        { cwd: projectRoot, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
+        { cwd: projectRoot, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 3000 }
       );
       containerId = psRes.trim().split("\n")[0]?.trim();
     } catch {}
