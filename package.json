@@ -15,7 +15,7 @@
     "dev": "bun run src/index.ts",
     "test": "bun test",
     "test:e2e": "bun scripts/e2e.ts",
-    "test:e2e:advanced": "bun scripts/e2e-advanced.ts",
+    "test:e2e:init": "bun scripts/e2e-init.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

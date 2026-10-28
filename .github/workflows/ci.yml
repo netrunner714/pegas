@@ -35,9 +35,6 @@ jobs:
       - name: Run E2E tests
         run: bun run test:e2e
 
-      - name: Run Advanced E2E tests
-        run: bun run test:e2e:advanced
-
   publish:
     name: Build, Release & Publish
     needs: test

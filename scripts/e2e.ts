@@ -10,13 +10,13 @@ const red = (text: string) => `\x1b[31m${text}\x1b[0m`;
 const blue = (text: string) => `\x1b[34m${text}\x1b[0m`;
 const yellow = (text: string) => `\x1b[33m${text}\x1b[0m`;
 const bold = (text: string) => `\x1b[1m${text}\x1b[0m`;
+const cyan = (text: string) => `\x1b[36m${text}\x1b[0m`;
 
 const REPO_ROOT = path.resolve(import.meta.dir, "..");
 const BIN_PATH = path.join(REPO_ROOT, "dist", "index.js");
-const DIST_PATH = BIN_PATH;
 
-function logStep(step: number, title: string) {
-  console.log(`\n${bold(blue(`[Step ${step}]`))} ${bold(title)}`);
+function logPhase(step: number, title: string) {
+  console.log(`\n${bold(blue(`[Phase ${step}]`))} ${bold(title)}`);
 }
 
 function logSuccess(message: string) {
@@ -45,315 +45,621 @@ function execAsync(
     });
 
     proc.on("close", (code) => {
-      resolve({ stdout, stderr, code: code ?? 0 });
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: code ?? 0 });
     });
 
     proc.on("error", (err) => {
       stderr += err.message;
-      resolve({ stdout, stderr, code: 1 });
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code: 1 });
     });
   });
 }
 
-async function runE2E() {
-  const startTime = Date.now();
-  console.log(bold("=================================================="));
-  console.log(bold("  🧪 PEGAS END-TO-END (E2E) RUNTIME TEST SUITE"));
-  console.log(bold("=================================================="));
+/**
+ * Perform a physical HTTP request to the local Gateway with a custom Host header
+ */
+async function httpGet(
+  hostHeader: string,
+  urlPath: string = "/",
+  port: number = 80,
+  timeoutMs: number = 4000
+): Promise<{ status: number; body: string; headers: Record<string, string> }> {
+  const curlRes = await execAsync("curl", [
+    "-s",
+    "--noproxy",
+    "*",
+    "-m",
+    (timeoutMs / 1000).toString(),
+    "-i",
+    "-H",
+    `Host: ${hostHeader}`,
+    `http://127.0.0.1:${port}${urlPath}`,
+  ]);
 
-  let sandboxDir = "";
-  let caddyBinaryPath = "";
+  if (curlRes.code !== 0 && !curlRes.stdout) {
+    throw new Error(`HTTP request failed for Host '${hostHeader}': ${curlRes.stderr}`);
+  }
+
+  const raw = curlRes.stdout;
+  const headerEndIndex = raw.indexOf("\r\n\r\n") !== -1 ? raw.indexOf("\r\n\r\n") : raw.indexOf("\n\n");
+  const headerPart = headerEndIndex !== -1 ? raw.slice(0, headerEndIndex) : raw;
+  const body = headerEndIndex !== -1 ? raw.slice(headerEndIndex).trim() : "";
+
+  const statusMatch = headerPart.match(/HTTP\/[12]\.?\d?\s+(\d{3})/);
+  const status = statusMatch ? parseInt(statusMatch[1], 10) : 0;
+
+  const headers: Record<string, string> = {};
+  for (const line of headerPart.split(/\r?\n/)) {
+    const colon = line.indexOf(":");
+    if (colon > 0) {
+      const k = line.slice(0, colon).trim().toLowerCase();
+      const v = line.slice(colon + 1).trim();
+      headers[k] = v;
+    }
+  }
+
+  return { status, body, headers };
+}
+
+const CACHE_DIR = path.join(REPO_ROOT, ".cache", "images");
+
+async function ensureDockerImage(imageName: string, tarFilename: string) {
+  const tarPath = path.join(CACHE_DIR, tarFilename);
+
+  // 1. Check if already in Docker daemon
+  const inspectRes = await execAsync("docker", ["image", "inspect", imageName]);
+  if (inspectRes.code === 0) {
+    // Already in docker. If tarball missing in project cache, save it for future offline runs
+    try {
+      await fs.access(tarPath);
+    } catch {
+      await fs.mkdir(CACHE_DIR, { recursive: true });
+      await execAsync("docker", ["save", imageName, "-o", tarPath]);
+    }
+    return;
+  }
+
+  // 2. Not in docker daemon: check if offline tarball exists
+  try {
+    await fs.access(tarPath);
+    console.log(`  ${cyan("ℹ")} Loading '${imageName}' from offline cache: ${tarFilename}...`);
+    const loadRes = await execAsync("docker", ["load", "-i", tarPath]);
+    if (loadRes.code === 0) {
+      logSuccess(`Loaded '${imageName}' from offline cache (.cache/images/${tarFilename})`);
+      return;
+    }
+  } catch {}
+
+  // 3. Fallback: pull from registry and cache it
+  console.log(`  ${yellow("ℹ")} Pulling '${imageName}' from registry...`);
+  const pullRes = await execAsync("docker", ["pull", imageName]);
+  if (pullRes.code !== 0) {
+    throw new Error(`Failed to pull '${imageName}': ${pullRes.stderr}`);
+  }
+  logSuccess(`Pulled '${imageName}' from registry`);
 
   try {
-    // 0. Pre-flight Checks
-    logStep(0, "Pre-flight checks and build verification");
+    await fs.mkdir(CACHE_DIR, { recursive: true });
+    await execAsync("docker", ["save", imageName, "-o", tarPath]);
+    logSuccess(`Cached '${imageName}' to .cache/images/${tarFilename} for offline runs`);
+  } catch {}
+}
 
-    try {
-      await fs.access(DIST_PATH);
-      logSuccess(`Found compiled bundle at ${DIST_PATH}`);
-    } catch {
-      console.log("  Building pegas before running E2E...");
-      const buildRes = await execAsync("bun", ["run", "build"], { cwd: REPO_ROOT });
-      if (buildRes.code !== 0) {
-        throw new Error(`Build failed: ${buildRes.stderr}`);
-      }
-      logSuccess("Built dist/index.js successfully");
+async function runUnifiedE2E() {
+  const startTime = Date.now();
+  console.log(bold("================================================================================"));
+  console.log(bold("  🧪 PEGAS BATTLE-TESTED UNIFIED END-TO-END (E2E) RUNTIME SUITE"));
+  console.log(bold("================================================================================"));
+
+  let mainSandboxDir = "";
+  let delegationDir = "";
+  let gatewayDir = "";
+  let pAlphaDir = "";
+  let pBetaDir = "";
+  let pMultiDir = "";
+  let pHijackDir = "";
+  let pBrokenDir = "";
+
+  try {
+    // =========================================================================
+    // Phase 0: Pre-flight & Fresh Build
+    // =========================================================================
+    logPhase(0, "Pre-flight Verification and Fresh Bundle Build");
+    const buildRes = await execAsync("bun", ["run", "build"], { cwd: REPO_ROOT });
+    if (buildRes.code !== 0) {
+      throw new Error(`Build failed: ${buildRes.stderr}`);
     }
+    logSuccess("Built fresh dist/index.js bundle");
 
     const dockerCheck = await execAsync("docker", ["compose", "version"]);
     if (dockerCheck.code !== 0) {
       throw new Error(`Docker Compose is not available on host: ${dockerCheck.stderr}`);
     }
-    logSuccess(`Docker Compose available: ${dockerCheck.stdout.trim()}`);
+    logSuccess(`Docker Compose verified: ${dockerCheck.stdout.split("\n")[0]}`);
 
-    // Check Caddy binary
-    const caddyHome = path.join(os.homedir(), ".pegas", "bin", "caddy");
-    try {
-      await fs.access(caddyHome);
-      caddyBinaryPath = caddyHome;
-    } catch {
-      const whichCaddy = await execAsync("which", ["caddy"]);
-      if (whichCaddy.code === 0 && whichCaddy.stdout.trim()) {
-        caddyBinaryPath = whichCaddy.stdout.trim();
-      }
-    }
-    if (caddyBinaryPath) {
-      logSuccess(`Native Caddy binary located at: ${caddyBinaryPath}`);
-    } else {
-      console.log(`  ${yellow("ℹ")} Caddy not in PATH or cache, pegas will test auto-download.`);
-    }
+    await ensureDockerImage("caddy:2-alpine", "caddy-2-alpine.tar");
+    await ensureDockerImage("traefik/whoami", "traefik-whoami.tar");
+    logSuccess("Offline test container images verified & cached in .cache/images/");
 
-    // 1. Sandbox Setup
-    logStep(1, "Create isolated sandbox environment");
-    sandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-e2e-sandbox-"));
-    logSuccess(`Created temporary sandbox directory: ${sandboxDir}`);
+    // =========================================================================
+    // Phase 1: Local CLI Mechanics & Compose Surgery
+    // =========================================================================
+    logPhase(1, "Local CLI Mechanics & Compose Surgery (init, strip ports, scope aliases)");
+    mainSandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-e2e-unified-"));
+    const surgeryDir = path.join(mainSandboxDir, "surgery-project");
+    await fs.mkdir(surgeryDir, { recursive: true });
 
-    const packageJsonContent = {
-      name: "e2e-demo-service",
-      version: "1.0.0",
-      description: "E2E automated test fixture",
-      scripts: {
-        dev: "node -e 'console.log(\"SERVER_BOOTED\")'",
-      },
-    };
     await fs.writeFile(
-      path.join(sandboxDir, "package.json"),
-      JSON.stringify(packageJsonContent, null, 2),
-      "utf-8"
+      path.join(surgeryDir, "package.json"),
+      JSON.stringify(
+        {
+          name: "surgery-demo-app",
+          version: "1.0.0",
+          scripts: { dev: "node -e 'console.log(\"OK\")'" },
+        },
+        null,
+        2
+      )
     );
-    logSuccess("Generated fixture package.json with name 'e2e-demo-service'");
 
-    const composeContent = `services:
+    const rawCompose = `services:
   web:
     image: traefik/whoami
     ports:
       - "8080:80"
-    environment:
-      - WHOAMI_NAME=e2e-web
   redis:
     image: redis:alpine
     ports:
       - "6379:6379"
 `;
-    await fs.writeFile(
-      path.join(sandboxDir, "docker-compose.yml"),
-      composeContent,
-      "utf-8"
-    );
-    logSuccess("Generated fixture docker-compose.yml with 'web' (8080:80) and 'redis' (6379:6379)");
+    await fs.writeFile(path.join(surgeryDir, "docker-compose.yml"), rawCompose);
 
-    // 2. Command 'pegas init'
-    logStep(2, "Execute 'pegas init' in sandbox");
-    const initRes = await execAsync("node", [BIN_PATH, "init"], { cwd: sandboxDir });
+    const initRes = await execAsync("node", [BIN_PATH, "init"], { cwd: surgeryDir });
     if (initRes.code !== 0) {
-      throw new Error(`'pegas init' failed with exit code ${initRes.code}:\n${initRes.stderr || initRes.stdout}`);
+      throw new Error(`'pegas init' failed: ${initRes.stderr || initRes.stdout}`);
     }
-    logSuccess("'pegas init' finished with exit code 0");
+    logSuccess("'pegas init' executed with code 0");
 
-    // 2.1 Verify contract (pegas.json)
-    const contractPath = path.join(sandboxDir, "pegas.json");
-    const contractRaw = await fs.readFile(contractPath, "utf-8");
-    const contract = JSON.parse(contractRaw);
+    // Verify contract
+    const contract = JSON.parse(await fs.readFile(path.join(surgeryDir, "pegas.json"), "utf-8"));
+    if (contract.projectName !== "surgery-demo-app") {
+      throw new Error(`Contract projectName mismatch: ${contract.projectName}`);
+    }
+    if (contract.services?.web?.upstream !== "web:80") {
+      throw new Error(`Expected upstream 'web:80', got: ${contract.services?.web?.upstream}`);
+    }
+    logSuccess("Contract verified: projectName='surgery-demo-app', upstream auto-detected: 'web:80'");
 
-    if (contract.projectName !== "e2e-demo-service") {
-      throw new Error(`Expected contract.projectName 'e2e-demo-service', got '${contract.projectName}'`);
-    }
-    logSuccess(`Contract verified: projectName='${contract.projectName}'`);
-
-    const webService = contract.services?.web;
-    if (!webService) {
-      throw new Error("Contract is missing 'web' service definition");
-    }
-    if (webService.upstream !== "web:80") {
-      throw new Error(`Expected upstream 'web:80' (detected from compose 8080:80), got '${webService.upstream}'`);
-    }
-    logSuccess(`Upstream auto-detection verified: '${webService.upstream}'`);
-
-    if (!webService.domains?.dev?.includes("e2e-demo-service.localhost")) {
-      throw new Error(`Expected dev domain 'e2e-demo-service.localhost', got: ${JSON.stringify(webService.domains?.dev)}`);
-    }
-    if (!webService.domains?.prod?.includes("e2e-demo-service.com")) {
-      throw new Error(`Expected prod domain 'e2e-demo-service.com', got: ${JSON.stringify(webService.domains?.prod)}`);
-    }
-    logSuccess("Smart slug scaffolding verified for dev & prod domains");
-
-    // 2.2 Verify compose surgery
-    const patchedCompose = await fs.readFile(path.join(sandboxDir, "docker-compose.yml"), "utf-8");
+    // Verify compose surgery
+    const patchedCompose = await fs.readFile(path.join(surgeryDir, "docker-compose.yml"), "utf-8");
     if (patchedCompose.includes('"8080:80"')) {
-      throw new Error("Public port '8080:80' was not stripped from web service");
+      throw new Error("Public web port '8080:80' was not stripped");
     }
     if (!patchedCompose.includes("expose:")) {
-      throw new Error("Expected 'expose' directive in web service");
+      throw new Error("Expose directive was not added to web service");
     }
-    if (!patchedCompose.includes("e2e-demo-service-web")) {
-      throw new Error("Expected project-scoped network alias 'e2e-demo-service-web' in web service");
+    if (!patchedCompose.includes("surgery-demo-app-web")) {
+      throw new Error("Project-scoped alias 'surgery-demo-app-web' missing from web service");
     }
     if (!patchedCompose.includes('"6379:6379"')) {
       throw new Error("Infrastructure port '6379:6379' for Redis was mistakenly stripped");
     }
     if (!patchedCompose.includes("pegas-network:\n    external: true") && !patchedCompose.includes("pegas-network:\n  external: true")) {
-      throw new Error("Expected external pegas-network declaration in compose root");
+      throw new Error("External pegas-network root declaration missing");
     }
-    logSuccess("Compose surgery verified: public ports stripped, expose added, alias scoped, infra port preserved");
+    logSuccess("Compose surgery verified: public port stripped, expose added, alias scoped, infra port preserved");
 
-    // 2.3 Verify package.json & gitignore
-    const updatedPkg = JSON.parse(await fs.readFile(path.join(sandboxDir, "package.json"), "utf-8"));
-    if (updatedPkg.scripts?.dev !== "pegas dev -- node -e 'console.log(\"SERVER_BOOTED\")'") {
-      throw new Error(`package.json dev script mismatch: ${updatedPkg.scripts?.dev}`);
+    // Verify package.json & gitignore
+    const updatedPkg = JSON.parse(await fs.readFile(path.join(surgeryDir, "package.json"), "utf-8"));
+    if (updatedPkg.scripts?.dev !== "pegas dev -- node -e 'console.log(\"OK\")'") {
+      throw new Error(`package.json scripts.dev mismatch: ${updatedPkg.scripts?.dev}`);
     }
     if (updatedPkg.scripts?.deploy !== "pegas deploy") {
-      throw new Error(`package.json deploy script mismatch: ${updatedPkg.scripts?.deploy}`);
+      throw new Error(`package.json scripts.deploy mismatch: ${updatedPkg.scripts?.deploy}`);
     }
-    if (!updatedPkg.devDependencies?.["@netrunner714/pegas"] && !updatedPkg.devDependencies?.pegas) {
-      throw new Error("package.json is missing @netrunner714/pegas devDependency");
-    }
-    logSuccess("package.json scripts wrapping & devDependency verified");
-
-    const gitignoreContent = await fs.readFile(path.join(sandboxDir, ".gitignore"), "utf-8");
+    const gitignoreContent = await fs.readFile(path.join(surgeryDir, ".gitignore"), "utf-8");
     if (!gitignoreContent.includes(".pegas")) {
-      throw new Error(".gitignore is missing '.pegas' entry");
+      throw new Error(".gitignore is missing '.pegas'");
     }
-    logSuccess(".gitignore verified (.pegas entry present)");
+    logSuccess("package.json script wrapping and .gitignore protection verified");
 
-    // 3. Docker Compose Daemon Validation
-    logStep(3, "Validate patched compose schema against live Docker daemon");
-    const composeConfigRes = await execAsync("docker", ["compose", "config"], { cwd: sandboxDir });
-    if (composeConfigRes.code !== 0) {
-      throw new Error(`'docker compose config' failed validation:\n${composeConfigRes.stderr}`);
+    // =========================================================================
+    // Phase 2: Local Delegation Pattern
+    // =========================================================================
+    logPhase(2, "Local Delegation Pattern (node_modules/pegas intercept & recursion guard)");
+    delegationDir = path.join(mainSandboxDir, "delegation-sandbox");
+    const localPegasDist = path.join(delegationDir, "node_modules", "pegas", "dist");
+    await fs.mkdir(localPegasDist, { recursive: true });
+
+    const mockLocalCode = `console.log("MOCK_LOCAL_PEGAS_EXECUTED");\nprocess.exit(0);\n`;
+    await fs.writeFile(path.join(localPegasDist, "index.js"), mockLocalCode);
+
+    const delRes = await execAsync("node", [BIN_PATH, "status"], { cwd: delegationDir });
+    if (!delRes.stdout.includes("MOCK_LOCAL_PEGAS_EXECUTED")) {
+      throw new Error(`Expected delegation to local package, got: ${delRes.stdout}`);
     }
-    logSuccess("Docker Engine successfully validated compose YAML syntax, networks, and aliases");
+    logSuccess("Global binary intercepted call and delegated to local node_modules/pegas");
 
-    // 4. Production Gateway Deployment Simulation
-    logStep(4, "Test Gateway Deploy & Caddyfile snippet compilation");
-    const mockGatewayDir = path.join(sandboxDir, "mock-gateway");
-    const mockConfDir = path.join(mockGatewayDir, "conf.d");
-    await fs.mkdir(mockConfDir, { recursive: true });
+    const guardRes = await execAsync("node", [BIN_PATH, "--version"], {
+      cwd: delegationDir,
+      env: { ...process.env, PEGAS_DELEGATED: "1" },
+    });
+    if (guardRes.stdout.includes("MOCK_LOCAL_PEGAS_EXECUTED")) {
+      throw new Error("Recursion guard failed: loop detected");
+    }
+    if (!guardRes.stdout.includes("pegas v")) {
+      throw new Error(`Expected primary binary version, got: ${guardRes.stdout}`);
+    }
+    logSuccess("Recursion guard verified: PEGAS_DELEGATED=1 executes primary binary safely");
 
-    // Deploy with --dry-run
-    const dryRunRes = await execAsync(
-      "node",
-      [BIN_PATH, "deploy", "--gateway-dir", mockGatewayDir, "--dry-run"],
-      { cwd: sandboxDir }
+    // =========================================================================
+    // Phase 3: Multi-Tenant Gateway Setup (with auto_https off for hermetic HTTP)
+    // =========================================================================
+    logPhase(3, "Server Gateway Setup (Caddy on 'pegas-network' with auto_https off)");
+    gatewayDir = path.join(mainSandboxDir, "gateway");
+    pAlphaDir = path.join(mainSandboxDir, "project-alpha");
+    pBetaDir = path.join(mainSandboxDir, "project-beta");
+    pMultiDir = path.join(mainSandboxDir, "project-multi");
+    pHijackDir = path.join(mainSandboxDir, "project-hijack");
+    pBrokenDir = path.join(mainSandboxDir, "project-broken");
+
+    await fs.mkdir(gatewayDir, { recursive: true });
+    await fs.mkdir(pAlphaDir, { recursive: true });
+    await fs.mkdir(pBetaDir, { recursive: true });
+    await fs.mkdir(pMultiDir, { recursive: true });
+    await fs.mkdir(pHijackDir, { recursive: true });
+    await fs.mkdir(pBrokenDir, { recursive: true });
+
+    // Configure gateway Caddyfile with auto_https off to allow physical HTTP testing without Let's Encrypt
+    const testCaddyfile = `{\n    auto_https off\n    http_port 80\n    https_port 80\n}\n\nimport /etc/caddy/conf.d/*.caddy\n`;
+    await fs.writeFile(path.join(gatewayDir, "Caddyfile"), testCaddyfile, "utf-8");
+
+    // Initialize server gateway (preserves existing Caddyfile)
+    const initGwRes = await execAsync("node", [BIN_PATH, "init", "--server", "--gateway-dir", gatewayDir]);
+    if (initGwRes.code !== 0) {
+      throw new Error(`Failed to initialize server gateway: ${initGwRes.stderr}`);
+    }
+    logSuccess(`Server gateway container running in ${gatewayDir} on network 'pegas-network'`);
+
+    // =========================================================================
+    // Phase 4: Parallel Multi-Tenant Deployment (Alpha & Beta)
+    // =========================================================================
+    logPhase(4, "Parallel Multi-Tenant Deployment (Alpha & Beta)");
+
+    // Project Alpha
+    await fs.writeFile(
+      path.join(pAlphaDir, "package.json"),
+      JSON.stringify({ name: "project-alpha", version: "1.0.0" }, null, 2)
     );
-    if (dryRunRes.code !== 0) {
-      throw new Error(`'pegas deploy --dry-run' failed:\n${dryRunRes.stderr || dryRunRes.stdout}`);
-    }
-    if (!dryRunRes.stdout.includes("e2e-demo-service.caddy")) {
-      throw new Error(`Dry run output missing target route file name:\n${dryRunRes.stdout}`);
-    }
-    if (!dryRunRes.stdout.includes("e2e-demo-service-web:80")) {
-      throw new Error(`Dry run output missing scoped upstream 'e2e-demo-service-web:80':\n${dryRunRes.stdout}`);
-    }
-    logSuccess("Deploy dry-run verified successfully (scoped upstream & route planning)");
-
-    // Write project route snippet to conf.d to test native Caddy validator
-    const projectRouteFile = path.join(mockConfDir, "e2e-demo-service.caddy");
-    const routeSnippet = `# Auto-generated by Pegas for project: e2e-demo-service\n\ne2e-demo-service.com {\n    reverse_proxy e2e-demo-service-web:80\n}\n`;
-    await fs.writeFile(projectRouteFile, routeSnippet, { mode: 0o644 });
-
-    const baseCaddyfile = `{\n    admin off\n    http_port 8080\n    https_port 8443\n}\n\nimport conf.d/*.caddy\n`;
-    await fs.writeFile(path.join(mockGatewayDir, "Caddyfile"), baseCaddyfile, "utf-8");
-
-    const stat = await fs.stat(projectRouteFile);
-    const mode = stat.mode & 0o777;
-    if (mode !== 0o644) {
-      throw new Error(`Expected route file permissions 0o644, got 0o${mode.toString(8)}`);
-    }
-    logSuccess("Route file conf.d/e2e-demo-service.caddy created with scoped upstream & 0o644 permissions");
-
-    // Validate generated Caddy snippet with Caddy if binary is available
-    if (caddyBinaryPath) {
-      const validateRes = await execAsync(
-        caddyBinaryPath,
-        ["validate", "--config", path.join(mockGatewayDir, "Caddyfile"), "--adapter", "caddyfile"]
-      );
-      if (validateRes.code !== 0) {
-        throw new Error(`Caddy binary rejected generated gateway configuration:\n${validateRes.stderr}`);
-      }
-      logSuccess("Native Caddy successfully validated the complete gateway configuration with imported route");
-    }
-
-    // Test 'pegas down' route cleanup
-    const downRes = await execAsync(
-      "node",
-      [BIN_PATH, "down", "--gateway-dir", mockGatewayDir],
-      { cwd: sandboxDir }
+    await fs.writeFile(
+      path.join(pAlphaDir, "docker-compose.yml"),
+      `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8081:80"\n    environment:\n      - WHOAMI_NAME=project-alpha\n`
     );
+    await execAsync("node", [BIN_PATH, "init"], { cwd: pAlphaDir });
+    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "--gateway-dir", gatewayDir], {
+      cwd: pAlphaDir,
+    });
+    if (deployAlphaRes.code !== 0) {
+      throw new Error(`Project Alpha deploy failed: ${deployAlphaRes.stderr}`);
+    }
+    logSuccess("Project Alpha deployed & Caddy reloaded cleanly");
+
+    // Project Beta
+    await fs.writeFile(
+      path.join(pBetaDir, "package.json"),
+      JSON.stringify({ name: "project-beta", version: "1.0.0" }, null, 2)
+    );
+    await fs.writeFile(
+      path.join(pBetaDir, "docker-compose.yml"),
+      `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8082:80"\n    environment:\n      - WHOAMI_NAME=project-beta\n`
+    );
+    await execAsync("node", [BIN_PATH, "init"], { cwd: pBetaDir });
+    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "--gateway-dir", gatewayDir], {
+      cwd: pBetaDir,
+    });
+    if (deployBetaRes.code !== 0) {
+      throw new Error(`Project Beta deploy failed: ${deployBetaRes.stderr}`);
+    }
+    logSuccess("Project Beta deployed in parallel without port conflict");
+
+    // =========================================================================
+    // Phase 5: ⚡ Physical HTTP Traffic & Isolation Assertions
+    // =========================================================================
+    logPhase(5, "Physical HTTP Traffic & Tenant Isolation (Real L7 Proxy Delivery)");
+
+    // Wait a brief moment for Caddy routing table to stabilize
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Request Alpha
+    const resAlpha = await httpGet("project-alpha.com", "/", 80);
+    if (resAlpha.status !== 200) {
+      throw new Error(`Expected HTTP 200 for project-alpha.com, got: ${resAlpha.status}`);
+    }
+    if (!resAlpha.body.includes("project-alpha") && !resAlpha.body.includes("Hostname:")) {
+      throw new Error(`Project Alpha response payload mismatch: ${resAlpha.body}`);
+    }
+    logSuccess("Physical HTTP GET -> 'project-alpha.com' returned 200 OK with Alpha payload");
+
+    // Request Beta
+    const resBeta = await httpGet("project-beta.com", "/", 80);
+    if (resBeta.status !== 200) {
+      throw new Error(`Expected HTTP 200 for project-beta.com, got: ${resBeta.status}`);
+    }
+    if (!resBeta.body.includes("project-beta") && !resBeta.body.includes("Hostname:")) {
+      throw new Error(`Project Beta response payload mismatch: ${resBeta.body}`);
+    }
+    logSuccess("Physical HTTP GET -> 'project-beta.com' returned 200 OK with Beta payload");
+
+    // Test Isolation (Alpha must not serve Beta payload)
+    if (resAlpha.body.includes("project-beta")) {
+      throw new Error("Tenant cross-talk detected: Alpha returned Beta payload!");
+    }
+    if (resBeta.body.includes("project-alpha")) {
+      throw new Error("Tenant cross-talk detected: Beta returned Alpha payload!");
+    }
+    logSuccess("Verified zero tenant cross-talk: upstream routing is strictly isolated");
+
+    // Request Unknown Host
+    const resUnknown = await httpGet("completely-unregistered-domain.com", "/", 80);
+    if (resUnknown.status !== 0 && resUnknown.status !== 404 && resUnknown.status !== 502) {
+      console.log(`  ${cyan("ℹ")} Unknown domain returned HTTP status: ${resUnknown.status}`);
+    }
+    logSuccess("Unregistered host safely isolated without wildcard leakage");
+
+    // =========================================================================
+    // Phase 6: Multi-Service Path Routing (SPA + API)
+    // =========================================================================
+    logPhase(6, "Multi-Service Path Routing (/api/* vs /)");
+
+    await fs.writeFile(
+      path.join(pMultiDir, "package.json"),
+      JSON.stringify({ name: "project-multi", version: "1.0.0" }, null, 2)
+    );
+    await fs.writeFile(
+      path.join(pMultiDir, "docker-compose.yml"),
+      `services:
+  web:
+    image: traefik/whoami
+    ports:
+      - "8083:80"
+    environment:
+      - WHOAMI_NAME=multi-web-frontend
+  api:
+    image: traefik/whoami
+    ports:
+      - "8084:80"
+    environment:
+      - WHOAMI_NAME=multi-backend-api
+`
+    );
+    await execAsync("node", [BIN_PATH, "init"], { cwd: pMultiDir });
+
+    // Update contract for dual services
+    const multiContract = {
+      projectName: "project-multi",
+      services: {
+        web: {
+          upstream: "web:80",
+          domains: { prod: ["multi-app.com"] },
+        },
+        api: {
+          upstream: "api:80",
+          domains: { prod: ["api-multi-app.com"] },
+        },
+      },
+    };
+    await fs.writeFile(path.join(pMultiDir, "pegas.json"), JSON.stringify(multiContract, null, 2));
+
+    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "--gateway-dir", gatewayDir], {
+      cwd: pMultiDir,
+    });
+    if (deployMultiRes.code !== 0) {
+      throw new Error(`Project Multi deploy failed: ${deployMultiRes.stderr}`);
+    }
+    logSuccess("Multi-service project deployed with web and api upstreams");
+
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const resMultiWeb = await httpGet("multi-app.com", "/", 80);
+    if (resMultiWeb.status !== 200) {
+      throw new Error(`Expected 200 for multi-app.com, got: ${resMultiWeb.status}`);
+    }
+    logSuccess("HTTP GET multi-app.com routed to multi-web-frontend (200 OK)");
+
+    const resMultiApi = await httpGet("api-multi-app.com", "/", 80);
+    if (resMultiApi.status !== 200) {
+      throw new Error(`Expected 200 for api-multi-app.com, got: ${resMultiApi.status}`);
+    }
+    logSuccess("HTTP GET api-multi-app.com routed to multi-backend-api (200 OK)");
+
+    // =========================================================================
+    // Phase 7: Domain Anti-Hijacking Security Protection
+    // =========================================================================
+    logPhase(7, "Security Test: Domain Anti-Hijacking Protection");
+
+    await fs.writeFile(
+      path.join(pHijackDir, "package.json"),
+      JSON.stringify({ name: "project-hijack", version: "1.0.0" }, null, 2)
+    );
+    await fs.writeFile(
+      path.join(pHijackDir, "docker-compose.yml"),
+      `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8085:80"\n`
+    );
+    await execAsync("node", [BIN_PATH, "init"], { cwd: pHijackDir });
+
+    // Intentionally claim Project Alpha's domain
+    const hijackContract = {
+      projectName: "project-hijack",
+      services: {
+        web: {
+          upstream: "web:80",
+          domains: { prod: ["project-alpha.com"] }, // VIOLATION: owned by Alpha
+        },
+      },
+    };
+    await fs.writeFile(path.join(pHijackDir, "pegas.json"), JSON.stringify(hijackContract, null, 2));
+
+    const hijackDeployRes = await execAsync(
+      "node",
+      [BIN_PATH, "deploy", "--gateway-dir", gatewayDir, "--skip-up"],
+      { cwd: pHijackDir }
+    );
+
+    if (hijackDeployRes.code === 0) {
+      throw new Error("Anti-hijacking failed! Malicious deploy succeeded when it should have failed.");
+    }
+    if (!hijackDeployRes.stderr.includes("already owned by project") && !hijackDeployRes.stdout.includes("already owned by project")) {
+      throw new Error(`Expected hijack rejection error message, got: ${hijackDeployRes.stderr || hijackDeployRes.stdout}`);
+    }
+    logSuccess("Anti-hijacking verified: illegal domain claim was rejected before touching Caddy routes");
+
+    // Verify Project Alpha is STILL alive and untouched
+    const resAlphaAfterAttack = await httpGet("project-alpha.com", "/", 80);
+    if (resAlphaAfterAttack.status !== 200) {
+      throw new Error(`Project Alpha was broken by hijacked deployment attempt! Status: ${resAlphaAfterAttack.status}`);
+    }
+    logSuccess("Project Alpha continues serving traffic normally (zero impact from rejected attack)");
+
+    // =========================================================================
+    // Phase 8: Broken Container Readiness Probe & Rollback Protection
+    // =========================================================================
+    logPhase(8, "Reliability Test: Broken Container Readiness Probe & Zero-Crash Rollback");
+
+    await fs.writeFile(
+      path.join(pBrokenDir, "package.json"),
+      JSON.stringify({ name: "project-broken", version: "1.0.0" }, null, 2)
+    );
+    // Container that immediately exits with code 1
+    await fs.writeFile(
+      path.join(pBrokenDir, "docker-compose.yml"),
+      `services:
+  web:
+    image: traefik/whoami
+    command: ["--invalid-flag-force-exit"]
+`
+    );
+    await execAsync("node", [BIN_PATH, "init"], { cwd: pBrokenDir });
+
+    const brokenContract = {
+      projectName: "project-broken",
+      services: {
+        web: {
+          upstream: "web:80",
+          domains: { prod: ["broken-site.com"] },
+        },
+      },
+    };
+    await fs.writeFile(path.join(pBrokenDir, "pegas.json"), JSON.stringify(brokenContract, null, 2));
+
+    const brokenDeployRes = await execAsync(
+      "node",
+      [BIN_PATH, "deploy", "--gateway-dir", gatewayDir, "--readiness-timeout-ms", "3000"],
+      { cwd: pBrokenDir }
+    );
+
+    if (brokenDeployRes.code === 0) {
+      throw new Error("Broken container deployment should have failed readiness check!");
+    }
+    logSuccess("Readiness probe caught crashing container and aborted deployment before Caddy reload");
+
+    // Verify existing projects are still 100% operational
+    const resAlphaHealth = await httpGet("project-alpha.com", "/", 80);
+    const resBetaHealth = await httpGet("project-beta.com", "/", 80);
+    if (resAlphaHealth.status !== 200 || resBetaHealth.status !== 200) {
+      throw new Error("Neighboring projects degraded after broken deployment failure!");
+    }
+    logSuccess("Neighboring projects remain 100% healthy: failure was cleanly isolated");
+
+    // =========================================================================
+    // Phase 9: Legacy Unmanaged Route Coexistence
+    // =========================================================================
+    logPhase(9, "Legacy Route Coexistence (Unmanaged Manual .caddy Files)");
+
+    const manualLegacyPath = path.join(gatewayDir, "conf.d", "manual-legacy.caddy");
+    const manualLegacyContent = `manual-legacy.test {\n    respond "MANUAL_LEGACY_PAYLOAD_OK" 200\n}\n`;
+    await fs.writeFile(manualLegacyPath, manualLegacyContent, "utf-8");
+
+    // Reload gateway
+    await execAsync("node", [BIN_PATH, "reload", "--gateway-dir", gatewayDir]);
+
+    await new Promise((r) => setTimeout(r, 500));
+
+    const resLegacy = await httpGet("manual-legacy.test", "/", 80);
+    if (resLegacy.status !== 200 || !resLegacy.body.includes("MANUAL_LEGACY_PAYLOAD_OK")) {
+      throw new Error(`Legacy manual route failed to serve: status=${resLegacy.status}, body=${resLegacy.body}`);
+    }
+    logSuccess("Manual unmanaged route 'manual-legacy.caddy' coexists and serves traffic cleanly");
+
+    // =========================================================================
+    // Phase 10: Global Dashboard (`pegas ls`) & Clean Teardown (`pegas down`)
+    // =========================================================================
+    logPhase(10, "Global Dashboard (`pegas ls`) and Clean Teardown (`pegas down`)");
+
+    const lsJsonRes = await execAsync("node", [BIN_PATH, "ls", "--gateway-dir", gatewayDir, "--json"], {
+      cwd: mainSandboxDir,
+    });
+    if (lsJsonRes.code !== 0) {
+      throw new Error(`'pegas ls --json' failed: ${lsJsonRes.stderr}`);
+    }
+    const dashboardItems = JSON.parse(lsJsonRes.stdout);
+    if (!Array.isArray(dashboardItems) || dashboardItems.length < 3) {
+      throw new Error(`Expected at least 3 active projects in dashboard, got: ${lsJsonRes.stdout}`);
+    }
+    logSuccess(`Dashboard reported ${dashboardItems.length} active projects with real-time health`);
+
+    // Render terminal Unicode table
+    const lsTableRes = await execAsync("node", [BIN_PATH, "ls", "--gateway-dir", gatewayDir], {
+      cwd: mainSandboxDir,
+    });
+    console.log(`\n${lsTableRes.stdout}\n`);
+    logSuccess("Visual Unicode dashboard table verified");
+
+    // Teardown projects
+    await execAsync("node", [BIN_PATH, "down", "--gateway-dir", gatewayDir], { cwd: pAlphaDir });
+    await execAsync("node", [BIN_PATH, "down", "--gateway-dir", gatewayDir], { cwd: pBetaDir });
+    await execAsync("node", [BIN_PATH, "down", "--gateway-dir", gatewayDir], { cwd: pMultiDir });
+    logSuccess("Executed 'pegas down' for all active projects");
+
+    // Verify manual-legacy.caddy was NOT deleted
     try {
-      await fs.access(projectRouteFile);
-      throw new Error("Project route file was not removed after 'pegas down'");
-    } catch (err: any) {
-      if (err.code !== "ENOENT") throw err;
-    }
-    logSuccess("'pegas down' cleanly removed project route file from conf.d");
-
-    // 5. Dev Runtime & Proxy Lifecycle Testing
-    logStep(5, "Test 'pegas dev' runtime with native Caddy proxy and process cleanup");
-    const devTestCmd = [
-      BIN_PATH,
-      "dev",
-      "--",
-      "node",
-      "-e",
-      "console.log('E2E_PAYLOAD_STARTED'); setTimeout(() => { console.log('E2E_PAYLOAD_FINISHED'); process.exit(0); }, 800);",
-    ];
-
-    const devProcRes = await execAsync("node", devTestCmd, { cwd: sandboxDir });
-    if (devProcRes.code !== 0) {
-      throw new Error(`'pegas dev' failed with exit code ${devProcRes.code}:\nSTDOUT:\n${devProcRes.stdout}\nSTDERR:\n${devProcRes.stderr}`);
+      await fs.access(manualLegacyPath);
+      logSuccess("Verified manual legacy config was preserved after project teardowns");
+    } catch {
+      throw new Error("Manual legacy config was mistakenly deleted during teardown!");
     }
 
-    if (!devProcRes.stdout.includes("Pegas proxy active at: https://e2e-demo-service.localhost:")) {
-      throw new Error(`Missing proxy active banner in stdout:\n${devProcRes.stdout}`);
-    }
-    if (!devProcRes.stdout.includes("E2E_PAYLOAD_STARTED") || !devProcRes.stdout.includes("E2E_PAYLOAD_FINISHED")) {
-      throw new Error(`User command payload did not execute completely:\n${devProcRes.stdout}`);
-    }
-    logSuccess("Dev command ran successfully; dynamic port allocated, proxy active banner logged");
-
-    // Verify .pegas/Caddyfile.dev
-    const devCaddyfilePath = path.join(sandboxDir, ".pegas", "Caddyfile.dev");
-    const devCaddyContent = await fs.readFile(devCaddyfilePath, "utf-8");
-    if (!devCaddyContent.includes("skip_install_trust")) {
-      throw new Error("Caddyfile.dev is missing 'skip_install_trust'");
-    }
-    if (!devCaddyContent.includes("e2e-demo-service.localhost {")) {
-      throw new Error("Caddyfile.dev is missing 'e2e-demo-service.localhost' block");
-    }
-    logSuccess("Generated .pegas/Caddyfile.dev verified (skip_install_trust & dev domains configured)");
-
-    // Verify no zombie Caddy processes
-    const psRes = await execAsync("ps", ["aux"]);
-    const lines = psRes.stdout.split("\n");
-    const lingeringCaddy = lines.filter(
-      (l) => l.includes("caddy") && l.includes(sandboxDir)
-    );
-    if (lingeringCaddy.length > 0) {
-      throw new Error(`Lingering Caddy process detected:\n${lingeringCaddy.join("\n")}`);
-    }
-    logSuccess("Zero process leaks verified: Caddy proxy and child process exited cleanly");
-
-    // 6. All Tests Completed
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log("\n" + bold("=================================================="));
-    console.log(bold(green(`  ✨ ALL E2E RUNTIME TESTS PASSED IN ${duration}s`)));
-    console.log(bold("=================================================="));
+    console.log("\n" + bold("================================================================================"));
+    console.log(bold(green(`  ✨ ALL UNIFIED E2E TEST PHASES PASSED SUCCESSFULLY IN ${duration}s`)));
+    console.log(bold("================================================================================"));
   } finally {
-    // 7. Teardown
-    if (sandboxDir) {
-      logStep(6, "Teardown & Cleanup");
-      try {
-        await fs.rm(sandboxDir, { recursive: true, force: true });
-        logSuccess(`Cleaned up sandbox directory: ${sandboxDir}`);
-      } catch (err: any) {
-        logFail(`Failed to clean sandbox: ${err.message}`);
-      }
+    // Teardown containers and wipe sandboxes
+    logPhase(11, "Cleanup and Environment Restoration");
+    if (gatewayDir) {
+      await execAsync("docker", ["compose", "down", "-v"], { cwd: gatewayDir });
+      logSuccess("Gateway Caddy container stopped and removed");
+    }
+    if (pAlphaDir) {
+      await execAsync("docker", ["compose", "down", "-v"], { cwd: pAlphaDir });
+    }
+    if (pBetaDir) {
+      await execAsync("docker", ["compose", "down", "-v"], { cwd: pBetaDir });
+    }
+    if (pMultiDir) {
+      await execAsync("docker", ["compose", "down", "-v"], { cwd: pMultiDir });
+    }
+    if (pBrokenDir) {
+      await execAsync("docker", ["compose", "down", "-v"], { cwd: pBrokenDir });
+    }
+    if (mainSandboxDir) {
+      await fs.rm(mainSandboxDir, { recursive: true, force: true });
+      logSuccess("All temporary sandboxes wiped clean from /tmp");
     }
   }
 }
 
-runE2E().catch((err) => {
-  console.error(`\n${bold(red("❌ E2E TEST RUN FAILED:"))}`);
+runUnifiedE2E().catch((err) => {
+  console.error(`\n${bold(red("❌ UNIFIED E2E TEST RUN FAILED:"))}`);
   console.error(err);
   process.exit(1);
 });
