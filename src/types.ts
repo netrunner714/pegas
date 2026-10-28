@@ -19,12 +19,14 @@ export interface AddOptions {
 }
 
 export interface InitOptions {
+  cwd?: string;
   gatewayDir?: string;
   email?: string;
   networkName?: string;
   server?: boolean;
   project?: boolean;
   json?: boolean;
+  noExit?: boolean;
 }
 
 export interface RouteInfo {

@@ -115,7 +115,10 @@ export async function handleServerInit(options: InitOptions): Promise<void> {
     } else {
       console.error("❌ Error: Docker daemon is not running or not installed.");
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   const hasCompose = await checkDockerCompose();
@@ -125,7 +128,10 @@ export async function handleServerInit(options: InitOptions): Promise<void> {
     } else {
       console.error("❌ Error: Docker Compose is not available.");
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   // 2. Gateway directory
@@ -197,7 +203,10 @@ volumes:
     } else {
       console.error("❌ Failed to start Caddy container:", startRes.stderr);
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   const validateRes = await validateCaddyConfig(gatewayDir);
@@ -222,6 +231,7 @@ volumes:
 
 export async function handleInit(options: InitOptions): Promise<void> {
   const isJson = options.json ?? false;
+  const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
 
   // If explicitly requested server
   if (options.server) {
@@ -231,13 +241,13 @@ export async function handleInit(options: InitOptions): Promise<void> {
 
   // If explicitly requested project
   if (options.project) {
-    await handleProjectInit(process.cwd(), isJson);
+    await handleProjectInit(cwd, isJson);
     return;
   }
 
   // Smart detection:
   // Climb up to find .git or package.json
-  const projectRoot = await findProjectRoot(process.cwd());
+  const projectRoot = await findProjectRoot(cwd);
 
   if (projectRoot) {
     await handleProjectInit(projectRoot, isJson);

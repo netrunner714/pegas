@@ -6,6 +6,8 @@ import child_process from "node:child_process";
 export interface FindCaddyOptions {
   silent?: boolean;
   cacheDir?: string;
+  skipCache?: boolean;
+  skipMirror?: boolean;
 }
 
 export function getCaddyReleaseInfo(
@@ -42,7 +44,7 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   const binaryName = isWin ? "caddy.exe" : "caddy";
 
   // 1. Check custom environment variable
-  if (process.env.CADDY_PATH) {
+  if (!options.skipCache && process.env.CADDY_PATH) {
     try {
       await fs.access(process.env.CADDY_PATH);
       return process.env.CADDY_PATH;
@@ -58,40 +60,43 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
     } catch {}
   }
 
-  // 3. Check local repository .cache/bin/ in current or parent directories
-  let searchDir = process.cwd();
-  for (let i = 0; i < 4; i++) {
-    const candidate = path.join(searchDir, ".cache", "bin", binaryName);
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch {}
-    const parent = path.dirname(searchDir);
-    if (parent === searchDir) break;
-    searchDir = parent;
-  }
-
-  // 4. Check cached binary in ~/.pegas/bin/
   const homeCacheDir = path.join(os.homedir(), ".pegas", "bin");
   const homeCachedBinary = path.join(homeCacheDir, binaryName);
-  try {
-    await fs.access(homeCachedBinary);
-    return homeCachedBinary;
-  } catch {}
 
-  // 5. Check system PATH
-  try {
-    const whichCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
-    const sysPath = child_process
-      .execSync(whichCmd, { stdio: ["ignore", "pipe", "ignore"] })
-      .toString()
-      .trim()
-      .split("\n")[0]
-      .trim();
-    if (sysPath) {
-      return sysPath;
+  if (!options.skipCache) {
+    // 3. Check local repository .cache/bin/ in current or parent directories
+    let searchDir = process.cwd();
+    for (let i = 0; i < 4; i++) {
+      const candidate = path.join(searchDir, ".cache", "bin", binaryName);
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {}
+      const parent = path.dirname(searchDir);
+      if (parent === searchDir) break;
+      searchDir = parent;
     }
-  } catch {}
+
+    // 4. Check cached binary in ~/.pegas/bin/
+    try {
+      await fs.access(homeCachedBinary);
+      return homeCachedBinary;
+    } catch {}
+
+    // 5. Check system PATH
+    try {
+      const whichCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
+      const sysPath = child_process
+        .execSync(whichCmd, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim()
+        .split("\n")[0]
+        .trim();
+      if (sysPath) {
+        return sysPath;
+      }
+    } catch {}
+  }
 
   // 6. Download official Caddy release
   const primaryCacheDir = options.cacheDir || homeCacheDir;
@@ -126,7 +131,7 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   await fs.unlink(archivePath).catch(() => {});
 
   // Mirror to ~/.pegas/bin/ if primary was different
-  if (primaryCacheDir !== homeCacheDir) {
+  if (!options.skipMirror && primaryCacheDir !== homeCacheDir) {
     try {
       await fs.mkdir(homeCacheDir, { recursive: true });
       await fs.copyFile(targetBinary, homeCachedBinary);
@@ -135,25 +140,27 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   }
 
   // Mirror to repo .cache/bin/ if .cache exists in cwd or parent
-  let repoSearchDir = process.cwd();
-  for (let i = 0; i < 4; i++) {
-    const repoCacheDir = path.join(repoSearchDir, ".cache");
-    const repoCacheBin = path.join(repoCacheDir, "bin");
-    try {
-      const stat = await fs.stat(repoCacheDir);
-      if (stat.isDirectory()) {
-        await fs.mkdir(repoCacheBin, { recursive: true });
-        const repoBinary = path.join(repoCacheBin, binaryName);
-        if (repoBinary !== targetBinary) {
-          await fs.copyFile(targetBinary, repoBinary);
-          await fs.chmod(repoBinary, 0o755);
+  if (!options.skipMirror) {
+    let repoSearchDir = process.cwd();
+    for (let i = 0; i < 4; i++) {
+      const repoCacheDir = path.join(repoSearchDir, ".cache");
+      const repoCacheBin = path.join(repoCacheDir, "bin");
+      try {
+        const stat = await fs.stat(repoCacheDir);
+        if (stat.isDirectory()) {
+          await fs.mkdir(repoCacheBin, { recursive: true });
+          const repoBinary = path.join(repoCacheBin, binaryName);
+          if (repoBinary !== targetBinary) {
+            await fs.copyFile(targetBinary, repoBinary);
+            await fs.chmod(repoBinary, 0o755);
+          }
+          break;
         }
-        break;
-      }
-    } catch {}
-    const parent = path.dirname(repoSearchDir);
-    if (parent === repoSearchDir) break;
-    repoSearchDir = parent;
+      } catch {}
+      const parent = path.dirname(repoSearchDir);
+      if (parent === repoSearchDir) break;
+      repoSearchDir = parent;
+    }
   }
 
   if (!options.silent) {

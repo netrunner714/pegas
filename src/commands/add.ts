@@ -138,7 +138,10 @@ export async function handleAdd(options: AddOptions): Promise<void> {
       console.error("❌ Caddy configuration validation failed! Changes have been rolled back.");
       console.error(validateRes.stderr || validateRes.stdout);
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   // Reload Caddy
@@ -154,7 +157,10 @@ export async function handleAdd(options: AddOptions): Promise<void> {
     } else {
       console.error("❌ Failed to reload Caddy:", reloadRes.stderr);
     }
-    process.exit(1);
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
   }
 
   const composePatch = `services:
