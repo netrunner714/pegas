@@ -3,6 +3,8 @@ import path from "node:path";
 import os from "node:os";
 import child_process from "node:child_process";
 
+export const PEGAS_CADDY_VERSION = "2.9.1";
+
 export interface FindCaddyOptions {
   silent?: boolean;
   cacheDir?: string;
@@ -10,6 +12,17 @@ export interface FindCaddyOptions {
   skipMirror?: boolean;
   customPath?: string;
   useSystemCaddy?: boolean;
+  version?: string;
+}
+
+export function getCaddyBinaryNames(
+  version = PEGAS_CADDY_VERSION,
+  platform = process.platform
+): { versionedName: string; plainName: string } {
+  const isWin = platform === "win32";
+  const plainName = isWin ? "caddy.exe" : "caddy";
+  const versionedName = isWin ? `caddy-v${version}.exe` : `caddy-v${version}`;
+  return { versionedName, plainName };
 }
 
 export function getCaddyReleaseInfo(
@@ -75,7 +88,8 @@ export function checkCaddyVersion(
 
 export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promise<string> {
   const isWin = process.platform === "win32";
-  const binaryName = isWin ? "caddy.exe" : "caddy";
+  const version = options.version || PEGAS_CADDY_VERSION;
+  const { versionedName, plainName } = getCaddyBinaryNames(version, process.platform);
 
   // 1. Explicit custom path via option or CADDY_PATH
   const explicitPath = options.customPath || (!options.skipCache ? process.env.CADDY_PATH : undefined);
@@ -100,7 +114,7 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   // 2. Explicit system Caddy opt-in (--system-caddy or CADDY_PATH=system)
   if (options.useSystemCaddy) {
     try {
-      const whichCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
+      const whichCmd = isWin ? `where ${plainName}` : `which ${plainName}`;
       const sysPath = child_process
         .execSync(whichCmd, { stdio: ["ignore", "pipe", "ignore"] })
         .toString()
@@ -121,51 +135,86 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
 
   // 3. Check explicitly provided cacheDir
   if (options.cacheDir) {
-    const customBinary = path.join(options.cacheDir, binaryName);
+    const customVersioned = path.join(options.cacheDir, versionedName);
+    const customPlain = path.join(options.cacheDir, plainName);
     try {
-      await fs.access(customBinary);
-      return customBinary;
+      await fs.access(customVersioned);
+      return customVersioned;
+    } catch {}
+    try {
+      await fs.access(customPlain);
+      return customPlain;
     } catch {}
   }
 
   const homeCacheDir = path.join(os.homedir(), ".pegas", "bin");
-  const homeCachedBinary = path.join(homeCacheDir, binaryName);
+  const homeVersionedBinary = path.join(homeCacheDir, versionedName);
+  const homePlainBinary = path.join(homeCacheDir, plainName);
 
   if (!options.skipCache) {
-    // 4. Check local repository .cache/bin/ in current or parent directories
+    // 4. Check managed cached binary in ~/.pegas/bin/
+    // 4a. First check versioned binary: ~/.pegas/bin/caddy-v2.9.1
+    try {
+      await fs.access(homeVersionedBinary);
+      if (checkCaddyVersion(homeVersionedBinary)) {
+        return homeVersionedBinary;
+      }
+    } catch {}
+
+    // 4b. Fallback check plain binary: ~/.pegas/bin/caddy (and promote it if compatible)
+    try {
+      await fs.access(homePlainBinary);
+      if (checkCaddyVersion(homePlainBinary)) {
+        try {
+          await fs.copyFile(homePlainBinary, homeVersionedBinary);
+          if (!isWin) {
+            await fs.chmod(homeVersionedBinary, 0o755);
+          }
+          return homeVersionedBinary;
+        } catch {
+          return homePlainBinary;
+        }
+      }
+    } catch {}
+
+    // 5. Check local repository .cache/bin/ in current or parent directories
     let searchDir = process.cwd();
     for (let i = 0; i < 4; i++) {
-      const candidate = path.join(searchDir, ".cache", "bin", binaryName);
+      const repoDir = path.join(searchDir, ".cache", "bin");
+      const repoVersioned = path.join(repoDir, versionedName);
+      const repoPlain = path.join(repoDir, plainName);
+
       try {
-        await fs.access(candidate);
-        if (checkCaddyVersion(candidate)) {
-          return candidate;
+        await fs.access(repoVersioned);
+        if (checkCaddyVersion(repoVersioned)) {
+          return repoVersioned;
         }
       } catch {}
+
+      try {
+        await fs.access(repoPlain);
+        if (checkCaddyVersion(repoPlain)) {
+          return repoPlain;
+        }
+      } catch {}
+
       const parent = path.dirname(searchDir);
       if (parent === searchDir) break;
       searchDir = parent;
     }
-
-    // 5. Check managed cached binary in ~/.pegas/bin/
-    try {
-      await fs.access(homeCachedBinary);
-      if (checkCaddyVersion(homeCachedBinary)) {
-        return homeCachedBinary;
-      }
-    } catch {}
   }
 
   // 6. Download official Caddy release into ~/.pegas/bin/
   const primaryCacheDir = options.cacheDir || homeCacheDir;
-  const targetBinary = path.join(primaryCacheDir, binaryName);
+  const targetVersionedBinary = path.join(primaryCacheDir, versionedName);
+  const targetPlainBinary = path.join(primaryCacheDir, plainName);
 
   if (!options.silent) {
-    console.log("⬇️  Managed Caddy not found in cache. Downloading official release...");
+    console.log(`⬇️  Managed Caddy v${version} not found in cache. Downloading official release...`);
   }
   await fs.mkdir(primaryCacheDir, { recursive: true });
 
-  const { filename, url } = getCaddyReleaseInfo();
+  const { filename, url } = getCaddyReleaseInfo(process.platform, process.arch, version);
 
   const archivePath = path.join(primaryCacheDir, filename);
 
@@ -179,10 +228,18 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
 
   // Extract binary
   if (isWin) {
-    child_process.execSync(`tar -xf "${archivePath}" -C "${primaryCacheDir}" "${binaryName}"`);
+    child_process.execSync(`tar -xf "${archivePath}" -C "${primaryCacheDir}" "${plainName}"`);
   } else {
-    child_process.execSync(`tar -xzf "${archivePath}" -C "${primaryCacheDir}" "${binaryName}"`);
-    await fs.chmod(targetBinary, 0o755);
+    child_process.execSync(`tar -xzf "${archivePath}" -C "${primaryCacheDir}" "${plainName}"`);
+  }
+
+  // Copy extracted plainName to targetVersionedBinary and ensure executable
+  if (targetPlainBinary !== targetVersionedBinary) {
+    await fs.copyFile(targetPlainBinary, targetVersionedBinary);
+  }
+  if (!isWin) {
+    await fs.chmod(targetVersionedBinary, 0o755);
+    await fs.chmod(targetPlainBinary, 0o755);
   }
 
   // Cleanup archive
@@ -192,8 +249,12 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   if (!options.skipMirror && primaryCacheDir !== homeCacheDir) {
     try {
       await fs.mkdir(homeCacheDir, { recursive: true });
-      await fs.copyFile(targetBinary, homeCachedBinary);
-      await fs.chmod(homeCachedBinary, 0o755);
+      await fs.copyFile(targetVersionedBinary, homeVersionedBinary);
+      await fs.copyFile(targetPlainBinary, homePlainBinary);
+      if (!isWin) {
+        await fs.chmod(homeVersionedBinary, 0o755);
+        await fs.chmod(homePlainBinary, 0o755);
+      }
     } catch {}
   }
 
@@ -207,10 +268,15 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
         const stat = await fs.stat(repoCacheDir);
         if (stat.isDirectory()) {
           await fs.mkdir(repoCacheBin, { recursive: true });
-          const repoBinary = path.join(repoCacheBin, binaryName);
-          if (repoBinary !== targetBinary) {
-            await fs.copyFile(targetBinary, repoBinary);
-            await fs.chmod(repoBinary, 0o755);
+          const repoVersioned = path.join(repoCacheBin, versionedName);
+          const repoPlain = path.join(repoCacheBin, plainName);
+          if (repoVersioned !== targetVersionedBinary) {
+            await fs.copyFile(targetVersionedBinary, repoVersioned);
+            await fs.copyFile(targetPlainBinary, repoPlain);
+            if (!isWin) {
+              await fs.chmod(repoVersioned, 0o755);
+              await fs.chmod(repoPlain, 0o755);
+            }
           }
           break;
         }
@@ -222,8 +288,8 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   }
 
   if (!options.silent) {
-    console.log(`✓ Caddy installed to ${targetBinary}`);
+    console.log(`✓ Caddy v${version} installed to ${targetVersionedBinary}`);
   }
 
-  return targetBinary;
+  return targetVersionedBinary;
 }

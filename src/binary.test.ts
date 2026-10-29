@@ -6,11 +6,25 @@ import child_process from "node:child_process";
 import {
   findOrDownloadCaddy,
   getCaddyReleaseInfo,
+  getCaddyBinaryNames,
+  PEGAS_CADDY_VERSION,
   isCaddyVersionCompatible,
   checkCaddyVersion,
 } from "./binary.js";
 
 describe("caddy binary resolution", () => {
+  it("getCaddyBinaryNames generates versioned and plain binary names", () => {
+    expect(PEGAS_CADDY_VERSION).toBe("2.9.1");
+
+    const linuxNames = getCaddyBinaryNames("2.9.1", "linux");
+    expect(linuxNames.versionedName).toBe("caddy-v2.9.1");
+    expect(linuxNames.plainName).toBe("caddy");
+
+    const winNames = getCaddyBinaryNames("2.9.1", "win32");
+    expect(winNames.versionedName).toBe("caddy-v2.9.1.exe");
+    expect(winNames.plainName).toBe("caddy.exe");
+  });
+
   it("isCaddyVersionCompatible validates minimum Caddy version requirement", () => {
     expect(isCaddyVersionCompatible("v2.9.1 h1:OEYiZ7DbCzAWVb6TNEkjRcSCRGHVoZsJinoDR/n9oaY=")).toBe(true);
     expect(isCaddyVersionCompatible("v2.8.0")).toBe(true);
@@ -169,12 +183,14 @@ describe("caddy binary resolution", () => {
         skipMirror: true,
         silent: false,
       });
-      expect(binaryPath).toBe(path.join(tmpDir, "caddy"));
+      const { versionedName, plainName } = getCaddyBinaryNames();
+      expect(binaryPath).toBe(path.join(tmpDir, versionedName));
       expect(await fs.access(binaryPath).then(() => true).catch(() => false)).toBe(true);
+      expect(await fs.access(path.join(tmpDir, plainName)).then(() => true).catch(() => false)).toBe(true);
 
       // Verify logs
       expect(logs.some((l) => l.includes("Downloading official release"))).toBe(true);
-      expect(logs.some((l) => l.includes("Caddy installed to"))).toBe(true);
+      expect(logs.some((l) => l.includes("installed to"))).toBe(true);
     } finally {
       globalThis.fetch = origFetch;
       console.log = origLog;
@@ -291,6 +307,29 @@ describe("caddy binary resolution", () => {
     } finally {
       fs.access = origAccess;
       child_process.execSync = origExecSync;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("promotes unversioned caddy to versioned caddy in home cache", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-promote-"));
+    const origHome = os.homedir;
+    (os as any).homedir = () => tmpDir;
+
+    const binDir = path.join(tmpDir, ".pegas", "bin");
+    await fs.mkdir(binDir, { recursive: true });
+
+    const { versionedName, plainName } = getCaddyBinaryNames();
+    const plainPath = path.join(binDir, plainName);
+    await fs.writeFile(plainPath, "#!/bin/sh\necho 'v2.9.1'", "utf-8");
+    await fs.chmod(plainPath, 0o755);
+
+    try {
+      const found = await findOrDownloadCaddy({ silent: true });
+      expect(found).toBe(path.join(binDir, versionedName));
+      expect(await fs.access(found).then(() => true).catch(() => false)).toBe(true);
+    } finally {
+      (os as any).homedir = origHome;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
