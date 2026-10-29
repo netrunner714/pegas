@@ -158,6 +158,10 @@ services:
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
 
+    const staleCaddyfile = path.join(tmpProj, ".pegas", "Caddyfile.dev");
+    await fs.mkdir(path.join(tmpProj, ".pegas"), { recursive: true });
+    await fs.writeFile(staleCaddyfile, "old", "utf-8");
+
     // Execute handleDev with a fast-terminating command
     const origLog = console.log;
     console.log = () => {};
@@ -167,6 +171,9 @@ services:
         noExit: true,
         command: ["node", "-e", "process.exit(0)"],
       });
+
+      // Verify Caddyfile.dev was cleaned up and not left on disk
+      expect(await fs.access(staleCaddyfile).then(() => true).catch(() => false)).toBe(false);
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });

@@ -142,24 +142,29 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     useSystemCaddy: options.systemCaddy,
   });
 
-  // 5. Generate .pegas/Caddyfile.dev
-  const devCaddyDir = path.join(projectRoot, ".pegas");
-  await fs.mkdir(devCaddyDir, { recursive: true });
-  const devCaddyfilePath = path.join(devCaddyDir, "Caddyfile.dev");
+  // 5. Clean up any stale legacy Caddyfile.dev
+  const devCaddyfilePath = path.join(projectRoot, ".pegas", "Caddyfile.dev");
+  await fs.unlink(devCaddyfilePath).catch(() => {});
 
+  // 6. Generate dev Caddyfile configuration in-memory
   const caddyfileContent = generateDevCaddyfile(contract, { httpsPort, httpPort });
-  await fs.writeFile(devCaddyfilePath, caddyfileContent, "utf-8");
 
-  // 6. Start Caddy in background child process
+  // 7. Start Caddy in background child process piping config via stdin
   console.log("🔒 Starting local Caddy HTTPS proxy...");
   const caddyProc: ChildProcess = child_process.spawn(
     caddyPath,
-    ["run", "--config", devCaddyfilePath],
+    ["run", "--adapter", "caddyfile", "--config", "-"],
     {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       cwd: projectRoot,
     }
   );
+
+  if (caddyProc.stdin) {
+    caddyProc.stdin.on("error", () => {});
+    caddyProc.stdin.write(caddyfileContent);
+    caddyProc.stdin.end();
+  }
 
   let caddyStderr = "";
   caddyProc.stderr?.on("data", (chunk) => {
