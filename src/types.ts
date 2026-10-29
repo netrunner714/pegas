@@ -62,6 +62,9 @@ export interface UpOptions {
   skipDnsCheck?: boolean;
   serverIp?: string;
   skipUp?: boolean;
+  command?: string[];
+  systemCaddy?: boolean;
+  caddyPath?: string;
 }
 
 export interface PegasContract {

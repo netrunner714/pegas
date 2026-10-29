@@ -15,6 +15,8 @@ export interface DevOptions {
   infra?: boolean;
   skipInfra?: boolean;
   noExit?: boolean;
+  caddyPath?: string;
+  systemCaddy?: boolean;
 }
 
 export interface DevPorts {
@@ -135,7 +137,10 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   const httpPort = await findAvailablePort(8080, [httpsPort]);
 
   // 4. Find or download native Caddy binary
-  const caddyPath = await findOrDownloadCaddy();
+  const caddyPath = await findOrDownloadCaddy({
+    customPath: options.caddyPath,
+    useSystemCaddy: options.systemCaddy,
+  });
 
   // 5. Generate .pegas/Caddyfile.dev
   const devCaddyDir = path.join(projectRoot, ".pegas");

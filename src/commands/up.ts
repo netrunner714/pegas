@@ -74,6 +74,8 @@ export async function handleUp(
       cwd: projectRoot,
       command: options.command,
       noExit: options.noExit,
+      caddyPath: options.caddyPath,
+      systemCaddy: options.systemCaddy,
     });
   } else {
     // Production, Stage, or any custom environment contour (qa, demo, etc.)

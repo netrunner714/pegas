@@ -183,7 +183,30 @@ describe("caddy binary resolution", () => {
     }
   });
 
-  it("rejects outdated system Caddy from PATH and warns user", async () => {
+  it("uses system Caddy when explicitly requested with useSystemCaddy", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-caddy-sys-opt-"));
+    const goodBinary = path.join(tmpDir, "caddy");
+    await fs.writeFile(goodBinary, "#!/bin/sh\necho 'v2.9.1'", "utf-8");
+    await fs.chmod(goodBinary, 0o755);
+
+    const origExecSync = child_process.execSync;
+    try {
+      child_process.execSync = ((cmd: string, opts?: any) => {
+        if (cmd.startsWith("which ") || cmd.startsWith("where ")) {
+          return Buffer.from(goodBinary + "\n");
+        }
+        return origExecSync(cmd, opts);
+      }) as any;
+
+      const found = await findOrDownloadCaddy({ useSystemCaddy: true, silent: true });
+      expect(found).toBe(goodBinary);
+    } finally {
+      child_process.execSync = origExecSync;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects outdated system Caddy when useSystemCaddy is requested", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-caddy-sys-old-"));
     const sysDir = path.join(tmpDir, "system-bin");
     await fs.mkdir(sysDir, { recursive: true });
@@ -192,19 +215,7 @@ describe("caddy binary resolution", () => {
     await fs.chmod(oldBinary, 0o755);
 
     const origExecSync = child_process.execSync;
-    const origAccess = fs.access;
-    const warnings: string[] = [];
-    const origWarn = console.warn;
-    console.warn = (...args) => warnings.push(args.join(" "));
-
     try {
-      fs.access = (async (p: any, mode: any) => {
-        if (String(p).includes(".pegas") || String(p).includes(".cache")) {
-          throw new Error("ENOENT");
-        }
-        return origAccess(p, mode);
-      }) as any;
-
       child_process.execSync = ((cmd: string, opts?: any) => {
         if (cmd.startsWith("which ") || cmd.startsWith("where ")) {
           return Buffer.from(oldBinary + "\n");
@@ -212,8 +223,49 @@ describe("caddy binary resolution", () => {
         return origExecSync(cmd, opts);
       }) as any;
 
-      // findOrDownloadCaddy should reject oldBinary, warn, and then attempt download
-      // which we intercept with dummy fetch
+      expect(
+        findOrDownloadCaddy({
+          useSystemCaddy: true,
+          silent: true,
+        })
+      ).rejects.toThrow("older than v2.8.0 or incompatible");
+    } finally {
+      child_process.execSync = origExecSync;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("by default ignores system PATH and relies on managed cache or downloads", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-caddy-sys-ignore-"));
+    const sysDir = path.join(tmpDir, "system-bin");
+    await fs.mkdir(sysDir, { recursive: true });
+    const sysBinary = path.join(sysDir, "caddy");
+    await fs.writeFile(sysBinary, "#!/bin/sh\necho 'v2.9.1'", "utf-8");
+    await fs.chmod(sysBinary, 0o755);
+
+    const origExecSync = child_process.execSync;
+    const origAccess = fs.access;
+
+    try {
+      // Mock that ~/.pegas/bin and .cache/bin don't exist
+      fs.access = (async (p: any, mode: any) => {
+        if (String(p).includes(".pegas") || String(p).includes(".cache")) {
+          throw new Error("ENOENT");
+        }
+        return origAccess(p, mode);
+      }) as any;
+
+      let whichCalled = false;
+      child_process.execSync = ((cmd: string, opts?: any) => {
+        if (cmd.startsWith("which ") || cmd.startsWith("where ")) {
+          whichCalled = true;
+          return Buffer.from(sysBinary + "\n");
+        }
+        return origExecSync(cmd, opts);
+      }) as any;
+
+      // By default without useSystemCaddy, it should NOT call which caddy
+      // and proceed directly to download
       let fetchCalled = false;
       const origFetch = globalThis.fetch;
       globalThis.fetch = async () => {
@@ -226,7 +278,7 @@ describe("caddy binary resolution", () => {
         await findOrDownloadCaddy({
           cacheDir: downloadDir,
           skipCache: false,
-          silent: false,
+          silent: true,
         });
       } catch (err: any) {
         expect(err.message).toBe("Simulated download stop");
@@ -234,12 +286,11 @@ describe("caddy binary resolution", () => {
         globalThis.fetch = origFetch;
       }
 
+      expect(whichCalled).toBe(false);
       expect(fetchCalled).toBe(true);
-      expect(warnings.some((w) => w.includes("is older than v2.8.0"))).toBe(true);
     } finally {
       fs.access = origAccess;
       child_process.execSync = origExecSync;
-      console.warn = origWarn;
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });

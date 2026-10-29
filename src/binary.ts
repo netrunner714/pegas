@@ -8,6 +8,8 @@ export interface FindCaddyOptions {
   cacheDir?: string;
   skipCache?: boolean;
   skipMirror?: boolean;
+  customPath?: string;
+  useSystemCaddy?: boolean;
 }
 
 export function getCaddyReleaseInfo(
@@ -75,15 +77,49 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   const isWin = process.platform === "win32";
   const binaryName = isWin ? "caddy.exe" : "caddy";
 
-  // 1. Check custom environment variable
-  if (!options.skipCache && process.env.CADDY_PATH) {
-    try {
-      await fs.access(process.env.CADDY_PATH);
-      return process.env.CADDY_PATH;
-    } catch {}
+  // 1. Explicit custom path via option or CADDY_PATH
+  const explicitPath = options.customPath || (!options.skipCache ? process.env.CADDY_PATH : undefined);
+  if (explicitPath) {
+    if (explicitPath.toLowerCase() === "system") {
+      options.useSystemCaddy = true;
+    } else {
+      try {
+        await fs.access(explicitPath);
+        if (!checkCaddyVersion(explicitPath) && !options.silent) {
+          console.warn(`⚠️  Provided Caddy at ${explicitPath} is older than v2.8.0 or incompatible.`);
+        }
+        return explicitPath;
+      } catch {
+        if (!options.silent) {
+          console.warn(`⚠️  Provided Caddy binary not found at ${explicitPath}`);
+        }
+      }
+    }
   }
 
-  // 2. Check explicitly provided cacheDir
+  // 2. Explicit system Caddy opt-in (--system-caddy or CADDY_PATH=system)
+  if (options.useSystemCaddy) {
+    try {
+      const whichCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
+      const sysPath = child_process
+        .execSync(whichCmd, { stdio: ["ignore", "pipe", "ignore"] })
+        .toString()
+        .trim()
+        .split("\n")[0]
+        .trim();
+      if (sysPath) {
+        if (checkCaddyVersion(sysPath)) {
+          return sysPath;
+        }
+        throw new Error(`System Caddy at ${sysPath} is older than v2.8.0 or incompatible.`);
+      }
+      throw new Error(`Caddy binary not found in system PATH.`);
+    } catch (err: any) {
+      throw new Error(`Failed to use system Caddy: ${err?.message || "not found in PATH"}`);
+    }
+  }
+
+  // 3. Check explicitly provided cacheDir
   if (options.cacheDir) {
     const customBinary = path.join(options.cacheDir, binaryName);
     try {
@@ -96,7 +132,7 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
   const homeCachedBinary = path.join(homeCacheDir, binaryName);
 
   if (!options.skipCache) {
-    // 3. Check local repository .cache/bin/ in current or parent directories
+    // 4. Check local repository .cache/bin/ in current or parent directories
     let searchDir = process.cwd();
     for (let i = 0; i < 4; i++) {
       const candidate = path.join(searchDir, ".cache", "bin", binaryName);
@@ -111,42 +147,21 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
       searchDir = parent;
     }
 
-    // 4. Check cached binary in ~/.pegas/bin/
+    // 5. Check managed cached binary in ~/.pegas/bin/
     try {
       await fs.access(homeCachedBinary);
       if (checkCaddyVersion(homeCachedBinary)) {
         return homeCachedBinary;
       }
     } catch {}
-
-    // 5. Check system PATH with version validation
-    try {
-      const whichCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
-      const sysPath = child_process
-        .execSync(whichCmd, { stdio: ["ignore", "pipe", "ignore"] })
-        .toString()
-        .trim()
-        .split("\n")[0]
-        .trim();
-      if (sysPath) {
-        if (checkCaddyVersion(sysPath)) {
-          return sysPath;
-        }
-        if (!options.silent) {
-          console.warn(
-            `⚠️  System Caddy at ${sysPath} is older than v2.8.0 or incompatible. Using Pegas managed Caddy instead.`
-          );
-        }
-      }
-    } catch {}
   }
 
-  // 6. Download official Caddy release
+  // 6. Download official Caddy release into ~/.pegas/bin/
   const primaryCacheDir = options.cacheDir || homeCacheDir;
   const targetBinary = path.join(primaryCacheDir, binaryName);
 
   if (!options.silent) {
-    console.log("⬇️  Caddy binary not found in PATH or cache. Downloading official release...");
+    console.log("⬇️  Managed Caddy not found in cache. Downloading official release...");
   }
   await fs.mkdir(primaryCacheDir, { recursive: true });
 

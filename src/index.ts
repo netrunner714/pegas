@@ -195,6 +195,8 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       "skip-dns-check": { type: "boolean", default: false },
       infra: { type: "boolean" },
       "no-infra": { type: "boolean" },
+      "system-caddy": { type: "boolean" },
+      "caddy-path": { type: "string" },
       "gateway-dir": { type: "string" },
       cwd: { type: "string" },
       write: { type: "boolean", default: false },
@@ -221,7 +223,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
     case "up": {
       const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : [];
-      await dispatch.handleUp({
+      const upOpts: Record<string, any> = {
         cwd: values.cwd as string | undefined,
         env: values.env as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
@@ -232,7 +234,10 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         skipDnsCheck: values["skip-dns-check"] as boolean | undefined,
         json: values.json as boolean | undefined,
         command: userCmd,
-      });
+      };
+      if (values["system-caddy"]) upOpts.systemCaddy = true;
+      if (values["caddy-path"]) upOpts.caddyPath = values["caddy-path"] as string;
+      await dispatch.handleUp(upOpts);
       break;
     }
 
@@ -244,11 +249,14 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       } else if (values.infra) {
         infra = true;
       }
-      await dispatch.handleDev({
+      const devOpts: Record<string, any> = {
         cwd: values.cwd as string | undefined,
         command: userCmd,
         infra,
-      });
+      };
+      if (values["system-caddy"]) devOpts.systemCaddy = true;
+      if (values["caddy-path"]) devOpts.caddyPath = values["caddy-path"] as string;
+      await dispatch.handleDev(devOpts);
       break;
     }
 
