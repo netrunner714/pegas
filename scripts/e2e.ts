@@ -225,15 +225,21 @@ async function runUnifiedE2E() {
     if (contract.projectName !== "surgery-demo-app") {
       throw new Error(`Contract projectName mismatch: ${contract.projectName}`);
     }
-    if (contract.services?.web?.upstream !== "web:80") {
-      throw new Error(`Expected upstream 'web:80', got: ${contract.services?.web?.upstream}`);
+    const webPort = contract.services?.web?.port ?? (contract.services?.web?.upstream ? parseInt(contract.services.web.upstream.split(":")[1]) : undefined);
+    if (webPort !== 80) {
+      throw new Error(`Expected port 80, got: ${webPort}`);
     }
-    logSuccess("Contract verified: projectName='surgery-demo-app', upstream auto-detected: 'web:80'");
+    logSuccess("Contract verified: projectName='surgery-demo-app', port auto-detected: 80");
 
-    // Verify compose surgery
-    const patchedCompose = await fs.readFile(path.join(surgeryDir, "docker-compose.yml"), "utf-8");
+    // Verify compose surgery (.pegas/docker-compose.yml created, root untouched)
+    const rootCompose = await fs.readFile(path.join(surgeryDir, "docker-compose.yml"), "utf-8");
+    if (!rootCompose.includes('"8080:80"')) {
+      throw new Error("Root docker-compose.yml was improperly mutated");
+    }
+
+    const patchedCompose = await fs.readFile(path.join(surgeryDir, ".pegas", "docker-compose.yml"), "utf-8");
     if (patchedCompose.includes('"8080:80"')) {
-      throw new Error("Public web port '8080:80' was not stripped");
+      throw new Error("Public web port '8080:80' was not stripped in .pegas/docker-compose.yml");
     }
     if (!patchedCompose.includes("expose:")) {
       throw new Error("Expose directive was not added to web service");
@@ -254,7 +260,7 @@ async function runUnifiedE2E() {
     if (updatedPkg.scripts?.dev !== "pegas dev -- node -e 'console.log(\"OK\")'") {
       throw new Error(`package.json scripts.dev mismatch: ${updatedPkg.scripts?.dev}`);
     }
-    if (updatedPkg.scripts?.deploy !== "pegas deploy") {
+    if (updatedPkg.scripts?.deploy !== "pegas deploy production") {
       throw new Error(`package.json scripts.deploy mismatch: ${updatedPkg.scripts?.deploy}`);
     }
     const gitignoreContent = await fs.readFile(path.join(surgeryDir, ".gitignore"), "utf-8");
@@ -357,7 +363,7 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8081:80"\n    environment:\n      - WHOAMI_NAME=project-alpha\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pAlphaDir });
-    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "--gateway-dir", gatewayDir], {
+    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pAlphaDir,
     });
     if (deployAlphaRes.code !== 0) {
@@ -375,7 +381,7 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8082:80"\n    environment:\n      - WHOAMI_NAME=project-beta\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pBetaDir });
-    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "--gateway-dir", gatewayDir], {
+    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pBetaDir,
     });
     if (deployBetaRes.code !== 0) {
@@ -471,7 +477,7 @@ networks:
     };
     await fs.writeFile(path.join(pMultiDir, "pegas.json"), JSON.stringify(multiContract, null, 2));
 
-    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "--gateway-dir", gatewayDir], {
+    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pMultiDir,
     });
     if (deployMultiRes.code !== 0) {
@@ -522,7 +528,7 @@ networks:
 
     const hijackDeployRes = await execAsync(
       "node",
-      [BIN_PATH, "deploy", "--gateway-dir", gatewayDir, "--skip-up"],
+      [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir],
       { cwd: pHijackDir }
     );
 
@@ -574,7 +580,7 @@ networks:
 
     const brokenDeployRes = await execAsync(
       "node",
-      [BIN_PATH, "deploy", "--gateway-dir", gatewayDir, "--readiness-timeout-ms", "3000"],
+      [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir],
       { cwd: pBrokenDir }
     );
 
@@ -600,8 +606,8 @@ networks:
     const manualLegacyContent = `manual-legacy.test {\n    respond "MANUAL_LEGACY_PAYLOAD_OK" 200\n}\n`;
     await fs.writeFile(manualLegacyPath, manualLegacyContent, "utf-8");
 
-    // Reload gateway
-    await execAsync("node", [BIN_PATH, "reload", "--gateway-dir", gatewayDir]);
+    // Reload gateway Caddy
+    await execAsync("docker", ["compose", "exec", "-T", "caddy", "caddy", "reload", "--config", "/etc/caddy/Caddyfile"], { cwd: gatewayDir });
 
     await new Promise((r) => setTimeout(r, 500));
 
@@ -612,27 +618,28 @@ networks:
     logSuccess("Manual unmanaged route 'manual-legacy.caddy' coexists and serves traffic cleanly");
 
     // =========================================================================
-    // Phase 10: Global Dashboard (`pegas ls`) & Clean Teardown (`pegas down`)
+    // Phase 10: Global Dashboard (`pegas status`) & Clean Teardown (`pegas down`)
     // =========================================================================
-    logPhase(10, "Global Dashboard (`pegas ls`) and Clean Teardown (`pegas down`)");
+    logPhase(10, "Global Dashboard (`pegas status`) and Clean Teardown (`pegas down`)");
 
-    const lsJsonRes = await execAsync("node", [BIN_PATH, "ls", "--gateway-dir", gatewayDir, "--json"], {
+    const statusJsonRes = await execAsync("node", [BIN_PATH, "status", "--gateway-dir", gatewayDir, "--json"], {
       cwd: mainSandboxDir,
     });
-    if (lsJsonRes.code !== 0) {
-      throw new Error(`'pegas ls --json' failed: ${lsJsonRes.stderr}`);
+    if (statusJsonRes.code !== 0) {
+      throw new Error(`'pegas status --json' failed: ${statusJsonRes.stderr}`);
     }
-    const dashboardItems = JSON.parse(lsJsonRes.stdout);
+    const statusData = JSON.parse(statusJsonRes.stdout);
+    const dashboardItems = statusData.projects || (Array.isArray(statusData) ? statusData : []);
     if (!Array.isArray(dashboardItems) || dashboardItems.length < 3) {
-      throw new Error(`Expected at least 3 active projects in dashboard, got: ${lsJsonRes.stdout}`);
+      throw new Error(`Expected at least 3 active projects in dashboard, got: ${statusJsonRes.stdout}`);
     }
     logSuccess(`Dashboard reported ${dashboardItems.length} active projects with real-time health`);
 
     // Render terminal Unicode table
-    const lsTableRes = await execAsync("node", [BIN_PATH, "ls", "--gateway-dir", gatewayDir], {
+    const statusTableRes = await execAsync("node", [BIN_PATH, "status", "--gateway-dir", gatewayDir], {
       cwd: mainSandboxDir,
     });
-    console.log(`\n${lsTableRes.stdout}\n`);
+    console.log(`\n${statusTableRes.stdout}\n`);
     logSuccess("Visual Unicode dashboard table verified");
 
     // Teardown projects

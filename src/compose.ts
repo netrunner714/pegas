@@ -118,9 +118,11 @@ export function isProxyService(serviceName: string, serviceLines: string[]): boo
   for (const line of serviceLines) {
     const match = line.match(/^\s*image:\s*([^\s]+)/);
     if (match) {
-      const img = match[1].toLowerCase();
+      const fullImg = match[1].toLowerCase().replace(/['"]/g, "");
+      const baseImg = fullImg.split("/").pop()?.split(":")[0] || "";
+      if (PROXY_SERVICE_NAMES.has(baseImg)) return true;
       for (const name of PROXY_SERVICE_NAMES) {
-        if (img.includes(name)) return true;
+        if (baseImg === name || baseImg.startsWith(`${name}-`) || baseImg.endsWith(`-${name}`)) return true;
       }
     }
   }
