@@ -179,7 +179,7 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   // Collect configured dev domains for display
   const devUrls: string[] = [];
   for (const s of Object.values(contract.services || {})) {
-    for (const d of s.domains?.dev || []) {
+    for (const d of getEnvironmentDomains(s, "development")) {
       devUrls.push(`https://${d}:${httpsPort}`);
     }
   }
@@ -258,8 +258,10 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
       }
     }
 
+    const localBinPath = path.join(projectRoot, "node_modules", ".bin");
     const devEnv = {
       ...process.env,
+      PATH: `${localBinPath}:${process.env.PATH || ""}`,
       NODE_ENV: "development",
       PEGAS_ENV: "development",
       ...(primaryDevDomain ? { APP_DOMAIN: primaryDevDomain } : {}),
