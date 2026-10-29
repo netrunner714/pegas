@@ -1,8 +1,9 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import net from "node:net";
+import * as child_process from "node:child_process";
 import { generateDevCaddyfile, handleDev } from "./dev.js";
 import { findOrDownloadCaddy } from "../binary.js";
 import { findAvailablePort, isPortAvailable } from "../ports.js";
@@ -293,11 +294,10 @@ services:
     const hint = logs.find((l) => l.includes("💡 Tip: Detected infra services"));
     expect(hint).toBeDefined();
     expect(hint).toContain("db, redis");
-    expect(hint).toContain("--infra");
     expect(hint).toContain('"bootInfra": true');
   });
 
-  it("prioritizes CLI options over pegas.json bootInfra setting", async () => {
+  it("boots infra services when bootInfra is true in contract", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dev-test-"));
     const contract: PegasContract = {
       bootInfra: true,
@@ -315,6 +315,12 @@ services:
       "utf-8"
     );
 
+    const executedCalls: { cmd: string; args: string[] }[] = [];
+    const spy = spyOn(child_process, "execFileSync").mockImplementation(((cmd: string, args: string[]) => {
+      executedCalls.push({ cmd, args });
+      return Buffer.from("");
+    }) as any);
+
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args) => {
@@ -322,22 +328,24 @@ services:
     };
 
     try {
-      // CLI --no-infra (infra: false) overrides bootInfra: true
       await handleDev({
         cwd: tmpProj,
-        infra: false,
         noExit: true,
         command: ["node", "-e", "process.exit(0)"],
       });
     } finally {
+      spy.mockRestore();
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
     }
 
     const booted = logs.find((l) => l.includes("Booting project infrastructure with Docker Compose"));
-    expect(booted).toBeUndefined();
-
-    const hint = logs.find((l) => l.includes("💡 Tip: Detected infra services"));
-    expect(hint).toBeDefined();
+    expect(booted).toBeDefined();
+    expect(executedCalls.length).toBe(2);
+    expect(executedCalls[0].cmd).toBe("docker");
+    expect(executedCalls[0].args).toContain("up");
+    expect(executedCalls[0].args).toContain("db");
+    expect(executedCalls[1].args).toContain("stop");
+    expect(executedCalls[1].args).toContain("db");
   });
 });

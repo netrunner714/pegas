@@ -63,6 +63,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         dryRun: true,
         skipUp: true,
@@ -85,7 +86,7 @@ describe("pegas deploy", () => {
           upstream: "app:3000",
           domains: {
             dev: ["app.localhost"],
-            prod: ["yourdomain.com"], // placeholder!
+            prod: ["yourdomain.com", "mysite.ru"], // placeholder + valid
           },
         },
         app: {
@@ -103,6 +104,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         dryRun: true,
         skipUp: true,
@@ -126,17 +128,17 @@ describe("pegas deploy", () => {
 
     try {
       // 1. Missing pegas.json (JSON mode)
-      await handleDeploy({ cwd: tmpProj, noExit: true, json: true });
+      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: true });
 
       // 2. Missing pegas.json (Text mode)
-      await handleDeploy({ cwd: tmpProj, noExit: true, json: false });
+      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: false });
 
       // 3. Corrupted pegas.json (JSON mode)
       await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), "{ invalid-json", "utf-8");
-      await handleDeploy({ cwd: tmpProj, noExit: true, json: true });
+      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: true });
 
       // 4. Corrupted pegas.json (Text mode)
-      await handleDeploy({ cwd: tmpProj, noExit: true, json: false });
+      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: false });
     } finally {
       console.log = origLog;
       console.error = origError;
@@ -187,6 +189,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         noExit: true,
         skipUp: true,
@@ -243,6 +246,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         dryRun: true,
         noExit: true,
@@ -286,6 +290,7 @@ describe("pegas deploy", () => {
       // 1. Live deploy in JSON mode
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         skipDnsCheck: true,
         skipUp: true,
@@ -301,6 +306,7 @@ describe("pegas deploy", () => {
       // 2. Live deploy in Text mode
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         skipDnsCheck: true,
         skipUp: true,
@@ -349,6 +355,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         skipDnsCheck: true,
         skipUp: true,
@@ -368,16 +375,10 @@ describe("pegas deploy", () => {
     }
   });
 
-  it("removes old project route file when contract has no production domains", async () => {
+  it("rejects deployment when requested environment has no domains configured", async () => {
     mockDeployReloadOk = true;
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-del-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-del-gw-"));
-
-    await fs.mkdir(path.join(tmpGateway, "conf.d"), { recursive: true });
-    await fs.writeFile(path.join(tmpGateway, "Caddyfile"), "import conf.d/*.caddy\n", "utf-8");
-
-    const routeFile = path.join(tmpGateway, "conf.d", "dev-only-app.caddy");
-    await fs.writeFile(routeFile, "old-prod-routes", "utf-8");
 
     // Contract has only dev domain, no prod
     const contract = {
@@ -391,19 +392,21 @@ describe("pegas deploy", () => {
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
 
+    const logs: string[] = [];
     const origLog = console.log;
-    console.log = () => {};
+    console.log = (...args) => logs.push(args.join(" "));
     try {
       await handleDeploy({
         cwd: tmpProj,
         gatewayDir: tmpGateway,
+        env: "stage",
         skipUp: true,
         noExit: true,
         json: true,
       });
 
-      const exists = await fs.access(routeFile).then(() => true).catch(() => false);
-      expect(exists).toBe(false);
+      const errLog = logs.find((l) => l.includes("has no domains defined"));
+      expect(errLog).toBeDefined();
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
@@ -503,6 +506,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
+        env: "production",
         gatewayDir: tmpGateway,
         serverIp: "192.0.2.1", // mismatch!
         strictDns: true,
@@ -518,5 +522,19 @@ describe("pegas deploy", () => {
 
     const strictErr = errors.find((e) => e.includes("Strict DNS check failed"));
     expect(strictErr).toBeDefined();
+  });
+
+  it("fails when no environment is provided", async () => {
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (...args) => errors.push(args.join(" "));
+
+    try {
+      await handleDeploy({ noExit: true });
+    } finally {
+      console.error = origError;
+    }
+
+    expect(errors.some((e) => e.includes("Environment contour is required for deploy"))).toBe(true);
   });
 });

@@ -247,15 +247,15 @@ describe("main CLI command routing", () => {
     console.log = (...args) => logs.push(args.join(" "));
 
     try {
-      await main(["add", "--help"]);
+      await main(["dev", "--help"]);
       await main(["help", "init"]);
       await main(["update", "-h"]);
     } finally {
       console.log = origLog;
     }
 
-    expect(logs[0]).toContain("pegas add");
-    expect(logs[0]).toContain("--upstream");
+    expect(logs[0]).toContain("pegas dev");
+    expect(logs[0]).toContain("--cwd");
     expect(logs[1]).toContain("pegas init");
     expect(logs[1]).toContain("--force");
     expect(logs[2]).toContain("pegas update");
@@ -329,7 +329,6 @@ describe("main CLI command routing", () => {
       [
         "update",
         "--latest",
-        "--dry-run",
         "--json",
       ],
       { dispatchers }
@@ -337,7 +336,6 @@ describe("main CLI command routing", () => {
 
     expect(calls.update).toEqual({
       latest: true,
-      dryRun: true,
       json: true,
     });
   });
@@ -350,18 +348,18 @@ describe("main CLI command routing", () => {
       },
     };
 
-    // With double-dash and infra flag
-    await main(["dev", "--infra", "--", "next", "dev", "--port", "3000"], { dispatchers });
+    // With double-dash
+    await main(["dev", "--", "next", "dev", "--port", "3000"], { dispatchers });
     expect(calls.dev).toEqual({
       command: ["next", "dev", "--port", "3000"],
-      infra: true,
+      cwd: undefined,
     });
 
-    // Without double-dash and no-infra flag
-    await main(["dev", "--no-infra", "vite"], { dispatchers });
+    // Without double-dash
+    await main(["dev", "vite"], { dispatchers });
     expect(calls.dev).toEqual({
       command: ["vite"],
-      infra: false,
+      cwd: undefined,
     });
   });
 
@@ -376,13 +374,9 @@ describe("main CLI command routing", () => {
     await main(
       [
         "deploy",
+        "production",
         "--gateway-dir",
         "/var/caddy",
-        "--dry-run",
-        "--skip-up",
-        "--skip-readiness",
-        "--strict-dns",
-        "--skip-dns-check",
         "--json",
       ],
       { dispatchers }
@@ -390,37 +384,13 @@ describe("main CLI command routing", () => {
 
     expect(calls.deploy).toEqual({
       env: "production",
+      cwd: undefined,
       gatewayDir: "/var/caddy",
-      dryRun: true,
-      skipUp: true,
-      skipReadiness: true,
-      strictDns: true,
-      skipDnsCheck: true,
       json: true,
     });
-  });
 
-  it("dispatches 'up' command with environment and options", async () => {
-    const calls: Record<string, any> = {};
-    const dispatchers: MainDispatchers = {
-      handleUp: async (opts) => {
-        calls.up = opts;
-      },
-    };
-
-    await main(["up", "--env", "stage", "--dry-run", "--json"], { dispatchers });
-
-    expect(calls.up).toEqual({
-      env: "stage",
-      gatewayDir: undefined,
-      dryRun: true,
-      skipUp: false,
-      skipReadiness: false,
-      strictDns: false,
-      skipDnsCheck: false,
-      json: true,
-      command: [],
-    });
+    await main(["deploy", "stage", "--json"], { dispatchers });
+    expect(calls.deploy.env).toBe("stage");
   });
 
   it("dispatches 'down' command with options", async () => {
@@ -435,111 +405,6 @@ describe("main CLI command routing", () => {
 
     expect(calls.down).toEqual({
       gatewayDir: "/srv/gw",
-      json: true,
-    });
-  });
-
-  it("dispatches 'add' command with domain and options", async () => {
-    const calls: Record<string, any> = {};
-    const dispatchers: MainDispatchers = {
-      handleAdd: async (opts) => {
-        calls.add = opts;
-      },
-    };
-
-    await main(
-      [
-        "add",
-        "app.example.com",
-        "-u",
-        "web:3000",
-        "--spa",
-        "--api-upstream",
-        "api:8000",
-        "--api-prefix",
-        "/api/*",
-        "--no-www",
-        "--force",
-        "--dry-run",
-        "--gateway-dir",
-        "/opt/pegas",
-        "--json",
-      ],
-      { dispatchers }
-    );
-
-    expect(calls.add).toEqual({
-      domain: "app.example.com",
-      upstream: "web:3000",
-      spa: true,
-      apiUpstream: "api:8000",
-      apiPrefix: "/api/*",
-      noWww: true,
-      force: true,
-      dryRun: true,
-      gatewayDir: "/opt/pegas",
-      json: true,
-    });
-  });
-
-  it("dispatches 'list' and 'ls' command aliases", async () => {
-    const calls: Record<string, any> = {};
-    const dispatchers: MainDispatchers = {
-      handleList: async (opts) => {
-        calls.list = opts;
-      },
-    };
-
-    await main(["list", "--gateway-dir", "/etc/caddy", "--json"], { dispatchers });
-    expect(calls.list).toEqual({
-      gatewayDir: "/etc/caddy",
-      json: true,
-    });
-
-    calls.list = null;
-    await main(["ls", "--gateway-dir", "/etc/caddy2", "--json"], { dispatchers });
-    expect(calls.list).toEqual({
-      gatewayDir: "/etc/caddy2",
-      json: true,
-    });
-  });
-
-  it("dispatches 'remove' and 'rm' command aliases", async () => {
-    const calls: Record<string, any> = {};
-    const dispatchers: MainDispatchers = {
-      handleRemove: async (opts) => {
-        calls.remove = opts;
-      },
-    };
-
-    await main(["remove", "demo.com", "--gateway-dir", "/var/pegas", "--json"], { dispatchers });
-    expect(calls.remove).toEqual({
-      domain: "demo.com",
-      gatewayDir: "/var/pegas",
-      json: true,
-    });
-
-    calls.remove = null;
-    await main(["rm", "demo.com", "--gateway-dir", "/var/pegas2", "--json"], { dispatchers });
-    expect(calls.remove).toEqual({
-      domain: "demo.com",
-      gatewayDir: "/var/pegas2",
-      json: true,
-    });
-  });
-
-  it("dispatches 'reload' command", async () => {
-    const calls: Record<string, any> = {};
-    const dispatchers: MainDispatchers = {
-      handleReload: async (opts) => {
-        calls.reload = opts;
-        return true;
-      },
-    };
-
-    await main(["reload", "--gateway-dir", "/var/pegas", "--json"], { dispatchers });
-    expect(calls.reload).toEqual({
-      gatewayDir: "/var/pegas",
       json: true,
     });
   });

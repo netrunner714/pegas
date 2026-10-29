@@ -1,4 +1,4 @@
-import { AddOptions } from "./types.js";
+import { RouteSnippetOptions } from "./types.js";
 
 function isSubdomainOrIp(domain: string): boolean {
   // If IP address
@@ -14,7 +14,7 @@ function isSubdomainOrIp(domain: string): boolean {
   return parts.length > 2;
 }
 
-export function generateCaddyfileSnippet(options: AddOptions): string {
+export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
   const {
     domain,
     upstream,

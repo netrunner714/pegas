@@ -19,11 +19,10 @@ describe("dynamic help text generation", () => {
   });
 
   it("generates command-specific help for subcommands", () => {
-    const addHelp = generateHelpText("add");
-    expect(addHelp).toContain("pegas add");
-    expect(addHelp).toContain("--upstream");
-    expect(addHelp).toContain("--spa");
-    expect(addHelp).toContain("GLOBAL OPTIONS:");
+    const devHelp = generateHelpText("dev");
+    expect(devHelp).toContain("pegas dev");
+    expect(devHelp).toContain("--cwd");
+    expect(devHelp).toContain("GLOBAL OPTIONS:");
 
     const initHelp = generateHelpText("init");
     expect(initHelp).toContain("pegas init");
@@ -35,12 +34,6 @@ describe("dynamic help text generation", () => {
     expect(updateHelp).toContain("--latest");
   });
 
-  it("generates command-specific help for aliases", () => {
-    const lsHelp = generateHelpText("ls");
-    expect(lsHelp).toContain("pegas list");
-    expect(lsHelp).toContain("aliases: ls");
-  });
-
   it("derives complete parseArgs options from definitions", () => {
     const opts = getParseArgsOptions();
 
@@ -48,8 +41,6 @@ describe("dynamic help text generation", () => {
     expect(opts["json"].type).toBe("boolean");
     expect(opts["force"].type).toBe("boolean");
     expect(opts["latest"].type).toBe("boolean");
-    expect(opts["upstream"].type).toBe("string");
-    expect(opts["upstream"].short).toBe("u");
     expect(opts["env"].type).toBe("string");
     expect(opts["env"].short).toBe("e");
   });

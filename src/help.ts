@@ -84,120 +84,19 @@ export const COMMANDS: CliCommandDef[] = [
         description: "Upgrade across major versions (e.g. 1.x -> 2.x)",
       },
       {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Print planned updates without writing to disk",
-      },
-      {
         name: "cwd",
         type: "string",
         placeholder: "<path>",
         description: "Target project directory",
       },
     ],
-    examples: ["$ pegas update", "$ pegas update --latest", "$ pegas update --dry-run"],
-  },
-  {
-    name: "up",
-    summary: "Bring up environment (development, stage, production)",
-    usage: "up -e <name> [options] [-- <command...>]",
-    options: [
-      {
-        name: "env",
-        type: "string",
-        short: "e",
-        placeholder: "<name>",
-        description: "Target environment contour (development, stage, production, etc.)",
-      },
-      {
-        name: "strict-dns",
-        type: "boolean",
-        default: false,
-        description: "Abort deployment if DNS records do not match server IP",
-      },
-      {
-        name: "skip-dns-check",
-        type: "boolean",
-        default: false,
-        description: "Bypass DNS pre-flight verification",
-      },
-      {
-        name: "skip-up",
-        type: "boolean",
-        default: false,
-        description: "Skip docker compose up step",
-      },
-      {
-        name: "skip-readiness",
-        type: "boolean",
-        default: false,
-        description: "Skip container health / readiness polling",
-      },
-      {
-        name: "system-caddy",
-        type: "boolean",
-        default: false,
-        description: "Use system Caddy binary from PATH",
-      },
-      {
-        name: "caddy-path",
-        type: "string",
-        placeholder: "<path>",
-        description: "Custom path or directory for Caddy binary",
-      },
-      {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Simulate execution without starting containers or updating Caddy",
-      },
-      {
-        name: "cwd",
-        type: "string",
-        placeholder: "<path>",
-        description: "Target project directory",
-      },
-    ],
-    examples: [
-      "$ pegas up --env development",
-      "$ pegas up --env production",
-      "$ pegas up --env stage --strict-dns",
-    ],
+    examples: ["$ pegas update", "$ pegas update --latest"],
   },
   {
     name: "dev",
-    summary: "Alias for 'pegas up --env development'",
+    summary: "Start local HTTPS proxy and development environment",
     usage: "dev [options] [-- <command...>]",
     options: [
-      {
-        name: "infra",
-        type: "boolean",
-        description: "Boot infrastructure services defined in docker-compose.yml",
-      },
-      {
-        name: "no-infra",
-        type: "boolean",
-        description: "Do not boot infrastructure services even if enabled in pegas.json",
-      },
-      {
-        name: "system-caddy",
-        type: "boolean",
-        default: false,
-        description: "Use system Caddy binary from PATH",
-      },
-      {
-        name: "caddy-path",
-        type: "string",
-        placeholder: "<path>",
-        description: "Custom path or directory for Caddy binary",
-      },
-      {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Simulate dev environment startup without launching Caddy",
-      },
       {
         name: "cwd",
         type: "string",
@@ -207,38 +106,20 @@ export const COMMANDS: CliCommandDef[] = [
     ],
     examples: [
       "$ pegas dev",
-      "$ pegas dev --infra",
       "$ pegas dev -- next dev",
     ],
   },
   {
     name: "deploy",
-    summary: "Alias for 'pegas up --env production'",
-    usage: "deploy [options]",
+    summary: "Deploy project containers and configure Caddy routes",
+    usage: "deploy <env> [options]",
     options: [
       {
-        name: "strict-dns",
-        type: "boolean",
-        default: false,
-        description: "Abort deployment if DNS records do not match server IP",
-      },
-      {
-        name: "skip-dns-check",
-        type: "boolean",
-        default: false,
-        description: "Bypass DNS pre-flight verification",
-      },
-      {
-        name: "skip-readiness",
-        type: "boolean",
-        default: false,
-        description: "Skip container health / readiness polling",
-      },
-      {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Simulate deployment without starting containers or updating Caddy",
+        name: "env",
+        type: "string",
+        short: "e",
+        placeholder: "<name>",
+        description: "Target environment contour (e.g. production, stage)",
       },
       {
         name: "cwd",
@@ -247,7 +128,10 @@ export const COMMANDS: CliCommandDef[] = [
         description: "Target project directory",
       },
     ],
-    examples: ["$ pegas deploy", "$ pegas deploy --strict-dns"],
+    examples: [
+      "$ pegas deploy production",
+      "$ pegas deploy stage",
+    ],
   },
   {
     name: "down",
@@ -264,86 +148,10 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas down"],
   },
   {
-    name: "add",
-    summary: "Route a domain to an internal container upstream",
-    usage: "add <domain> [options]",
-    options: [
-      {
-        name: "upstream",
-        type: "string",
-        short: "u",
-        placeholder: "<target>",
-        description: "Upstream container:port (e.g. web:3000)",
-      },
-      {
-        name: "spa",
-        type: "boolean",
-        default: false,
-        description: "SPA mode (separate frontend and API proxying)",
-      },
-      {
-        name: "api-upstream",
-        type: "string",
-        placeholder: "<tgt>",
-        description: "Upstream for API backend (e.g. api:8000)",
-      },
-      {
-        name: "api-prefix",
-        type: "string",
-        placeholder: "<pfx>",
-        default: "/api/*",
-        description: "API path prefix (default: /api/*)",
-      },
-      {
-        name: "no-www",
-        type: "boolean",
-        default: false,
-        description: "Do not auto-generate www redirect",
-      },
-      {
-        name: "force",
-        type: "boolean",
-        default: false,
-        description: "Overwrite existing route file",
-      },
-      {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Print generated config without applying",
-      },
-    ],
-    examples: [
-      "$ pegas add myapp.ru --upstream web:3000",
-      "$ pegas add api.myapp.ru --upstream api:8000",
-      "$ pegas add app.com --spa --api-upstream backend:5000",
-    ],
-  },
-  {
-    name: "list",
-    aliases: ["ls"],
-    summary: "List all active domain routes",
-    usage: "list [options]",
-    examples: ["$ pegas list", "$ pegas ls"],
-  },
-  {
-    name: "remove",
-    aliases: ["rm"],
-    summary: "Delete route and reload Caddy",
-    usage: "remove <domain> [options]",
-    examples: ["$ pegas remove myapp.ru", "$ pegas rm myapp.ru"],
-  },
-  {
-    name: "reload",
-    summary: "Validate and hot-reload Caddy configuration",
-    usage: "reload [options]",
-    examples: ["$ pegas reload"],
-  },
-  {
     name: "status",
-    summary: "Check Docker and gateway health",
+    summary: "Check gateway health and active project routes",
     usage: "status [options]",
-    examples: ["$ pegas status"],
+    examples: ["$ pegas status", "$ pegas status --json"],
   },
   {
     name: "llms",
@@ -463,14 +271,10 @@ export function generateHelpText(commandName?: string): string {
     if (cmd.aliases && cmd.aliases.length > 0) {
       label += `, ${cmd.aliases.join(", ")}`;
     }
-    if (cmd.name === "up") {
-      label += " --env <name>";
+    if (cmd.name === "deploy") {
+      label += " [env]";
     } else if (cmd.name === "dev") {
       label += " [-- <command>]";
-    } else if (cmd.name === "add") {
-      label += " <domain> [options]";
-    } else if (cmd.name === "remove") {
-      label += " <domain>";
     }
     cmdLabels.push(label);
   }
@@ -487,11 +291,9 @@ export function generateHelpText(commandName?: string): string {
   // Detailed command option sections
   const commandOptionSections: Array<{ name: string; options: CliOptionDef[] }> = [
     { name: "update", options: COMMANDS.find((c) => c.name === "update")?.options || [] },
-    { name: "up", options: COMMANDS.find((c) => c.name === "up")?.options || [] },
-    { name: "init", options: COMMANDS.find((c) => c.name === "init")?.options || [] },
-    { name: "add", options: COMMANDS.find((c) => c.name === "add")?.options || [] },
-    { name: "dev", options: COMMANDS.find((c) => c.name === "dev")?.options || [] },
     { name: "deploy", options: COMMANDS.find((c) => c.name === "deploy")?.options || [] },
+    { name: "init", options: COMMANDS.find((c) => c.name === "init")?.options || [] },
+    { name: "dev", options: COMMANDS.find((c) => c.name === "dev")?.options || [] },
   ];
 
   for (const sec of commandOptionSections) {
@@ -508,9 +310,9 @@ export function generateHelpText(commandName?: string): string {
 
   lines.push(`EXAMPLES:`);
   lines.push(`  $ pegas init`);
-  lines.push(`  $ pegas add myapp.ru --upstream web:3000`);
-  lines.push(`  $ pegas add api.myapp.ru --upstream api:8000`);
-  lines.push(`  $ pegas list`);
+  lines.push(`  $ pegas dev`);
+  lines.push(`  $ pegas deploy`);
+  lines.push(`  $ pegas status`);
   lines.push("");
 
   return lines.join("\n");

@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
-import { findProjectRoot, findGatewayDir, getProjectRouteFilePath } from "../gateway.js";
+import { findProjectRoot, findGatewayDir, getConfDir, reloadGateway } from "../gateway.js";
 import { CONTRACT_FILENAME } from "../contract.js";
 import { findPegasCompose } from "../compose.js";
-import { handleReload } from "./reload.js";
 
 export interface DownOptions {
   gatewayDir?: string;
@@ -18,29 +17,57 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
+  const contractPath = path.join(projectRoot, CONTRACT_FILENAME);
 
   let projectName = path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
   try {
-    const rawContract = await fs.readFile(path.join(projectRoot, CONTRACT_FILENAME), "utf-8");
+    const rawContract = await fs.readFile(contractPath, "utf-8");
     const contract = JSON.parse(rawContract);
     if (contract.projectName) {
       projectName = contract.projectName;
     }
-  } catch {}
+  } catch {
+    const composeFile = await findPegasCompose(projectRoot);
+    if (!composeFile) {
+      if (isJson) {
+        console.log(
+          JSON.stringify({
+            error: `Contract '${CONTRACT_FILENAME}' not found in '${projectRoot}'. Run this command inside a Pegas project.`,
+          })
+        );
+      } else {
+        console.error(`❌ Error: Contract '${CONTRACT_FILENAME}' not found in project root (${projectRoot}).`);
+        console.error(`   Run this command inside a Pegas project.`);
+      }
+      if (!options.noExit) {
+        process.exit(1);
+      }
+      return;
+    }
+  }
 
   const gatewayDir = await findGatewayDir(options.gatewayDir);
-  const routeFilePath = getProjectRouteFilePath(gatewayDir, projectName);
+  const confDir = getConfDir(gatewayDir);
+  const sanitizedProject = projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 
-  let fileRemoved = false;
+  const removedFiles: string[] = [];
   try {
-    await fs.unlink(routeFilePath);
-    fileRemoved = true;
-    if (!isJson) {
-      console.log(`\n🗑️  [1/2] Removed project route file: ${routeFilePath}`);
+    const files = await fs.readdir(confDir);
+    for (const f of files) {
+      if (f === `${sanitizedProject}.caddy` || (f.startsWith(`${sanitizedProject}-`) && f.endsWith(".caddy"))) {
+        const fullPath = path.join(confDir, f);
+        await fs.unlink(fullPath);
+        removedFiles.push(fullPath);
+      }
     }
-  } catch {
-    if (!isJson) {
-      console.log(`\nℹ️  [1/2] No route file found for project '${projectName}' at ${routeFilePath}`);
+  } catch {}
+
+  const fileRemoved = removedFiles.length > 0;
+  if (!isJson) {
+    if (fileRemoved) {
+      console.log(`\n🗑️  [1/2] Removed project route file(s):\n${removedFiles.map((f) => `   - ${f}`).join("\n")}`);
+    } else {
+      console.log(`\nℹ️  [1/2] No route file found for project '${projectName}' in ${confDir}`);
     }
   }
 
@@ -49,7 +76,7 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
     if (!isJson) {
       console.log("🔄 Reloading Caddy gateway...");
     }
-    await handleReload({
+    await reloadGateway({
       gatewayDir,
       json: options.json,
       silent: false,
@@ -95,7 +122,7 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
       JSON.stringify({
         status: "success",
         project: projectName,
-        routeFile: routeFilePath,
+        routeFiles: removedFiles,
         fileRemoved,
       })
     );

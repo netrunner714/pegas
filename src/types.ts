@@ -3,7 +3,7 @@ export interface GatewayContext {
   networkName: string;
 }
 
-export interface AddOptions {
+export interface RouteSnippetOptions {
   domain: string;
   upstream?: string;
   spa?: boolean;
@@ -18,6 +18,8 @@ export interface AddOptions {
   noExit?: boolean;
 }
 
+export type AddOptions = RouteSnippetOptions;
+
 export interface InitOptions {
   cwd?: string;
   gatewayDir?: string;
@@ -29,7 +31,6 @@ export interface InitOptions {
 
 export interface UpdateOptions {
   latest?: boolean;
-  dryRun?: boolean;
   json?: boolean;
   cwd?: string;
   noExit?: boolean;
@@ -81,11 +82,20 @@ export interface DevGatewayConfig {
   httpsPort?: number;
   skipInstallTrust?: boolean;
   admin?: boolean;
+  systemCaddy?: boolean;
+  caddyPath?: string;
+}
+
+export interface DeployConfig {
+  strictDns?: boolean;
+  skipDnsCheck?: boolean;
+  skipReadiness?: boolean;
 }
 
 export interface PegasContract {
   projectName?: string;
   bootInfra?: boolean;
+  deploy?: DeployConfig;
   devGateway?: DevGatewayConfig;
   services: Record<string, ServiceContract>;
 }

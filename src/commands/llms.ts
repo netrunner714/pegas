@@ -11,15 +11,14 @@ export const LLMS_TXT_CONTENT = `# pegas
 - Auto-provisions Let's Encrypt SSL on first request.
 
 ## CLI Usage for Agents
-- \`npx @netrunner714/pegas init\` — Initialize gateway and Docker network on a clean VPS, or initialize a project with \`pegas.json\`.
-- \`npx pegas dev -- <command>\` — Local HTTPS proxy for dev domains without Docker.
-- \`npx pegas deploy\` — Declaratively deploy project containers and route Caddy domains from \`pegas.json\`.
+- \`npx @netrunner714/pegas init\` — Initialize project with \`pegas.json\` contract and dev scripts.
+- \`npx pegas dev\` — Start local HTTPS proxy for \`*.localhost\` domains.
+- \`npx pegas dev -- <command>\` — Local HTTPS proxy + app command in one process (e.g. \`pegas dev -- next dev\`).
+- \`npx pegas deploy <environment>\` — Declaratively deploy containers and configure Caddy routes (e.g. \`pegas deploy production\`, \`pegas deploy stage\`).
 - \`npx pegas down\` — Tear down project containers and unbind Caddy routes.
-- \`npx pegas add <domain> --upstream <service:port>\` — Route a new domain to a container service.
-- \`npx pegas add <domain> --spa --upstream <client:80> --api-upstream <api:8000>\` — Route SPA + API.
-- \`npx pegas list --json\` — List all active routes.
-- \`npx pegas remove <domain>\` — Remove route and reload Caddy.
-- \`npx pegas status\` — Check Docker, network, and Caddy health.
+- \`npx pegas status [--json]\` — Unified dashboard for Caddy health, container states, and active project routes.
+- \`npx pegas update [--latest]\` — Update Pegas CLI in package.json.
+- \`npx pegas llms\` — Print machine-readable LLM context.
 
 ## Example Docker Compose Patch for Any App
 \`\`\`yaml

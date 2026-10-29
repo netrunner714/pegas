@@ -21,9 +21,9 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
 ## Команды
-* Локальная разработка: \`npm run dev\` (запускает \`pegas up --env development\`)
-* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas up --env production\`)
-* Деплой на стейджинг: \`pegas up --env stage\`
+* Локальная разработка: \`npm run dev\` (запускает \`pegas dev\`)
+* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas deploy production\`)
+* Деплой на стейджинг: \`pegas deploy stage\`
 * Остановка проекта: \`pegas down\`
 
 Документация: https://netrunner714.ru/pegas
@@ -74,7 +74,6 @@ export async function resolveTargetVersion(
 
 export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
-  const isDryRun = options.dryRun ?? false;
   const allowMajor = options.latest ?? false;
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
 
@@ -137,34 +136,6 @@ export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
     if (hasNewerMajor && availableMajor) {
       console.log(`\n💡 Доступна новая мажорная версия v${availableMajor}. Для перехода запустите: pegas update --latest\n`);
     }
-    return;
-  }
-
-  if (isDryRun) {
-    if (isJson) {
-      console.log(
-        JSON.stringify({
-          status: "dry-run",
-          current: currentVer,
-          target: targetVer,
-          latest: allowMajor,
-          packageManager: pm,
-          updateCommand: updateCmd,
-          hasNewerMajor,
-          availableMajor,
-        })
-      );
-      return;
-    }
-
-    console.log(`\n📋 [dry-run] Pegas update preview:\n`);
-    console.log(`  • Обновление @netrunner714/pegas: v${currentVer} -> v${targetVer}`);
-    console.log(`  • Пакетный менеджер: ${pm}`);
-    console.log(`  • Будет выполнена команда: ${updateCmd}`);
-    if (hasNewerMajor && availableMajor) {
-      console.log(`  • (Доступна также мажорная версия v${availableMajor}: используйте --latest)`);
-    }
-    console.log(`\nИзменения не были внесены. Запустите 'pegas update' для применения.\n`);
     return;
   }
 

@@ -4,14 +4,9 @@ import path from "node:path";
 import child_process from "node:child_process";
 import { parseArgs } from "node:util";
 import { handleInit } from "./commands/init.js";
-import { handleUp } from "./commands/up.js";
 import { handleDeploy } from "./commands/deploy.js";
 import { handleDown } from "./commands/down.js";
 import { handleDev } from "./commands/dev.js";
-import { handleAdd } from "./commands/add.js";
-import { handleList } from "./commands/list.js";
-import { handleRemove } from "./commands/remove.js";
-import { handleReload } from "./commands/reload.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
@@ -81,14 +76,9 @@ export function tryLocalDelegation(args = process.argv.slice(2)): void {
 
 export interface MainDispatchers {
   handleInit?: typeof handleInit;
-  handleUp?: typeof handleUp;
   handleDeploy?: typeof handleDeploy;
   handleDown?: typeof handleDown;
   handleDev?: typeof handleDev;
-  handleAdd?: typeof handleAdd;
-  handleList?: typeof handleList;
-  handleRemove?: typeof handleRemove;
-  handleReload?: typeof handleReload;
   handleStatus?: typeof handleStatus;
   handleLlms?: typeof handleLlms;
   handleUpdate?: typeof handleUpdate;
@@ -105,14 +95,9 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
   const dispatch = {
     handleInit: options.dispatchers?.handleInit || handleInit,
-    handleUp: options.dispatchers?.handleUp || handleUp,
     handleDeploy: options.dispatchers?.handleDeploy || handleDeploy,
     handleDown: options.dispatchers?.handleDown || handleDown,
     handleDev: options.dispatchers?.handleDev || handleDev,
-    handleAdd: options.dispatchers?.handleAdd || handleAdd,
-    handleList: options.dispatchers?.handleList || handleList,
-    handleRemove: options.dispatchers?.handleRemove || handleRemove,
-    handleReload: options.dispatchers?.handleReload || handleReload,
     handleStatus: options.dispatchers?.handleStatus || handleStatus,
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
@@ -163,61 +148,26 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       await dispatch.handleUpdate({
         cwd: values.cwd as string | undefined,
         latest: values.latest as boolean | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
       });
       break;
     }
 
-    case "up": {
-      const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : [];
-      const upOpts: Record<string, any> = {
-        cwd: values.cwd as string | undefined,
-        env: values.env as string | undefined,
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
-        skipUp: values["skip-up"] as boolean | undefined,
-        skipReadiness: values["skip-readiness"] as boolean | undefined,
-        strictDns: values["strict-dns"] as boolean | undefined,
-        skipDnsCheck: values["skip-dns-check"] as boolean | undefined,
-        json: values.json as boolean | undefined,
-        command: userCmd,
-      };
-      if (values["system-caddy"]) upOpts.systemCaddy = true;
-      if (values["caddy-path"]) upOpts.caddyPath = values["caddy-path"] as string;
-      await dispatch.handleUp(upOpts);
-      break;
-    }
-
     case "dev": {
       const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : positionals.slice(1);
-      let infra: boolean | undefined = undefined;
-      if (values["no-infra"]) {
-        infra = false;
-      } else if (values.infra) {
-        infra = true;
-      }
-      const devOpts: Record<string, any> = {
+      await dispatch.handleDev({
         cwd: values.cwd as string | undefined,
         command: userCmd,
-        infra,
-      };
-      if (values["system-caddy"]) devOpts.systemCaddy = true;
-      if (values["caddy-path"]) devOpts.caddyPath = values["caddy-path"] as string;
-      await dispatch.handleDev(devOpts);
+      });
       break;
     }
 
     case "deploy": {
+      const targetEnv = (positionals[1] as string | undefined) || (values.env as string | undefined);
       await dispatch.handleDeploy({
         cwd: values.cwd as string | undefined,
-        env: (values.env as string | undefined) || "production",
+        env: targetEnv,
         gatewayDir: values["gateway-dir"] as string | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
-        skipUp: values["skip-up"] as boolean | undefined,
-        skipReadiness: values["skip-readiness"] as boolean | undefined,
-        strictDns: values["strict-dns"] as boolean | undefined,
-        skipDnsCheck: values["skip-dns-check"] as boolean | undefined,
         json: values.json as boolean | undefined,
       });
       break;
@@ -226,51 +176,6 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "down": {
       await dispatch.handleDown({
         cwd: values.cwd as string | undefined,
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        json: values.json as boolean | undefined,
-      });
-      break;
-    }
-
-    case "add": {
-      const domain = positionals[1];
-      await dispatch.handleAdd({
-        domain: domain || "",
-        upstream: values.upstream as string | undefined,
-        spa: values.spa as boolean | undefined,
-        apiUpstream: values["api-upstream"] as string | undefined,
-        apiPrefix: values["api-prefix"] as string | undefined,
-        noWww: values["no-www"] as boolean | undefined,
-        force: values.force as boolean | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        json: values.json as boolean | undefined,
-      });
-      break;
-    }
-
-    case "list":
-    case "ls": {
-      await dispatch.handleList({
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        json: values.json as boolean | undefined,
-      });
-      break;
-    }
-
-    case "remove":
-    case "rm": {
-      const domain = positionals[1];
-      await dispatch.handleRemove({
-        domain: domain || "",
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        json: values.json as boolean | undefined,
-      });
-      break;
-    }
-
-    case "reload": {
-      await dispatch.handleReload({
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
       });

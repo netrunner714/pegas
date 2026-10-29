@@ -1,13 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
-import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream } from "../contract.js";
+import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments } from "../contract.js";
 import { findPegasCompose, setupProjectCompose } from "../compose.js";
 import { PegasContract } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
-import { handleReload } from "./reload.js";
-import { parseCaddyProjectFile } from "./list.js";
+import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 
 export interface DeployOptions {
@@ -160,7 +159,24 @@ export function resolveScopedUpstream(upstream: string, projectName: string): st
 export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
-  const env = options.env || "production";
+  const env = options.env;
+
+  if (!env) {
+    if (isJson) {
+      console.log(
+        JSON.stringify({
+          error: "Environment contour is required for deploy (e.g. 'production' or 'stage').",
+        })
+      );
+    } else {
+      console.error("❌ Error: Environment contour is required for deploy.");
+      console.error("   Usage: pegas deploy <environment> (e.g. 'pegas deploy production' or 'pegas deploy stage')");
+    }
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
+  }
 
   // 1. Find project root and contract
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
@@ -216,6 +232,10 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     await fs.mkdir(confDir, { recursive: true });
   }
 
+  const strictDns = contract.deploy?.strictDns ?? options.strictDns ?? false;
+  const skipDnsCheck = contract.deploy?.skipDnsCheck ?? options.skipDnsCheck ?? false;
+  const skipReadiness = contract.deploy?.skipReadiness ?? options.skipReadiness ?? false;
+
   // Anti-Hijacking Domain Collision Check
   const requestedDomains: string[] = [];
   for (const [, serviceConfig] of Object.entries(contract.services || {})) {
@@ -237,7 +257,32 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     }
   }
 
-  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName);
+  // Pre-flight check: ensure the requested environment exists and has at least one domain
+  if (requestedDomains.length === 0) {
+    const available = listAvailableEnvironments(contract);
+    const envHint =
+      available.length > 0
+        ? `Available environments: ${available.join(", ")}`
+        : `No environments with active domains defined in '${CONTRACT_FILENAME}'.`;
+
+    if (isJson) {
+      console.log(
+        JSON.stringify({
+          error: `Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`,
+          availableEnvironments: available,
+        })
+      );
+    } else {
+      console.error(`\n❌ Error: Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`);
+      console.error(`   ${envHint}`);
+    }
+    if (!options.noExit) {
+      process.exit(1);
+    }
+    return;
+  }
+
+  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, env);
   const currentProjectFileName = path.basename(projectRouteFile);
 
   try {
@@ -282,16 +327,16 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   }
 
   // 3. DNS Pre-flight Validation: Verify domains resolve to server IP before deployment
-  if (!options.skipDnsCheck && requestedDomains.length > 0) {
+  if (!skipDnsCheck && requestedDomains.length > 0) {
     const dnsResult = await validateDomains(requestedDomains, {
-      skipDnsCheck: options.skipDnsCheck,
-      strictDns: options.strictDns,
+      skipDnsCheck,
+      strictDns,
       serverIp: options.serverIp,
       json: isJson,
       noExit: options.noExit,
     });
 
-    if (!dnsResult.valid && options.strictDns) {
+    if (!dnsResult.valid && strictDns) {
       if (isJson) {
         console.log(
           JSON.stringify({
@@ -353,7 +398,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     }
 
     // Readiness Probe: verify containers are running and healthy before updating Caddy routes
-    if (!options.skipReadiness) {
+    if (!skipReadiness) {
       const servicesToCheck: string[] = [];
       for (const [sName, sCfg] of Object.entries(contract.services || {})) {
         const domains = getEnvironmentDomains(sCfg, env);
@@ -494,7 +539,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       console.log("\n🔄 [3/3] Validating and hot-reloading Caddy gateway...");
     }
 
-    const reloaded = await handleReload({
+    const reloaded = await reloadGateway({
       gatewayDir,
       json: options.json,
       silent: isJson,

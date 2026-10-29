@@ -183,15 +183,15 @@ describe("contract & package.json integration", () => {
     expect(actions.length).toBeGreaterThan(0);
 
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
-    expect(updated.scripts.dev).toBe("pegas up --env development -- next dev");
-    expect(updated.scripts.deploy).toBe("pegas up --env production");
+    expect(updated.scripts.dev).toBe("pegas dev -- next dev");
+    expect(updated.scripts.deploy).toBe("pegas deploy production");
     expect(updated.devDependencies["@netrunner714/pegas"]).toBe(`^${VERSION}`);
 
     // Test idempotence
     const secondActions = await updatePackageJson(tmpDir);
     expect(secondActions.length).toBe(0);
     const updatedAgain = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
-    expect(updatedAgain.scripts.dev).toBe("pegas up --env development -- next dev");
+    expect(updatedAgain.scripts.dev).toBe("pegas dev -- next dev");
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -201,8 +201,8 @@ describe("contract & package.json integration", () => {
     const initialPkg = {
       name: "my-app",
       scripts: {
-        dev: "pegas up --env development -- next dev",
-        deploy: "pegas up --env production",
+        dev: "pegas dev -- next dev",
+        deploy: "pegas deploy production",
       },
       devDependencies: {
         "@netrunner714/pegas": "^1.0.0",

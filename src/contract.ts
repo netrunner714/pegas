@@ -436,19 +436,20 @@ export async function updatePackageJson(
 
     // 1. Update dev script with pegas wrapper
     if (pkg.scripts.dev) {
-      if (!pkg.scripts.dev.includes("pegas up") && !pkg.scripts.dev.includes("pegas dev")) {
-        pkg.scripts.dev = `pegas up --env development -- ${pkg.scripts.dev}`;
-        actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas up --env development --'");
+      if (!pkg.scripts.dev.includes("pegas dev")) {
+        const cleanDev = pkg.scripts.dev.replace(/^pegas up --env development --\s*/, "");
+        pkg.scripts.dev = `pegas dev -- ${cleanDev}`;
+        actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas dev --'");
       }
     } else {
-      pkg.scripts.dev = "pegas up --env development";
-      actions.push("Добавлен скрипт 'dev': 'pegas up --env development' в package.json");
+      pkg.scripts.dev = "pegas dev";
+      actions.push("Добавлен скрипт 'dev': 'pegas dev' в package.json");
     }
 
     // 2. Add deploy script
-    if (!pkg.scripts.deploy || (!pkg.scripts.deploy.includes("pegas up") && !pkg.scripts.deploy.includes("pegas deploy"))) {
-      pkg.scripts.deploy = "pegas up --env production";
-      actions.push("Добавлен скрипт 'deploy': 'pegas up --env production' в package.json");
+    if (!pkg.scripts.deploy || !pkg.scripts.deploy.includes("pegas deploy")) {
+      pkg.scripts.deploy = "pegas deploy production";
+      actions.push("Добавлен скрипт 'deploy': 'pegas deploy production' в package.json");
     }
 
     // 3. Add pegas to devDependencies if missing (init does not bump version automatically)

@@ -13,6 +13,12 @@ describe("pegas down", () => {
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
     const projectName = path.basename(tmpProj).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 
+    await fs.writeFile(
+      path.join(tmpProj, CONTRACT_FILENAME),
+      JSON.stringify({ projectName, services: {} }),
+      "utf-8"
+    );
+
     // Pre-create project route file in gateway
     const routeFile = getProjectRouteFilePath(tmpGateway, projectName);
     await fs.mkdir(path.dirname(routeFile), { recursive: true });
@@ -49,6 +55,12 @@ describe("pegas down", () => {
   it("handles missing route file gracefully", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
+
+    await fs.writeFile(
+      path.join(tmpProj, CONTRACT_FILENAME),
+      JSON.stringify({ projectName: "test-app", services: {} }),
+      "utf-8"
+    );
 
     const origLog = console.log;
     const origError = console.error;
@@ -117,6 +129,12 @@ describe("pegas down", () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-down-text-missing-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-text-missing-"));
 
+    await fs.writeFile(
+      path.join(tmpProj, CONTRACT_FILENAME),
+      JSON.stringify({ projectName: "text-missing-app", services: {} }),
+      "utf-8"
+    );
+
     const logs: string[] = [];
     const origLog = console.log;
     const origError = console.error;
@@ -143,6 +161,12 @@ describe("pegas down", () => {
   it("executes docker compose down when skipComposeDown is not set", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-down-exec-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-exec-"));
+
+    await fs.writeFile(
+      path.join(tmpProj, CONTRACT_FILENAME),
+      JSON.stringify({ projectName: "exec-app", services: {} }),
+      "utf-8"
+    );
 
     let executedCommand = "";
     const origExecSync = child_process.execSync;
@@ -179,6 +203,12 @@ describe("pegas down", () => {
   it("handles docker compose down errors in json and text modes", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-down-err-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-err-"));
+
+    await fs.writeFile(
+      path.join(tmpProj, CONTRACT_FILENAME),
+      JSON.stringify({ projectName: "err-app", services: {} }),
+      "utf-8"
+    );
 
     const origExecSync = child_process.execSync;
     child_process.execSync = (() => {
@@ -223,5 +253,24 @@ describe("pegas down", () => {
     const parsed = JSON.parse(jsonLog!);
     expect(parsed.error).toContain("Failed to execute 'docker compose down'");
     expect(errors.some((e) => e.includes("Failed to execute 'docker compose down'"))).toBe(true);
+  });
+
+  it("aborts when no pegas.json or compose file is found", async () => {
+    const tmpEmpty = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-down-empty-"));
+    const errors: string[] = [];
+    const origError = console.error;
+    console.error = (...args) => errors.push(args.join(" "));
+
+    try {
+      await handleDown({
+        cwd: tmpEmpty,
+        noExit: true,
+      });
+    } finally {
+      console.error = origError;
+      await fs.rm(tmpEmpty, { recursive: true, force: true });
+    }
+
+    expect(errors.some((e) => e.includes("Contract 'pegas.json' not found"))).toBe(true);
   });
 });

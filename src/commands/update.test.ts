@@ -60,43 +60,6 @@ describe("pegas update", () => {
       expect(res.current).toBe(VERSION);
     });
 
-    it("supports dry-run mode without modifying package.json", async () => {
-      const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-update-dry-"));
-      await fs.writeFile(
-        path.join(tmpProj, "package.json"),
-        JSON.stringify(
-          {
-            name: "my-app",
-            packageManager: "bun@1.4.4",
-            devDependencies: { "@netrunner714/pegas": "^1.0.0" },
-          },
-          null,
-          2
-        )
-      );
-
-      const logs: string[] = [];
-      const origLog = console.log;
-      console.log = (...args) => logs.push(args.join(" "));
-
-      try {
-        await handleUpdate({ cwd: tmpProj, dryRun: true, json: true });
-
-        const res = JSON.parse(logs[0]);
-        expect(res.status).toBe("dry-run");
-        expect(res.current).toBe("1.0.0");
-        expect(res.packageManager).toBe("bun");
-        expect(res.updateCommand).toBe("bun update @netrunner714/pegas");
-
-        // Verify file was NOT modified
-        const unedited = JSON.parse(await fs.readFile(path.join(tmpProj, "package.json"), "utf-8"));
-        expect(unedited.devDependencies["@netrunner714/pegas"]).toBe("^1.0.0");
-      } finally {
-        console.log = origLog;
-        await fs.rm(tmpProj, { recursive: true, force: true });
-      }
-    });
-
     it("updates package.json, executes package manager command, and refreshes docs", async () => {
       const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-update-live-"));
       await fs.writeFile(

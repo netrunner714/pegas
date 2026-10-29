@@ -21,9 +21,9 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
 ## Команды
-* Локальная разработка: \`npm run dev\` (запускает \`pegas up --env development\`)
-* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas up --env production\`)
-* Деплой на стейджинг: \`pegas up --env stage\`
+* Локальная разработка: \`npm run dev\` (запускает \`pegas dev\`)
+* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas deploy production\`)
+* Деплой на стейджинг: \`pegas deploy stage\`
 * Остановка проекта: \`pegas down\`
 
 Документация: https://netrunner714.ru/pegas
