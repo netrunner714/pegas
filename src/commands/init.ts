@@ -4,6 +4,7 @@ import { InitOptions } from "../types.js";
 import { findProjectRoot } from "../gateway.js";
 import { setupProjectCompose } from "../compose.js";
 import { setupProjectContract, updatePackageJson } from "../contract.js";
+import { findOrDownloadCaddy } from "../binary.js";
 
 const DOCS_PEGAS_MD = `# Pegas
 
@@ -86,6 +87,18 @@ export async function setupAgentsMd(projectDir: string, dryRun = false): Promise
   }
 }
 
+export async function setupDevBinary(dryRun = false): Promise<string> {
+  if (dryRun) {
+    return "Проверка локального Caddy для dev-режима (dry-run: пропущено)";
+  }
+  try {
+    await findOrDownloadCaddy({ silent: true });
+    return "Подготовлен локальный Caddy для dev-режима";
+  } catch (err: any) {
+    return `Предупреждение: не удалось предзагрузить Caddy (${err?.message || "ошибка сети"}), будет загружен при первом pegas dev`;
+  }
+}
+
 export async function handleProjectInit(
   cwd = process.cwd(),
   isJson = false,
@@ -139,6 +152,10 @@ export async function handleProjectInit(
   } else {
     actions.push(`${composeRes.file}: порты и сеть pegas-network уже оптимизированы`);
   }
+
+  // 7. Pre-warm local dev Caddy binary
+  const binaryAction = await setupDevBinary(dryRun);
+  actions.push(binaryAction);
 
   if (isJson) {
     console.log(

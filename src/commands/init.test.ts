@@ -2,7 +2,14 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { setupGitignore, setupAgentsMd, PEGAS_AGENT_RULES, handleProjectInit, handleInit } from "./init.js";
+import {
+  setupGitignore,
+  setupAgentsMd,
+  setupDevBinary,
+  PEGAS_AGENT_RULES,
+  handleProjectInit,
+  handleInit,
+} from "./init.js";
 
 describe("pegas init (unit)", () => {
   it("setupAgentsMd creates, appends, and updates AGENTS.md idempotently", async () => {
@@ -41,6 +48,19 @@ describe("pegas init (unit)", () => {
     expect(await fs.access(path.join(tmpProj, "AGENTS.md")).then(() => true).catch(() => false)).toBe(false);
 
     await fs.rm(tmpProj, { recursive: true, force: true });
+  });
+
+  it("setupDevBinary pre-warms Caddy or reports dry-run/fallback gracefully", async () => {
+    // 1. Dry run
+    const resDry = await setupDevBinary(true);
+    expect(resDry).toContain("dry-run: пропущено");
+
+    // 2. Normal run (succeeds or warns gracefully without throwing)
+    const resLive = await setupDevBinary(false);
+    expect(
+      resLive.includes("Подготовлен локальный Caddy") ||
+      resLive.includes("Предупреждение:")
+    ).toBe(true);
   });
 
   it("setupGitignore adds .pegas if missing and is idempotent", async () => {
