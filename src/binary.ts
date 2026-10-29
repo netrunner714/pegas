@@ -39,6 +39,38 @@ export function getCaddyReleaseInfo(
   return { plat, arch: archName, ext, filename, url };
 }
 
+export function isCaddyVersionCompatible(
+  versionOutput: string,
+  minMajor = 2,
+  minMinor = 8
+): boolean {
+  const match = versionOutput.match(/v?(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!match) return false;
+  const major = parseInt(match[1], 10);
+  const minor = parseInt(match[2], 10);
+  if (major > minMajor) return true;
+  if (major === minMajor && minor >= minMinor) return true;
+  return false;
+}
+
+export function checkCaddyVersion(
+  binaryPath: string,
+  minMajor = 2,
+  minMinor = 8
+): boolean {
+  try {
+    const out = child_process
+      .execFileSync(binaryPath, ["version"], {
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 3000,
+      })
+      .toString();
+    return isCaddyVersionCompatible(out, minMajor, minMinor);
+  } catch {
+    return false;
+  }
+}
+
 export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promise<string> {
   const isWin = process.platform === "win32";
   const binaryName = isWin ? "caddy.exe" : "caddy";
@@ -70,7 +102,9 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
       const candidate = path.join(searchDir, ".cache", "bin", binaryName);
       try {
         await fs.access(candidate);
-        return candidate;
+        if (checkCaddyVersion(candidate)) {
+          return candidate;
+        }
       } catch {}
       const parent = path.dirname(searchDir);
       if (parent === searchDir) break;
@@ -80,10 +114,12 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
     // 4. Check cached binary in ~/.pegas/bin/
     try {
       await fs.access(homeCachedBinary);
-      return homeCachedBinary;
+      if (checkCaddyVersion(homeCachedBinary)) {
+        return homeCachedBinary;
+      }
     } catch {}
 
-    // 5. Check system PATH
+    // 5. Check system PATH with version validation
     try {
       const whichCmd = isWin ? `where ${binaryName}` : `which ${binaryName}`;
       const sysPath = child_process
@@ -93,7 +129,14 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
         .split("\n")[0]
         .trim();
       if (sysPath) {
-        return sysPath;
+        if (checkCaddyVersion(sysPath)) {
+          return sysPath;
+        }
+        if (!options.silent) {
+          console.warn(
+            `⚠️  System Caddy at ${sysPath} is older than v2.8.0 or incompatible. Using Pegas managed Caddy instead.`
+          );
+        }
       }
     } catch {}
   }

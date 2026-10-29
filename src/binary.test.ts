@@ -3,9 +3,52 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import child_process from "node:child_process";
-import { findOrDownloadCaddy, getCaddyReleaseInfo } from "./binary.js";
+import {
+  findOrDownloadCaddy,
+  getCaddyReleaseInfo,
+  isCaddyVersionCompatible,
+  checkCaddyVersion,
+} from "./binary.js";
 
 describe("caddy binary resolution", () => {
+  it("isCaddyVersionCompatible validates minimum Caddy version requirement", () => {
+    expect(isCaddyVersionCompatible("v2.9.1 h1:OEYiZ7DbCzAWVb6TNEkjRcSCRGHVoZsJinoDR/n9oaY=")).toBe(true);
+    expect(isCaddyVersionCompatible("v2.8.0")).toBe(true);
+    expect(isCaddyVersionCompatible("v2.8.4")).toBe(true);
+    expect(isCaddyVersionCompatible("v2.10.0")).toBe(true);
+    expect(isCaddyVersionCompatible("v3.0.0")).toBe(true);
+    expect(isCaddyVersionCompatible("2.8.0")).toBe(true);
+
+    // Incompatible versions
+    expect(isCaddyVersionCompatible("v2.7.6")).toBe(false);
+    expect(isCaddyVersionCompatible("v2.4.1")).toBe(false);
+    expect(isCaddyVersionCompatible("v1.0.5")).toBe(false);
+    expect(isCaddyVersionCompatible("Caddy 0.11.0")).toBe(false);
+    expect(isCaddyVersionCompatible("devel")).toBe(false);
+    expect(isCaddyVersionCompatible("")).toBe(false);
+  });
+
+  it("checkCaddyVersion executes binary with version flag and verifies compatibility", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-caddy-ver-"));
+    const goodBinary = path.join(tmpDir, "caddy-good");
+    const oldBinary = path.join(tmpDir, "caddy-old");
+    const nonExecutable = path.join(tmpDir, "caddy-noexec");
+
+    await fs.writeFile(goodBinary, "#!/bin/sh\necho 'v2.9.1 h1:abc'", "utf-8");
+    await fs.chmod(goodBinary, 0o755);
+
+    await fs.writeFile(oldBinary, "#!/bin/sh\necho 'v2.6.2'", "utf-8");
+    await fs.chmod(oldBinary, 0o755);
+
+    await fs.writeFile(nonExecutable, "not executable", "utf-8");
+
+    expect(checkCaddyVersion(goodBinary)).toBe(true);
+    expect(checkCaddyVersion(oldBinary)).toBe(false);
+    expect(checkCaddyVersion(nonExecutable)).toBe(false);
+    expect(checkCaddyVersion(path.join(tmpDir, "does-not-exist"))).toBe(false);
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
   it("getCaddyReleaseInfo maps platform and architecture correctly", () => {
     const linuxX64 = getCaddyReleaseInfo("linux", "x64");
     expect(linuxX64.filename).toBe("caddy_2.9.1_linux_amd64.tar.gz");
@@ -137,6 +180,67 @@ describe("caddy binary resolution", () => {
       console.log = origLog;
       await fs.rm(tmpDir, { recursive: true, force: true });
       await fs.rm(tarDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects outdated system Caddy from PATH and warns user", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-caddy-sys-old-"));
+    const sysDir = path.join(tmpDir, "system-bin");
+    await fs.mkdir(sysDir, { recursive: true });
+    const oldBinary = path.join(sysDir, "caddy");
+    await fs.writeFile(oldBinary, "#!/bin/sh\necho 'v2.6.2'", "utf-8");
+    await fs.chmod(oldBinary, 0o755);
+
+    const origExecSync = child_process.execSync;
+    const origAccess = fs.access;
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+
+    try {
+      fs.access = (async (p: any, mode: any) => {
+        if (String(p).includes(".pegas") || String(p).includes(".cache")) {
+          throw new Error("ENOENT");
+        }
+        return origAccess(p, mode);
+      }) as any;
+
+      child_process.execSync = ((cmd: string, opts?: any) => {
+        if (cmd.startsWith("which ") || cmd.startsWith("where ")) {
+          return Buffer.from(oldBinary + "\n");
+        }
+        return origExecSync(cmd, opts);
+      }) as any;
+
+      // findOrDownloadCaddy should reject oldBinary, warn, and then attempt download
+      // which we intercept with dummy fetch
+      let fetchCalled = false;
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = async () => {
+        fetchCalled = true;
+        throw new Error("Simulated download stop");
+      };
+
+      const downloadDir = path.join(tmpDir, "download");
+      try {
+        await findOrDownloadCaddy({
+          cacheDir: downloadDir,
+          skipCache: false,
+          silent: false,
+        });
+      } catch (err: any) {
+        expect(err.message).toBe("Simulated download stop");
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+
+      expect(fetchCalled).toBe(true);
+      expect(warnings.some((w) => w.includes("is older than v2.8.0"))).toBe(true);
+    } finally {
+      fs.access = origAccess;
+      child_process.execSync = origExecSync;
+      console.warn = origWarn;
+      await fs.rm(tmpDir, { recursive: true, force: true });
     }
   });
 });
