@@ -120,7 +120,7 @@ ${bold("OPTIONS:")}
 ${bold("EXAMPLES:")}
   $ bun scripts/e2e-init.ts /path/to/my-project
   $ bun scripts/e2e-init.ts /path/to/my-project --diff
-  $ bun scripts/e2e-init.ts https://github.com/netrunner714/netrunner714
+  $ bun scripts/e2e-init.ts https://github.com/example/repo
 `);
     process.exit(1);
   }
