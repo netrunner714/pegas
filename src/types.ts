@@ -67,8 +67,14 @@ export interface UpOptions {
   caddyPath?: string;
 }
 
+export interface DevGatewayConfig {
+  httpPort?: number;
+  httpsPort?: number;
+}
+
 export interface PegasContract {
   projectName?: string;
   bootInfra?: boolean;
+  devGateway?: DevGatewayConfig;
   services: Record<string, ServiceContract>;
 }

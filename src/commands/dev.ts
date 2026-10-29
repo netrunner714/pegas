@@ -133,8 +133,15 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   }
 
   // 3. Find free unprivileged ports for local Caddy (resolves port collisions)
-  const httpsPort = await findAvailablePort(8443);
-  const httpPort = await findAvailablePort(8080, [httpsPort]);
+  const preferredHttps = contract.devGateway?.httpsPort ?? 8443;
+  const preferredHttp = contract.devGateway?.httpPort ?? 8080;
+
+  const httpsPort = await findAvailablePort(preferredHttps);
+  const httpPort = await findAvailablePort(preferredHttp, [httpsPort]);
+
+  if (httpsPort !== preferredHttps) {
+    console.warn(`⚠️  Preferred dev HTTPS port ${preferredHttps} is in use. Using available port ${httpsPort} instead.`);
+  }
 
   // 4. Find or download native Caddy binary
   const caddyPath = await findOrDownloadCaddy({

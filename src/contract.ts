@@ -262,6 +262,10 @@ export function createDefaultContract(
   const portNum = typeof port === "string" ? parseInt(port, 10) || 3000 : port;
   return {
     projectName: slug,
+    devGateway: {
+      httpPort: 8080,
+      httpsPort: 8443,
+    },
     services: {
       [serviceName]: {
         port: portNum,

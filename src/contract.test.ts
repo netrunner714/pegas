@@ -58,6 +58,7 @@ describe("contract & package.json integration", () => {
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe("my-awesome-site");
+    expect(content.devGateway).toEqual({ httpPort: 8080, httpsPort: 8443 });
     expect(content.services.web.port).toBe(3000);
     expect(content.services.web.domains.development).toEqual(["my-awesome-site.localhost"]);
     expect(content.services.web.domains.production).toEqual(["my-awesome-site.com"]);
