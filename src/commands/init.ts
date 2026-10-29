@@ -272,7 +272,7 @@ export async function handleInit(options: InitOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const dryRun = options.dryRun ?? false;
-  const force = Boolean(options.force || options.reset);
+  const force = Boolean(options.force);
 
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
   await handleProjectInit(projectRoot, isJson, dryRun, { force });
