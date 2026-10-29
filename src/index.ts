@@ -196,6 +196,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       infra: { type: "boolean" },
       "no-infra": { type: "boolean" },
       "gateway-dir": { type: "string" },
+      cwd: { type: "string" },
       write: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h" },
@@ -210,6 +211,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
   switch (command) {
     case "init": {
       await dispatch.handleInit({
+        cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
@@ -220,6 +222,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "up": {
       const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : [];
       await dispatch.handleUp({
+        cwd: values.cwd as string | undefined,
         env: values.env as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
@@ -242,6 +245,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         infra = true;
       }
       await dispatch.handleDev({
+        cwd: values.cwd as string | undefined,
         command: userCmd,
         infra,
       });
@@ -250,6 +254,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
     case "deploy": {
       await dispatch.handleDeploy({
+        cwd: values.cwd as string | undefined,
         env: (values.env as string | undefined) || "production",
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
@@ -264,6 +269,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
     case "down": {
       await dispatch.handleDown({
+        cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
       });
