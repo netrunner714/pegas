@@ -286,29 +286,62 @@ export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web
 
 export async function setupProjectContract(
   projectDir: string,
-  dryRun = false
-): Promise<{ created: boolean; file: string; slug: string; contract?: PegasContract }> {
+  dryRun = false,
+  force = false
+): Promise<{
+  created: boolean;
+  overwritten?: boolean;
+  backupFile?: string;
+  file: string;
+  slug: string;
+  contract?: PegasContract;
+}> {
   const contractPath = path.join(projectDir, CONTRACT_FILENAME);
+  const backupPath = path.join(projectDir, `${CONTRACT_FILENAME}.bak`);
   const slug = await detectProjectSlug(projectDir);
 
+  let exists = false;
   try {
     await fs.access(contractPath);
-    return { created: false, file: CONTRACT_FILENAME, slug };
-  } catch {
-    const detected = await detectComposeWebService(projectDir);
-    const serviceName = detected?.name || "web";
-    const port = detected?.port || "3000";
+    exists = true;
+  } catch {}
 
-    const defaultContract = createDefaultContract(slug, serviceName, port);
+  if (exists && !force) {
+    return { created: false, file: CONTRACT_FILENAME, slug };
+  }
+
+  const detected = await detectComposeWebService(projectDir);
+  const serviceName = detected?.name || "web";
+  const port = detected?.port || "3000";
+  const defaultContract = createDefaultContract(slug, serviceName, port);
+
+  if (exists && force) {
     if (!dryRun) {
+      await fs.copyFile(contractPath, backupPath);
       await fs.writeFile(
         contractPath,
         JSON.stringify(defaultContract, null, 2) + "\n",
         "utf-8"
       );
     }
-    return { created: true, file: CONTRACT_FILENAME, slug, contract: defaultContract };
+    return {
+      created: false,
+      overwritten: true,
+      backupFile: `${CONTRACT_FILENAME}.bak`,
+      file: CONTRACT_FILENAME,
+      slug,
+      contract: defaultContract,
+    };
   }
+
+  if (!dryRun) {
+    await fs.writeFile(
+      contractPath,
+      JSON.stringify(defaultContract, null, 2) + "\n",
+      "utf-8"
+    );
+  }
+  return { created: true, file: CONTRACT_FILENAME, slug, contract: defaultContract };
 }
 
 export async function updatePackageJson(

@@ -65,7 +65,7 @@ OPTIONS FOR 'up':
       --dry-run            Simulate execution without starting containers or updating Caddy
 
 OPTIONS FOR 'init':
-      --dry-run            Print planned project files without writing to disk
+      --force              Reset contract pegas.json to defaults (creates pegas.json.bak)
       --dry-run            Print planned project files without writing to disk
 
 OPTIONS FOR 'add':
@@ -233,6 +233,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
+        force: values.force as boolean | undefined,
         json: values.json as boolean | undefined,
       });
       break;

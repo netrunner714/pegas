@@ -154,8 +154,14 @@ export async function handleProjectInit(
   cwd = process.cwd(),
   isJson = false,
   dryRun = false,
-  options: { skipNpmCheck?: boolean } = {}
+  optionsOrForce: boolean | { skipNpmCheck?: boolean; force?: boolean } = {}
 ): Promise<void> {
+  const force = typeof optionsOrForce === "boolean" ? optionsOrForce : (optionsOrForce.force ?? false);
+  const skipNpm =
+    typeof optionsOrForce === "object" && typeof optionsOrForce.skipNpmCheck === "boolean"
+      ? optionsOrForce.skipNpmCheck
+      : Boolean(process.env.PEGAS_SKIP_NPM_CHECK || process.env.NODE_ENV === "test");
+
   const actions: string[] = [];
 
   if (cwd !== process.cwd()) {
@@ -163,9 +169,11 @@ export async function handleProjectInit(
   }
 
   // 1. Contract generation (pegas.json) with smart slug detection
-  const contractRes = await setupProjectContract(cwd, dryRun);
+  const contractRes = await setupProjectContract(cwd, dryRun, force);
   if (contractRes.created) {
     actions.push(`Создан контракт ${contractRes.file} для проекта '${contractRes.slug}'`);
+  } else if (contractRes.overwritten) {
+    actions.push(`Сброшен на дефолт контракт ${contractRes.file} (бэкап сохранен в ${contractRes.backupFile})`);
   } else {
     actions.push(`Контракт ${contractRes.file} уже существует`);
   }
@@ -183,7 +191,6 @@ export async function handleProjectInit(
   }
 
   // 2c. Check latest version from npm registry (non-blocking)
-  const skipNpm = options.skipNpmCheck ?? Boolean(process.env.PEGAS_SKIP_NPM_CHECK || process.env.NODE_ENV === "test");
   const npmVer = skipNpm ? null : await checkNpmLatestVersion();
   if (npmVer && compareSemver(npmVer, VERSION) > 0) {
     const pm = await detectPackageManager(cwd);
@@ -262,7 +269,8 @@ export async function handleInit(options: InitOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const dryRun = options.dryRun ?? false;
+  const force = options.force ?? false;
 
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
-  await handleProjectInit(projectRoot, isJson, dryRun);
+  await handleProjectInit(projectRoot, isJson, dryRun, { force });
 }

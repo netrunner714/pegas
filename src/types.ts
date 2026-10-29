@@ -22,6 +22,7 @@ export interface InitOptions {
   cwd?: string;
   gatewayDir?: string;
   dryRun?: boolean;
+  force?: boolean;
   json?: boolean;
   noExit?: boolean;
 }

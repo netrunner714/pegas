@@ -282,6 +282,7 @@ describe("main CLI command routing", () => {
         "init",
         "--gateway-dir",
         "/etc/pegas",
+        "--force",
         "--dry-run",
         "--json",
       ],
@@ -290,6 +291,7 @@ describe("main CLI command routing", () => {
 
     expect(calls.init).toEqual({
       gatewayDir: "/etc/pegas",
+      force: true,
       dryRun: true,
       json: true,
     });

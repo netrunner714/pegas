@@ -205,6 +205,9 @@ describe("pegas init (unit)", () => {
 
       // 2. Dry run init
       await handleInit({ cwd: tmpProj, dryRun: true, json: true });
+
+      // 3. Force init (resets contract)
+      await handleInit({ cwd: tmpProj, force: true, json: true });
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
@@ -212,6 +215,7 @@ describe("pegas init (unit)", () => {
 
     expect(logs.some((l) => l.includes('"status":"success"'))).toBe(true);
     expect(logs.some((l) => l.includes('"status":"dry-run"'))).toBe(true);
+    expect(logs.some((l) => l.includes("Сброшен на дефолт контракт"))).toBe(true);
   });
 
   it("checkInstalledVersion detects local version in node_modules", async () => {

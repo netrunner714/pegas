@@ -120,6 +120,18 @@ describe("contract & package.json integration", () => {
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content).toEqual(custom);
 
+    // Overwrites when force: true and creates backup
+    const forceRes = await setupProjectContract(tmpDir, false, true);
+    expect(forceRes.created).toBe(false);
+    expect(forceRes.overwritten).toBe(true);
+    expect(forceRes.backupFile).toBe("pegas.json.bak");
+
+    const backupContent = JSON.parse(await fs.readFile(path.join(tmpDir, "pegas.json.bak"), "utf-8"));
+    expect(backupContent).toEqual(custom);
+
+    const overwrittenContent = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
+    expect(overwrittenContent.devGateway).toBeDefined();
+
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
