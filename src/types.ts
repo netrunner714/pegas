@@ -70,6 +70,8 @@ export interface UpOptions {
 export interface DevGatewayConfig {
   httpPort?: number;
   httpsPort?: number;
+  skipInstallTrust?: boolean;
+  admin?: boolean;
 }
 
 export interface PegasContract {

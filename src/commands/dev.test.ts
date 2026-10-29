@@ -28,8 +28,51 @@ describe("pegas dev", () => {
     expect(caddyfile).toContain("admin off");
     expect(caddyfile).toContain("https_port 8444");
     expect(caddyfile).toContain("http_port 8081");
+    expect(caddyfile).toContain("skip_install_trust");
     expect(caddyfile).toContain("app.localhost {");
     expect(caddyfile).toContain("reverse_proxy localhost:3000");
+  });
+
+  it("respects devGateway admin and skipInstallTrust options in generateDevCaddyfile", () => {
+    // 1. admin: true, skipInstallTrust: false
+    const contractWithOverrides: PegasContract = {
+      devGateway: {
+        httpPort: 8080,
+        httpsPort: 8443,
+        skipInstallTrust: false,
+        admin: true,
+      },
+      services: {
+        web: {
+          port: 3000,
+          domains: { development: ["test.localhost"] },
+        },
+      },
+    };
+
+    const caddyfile = generateDevCaddyfile(contractWithOverrides);
+    expect(caddyfile).not.toContain("admin off");
+    expect(caddyfile).not.toContain("skip_install_trust");
+
+    // 2. admin: false, skipInstallTrust: true
+    const contractDefault: PegasContract = {
+      devGateway: {
+        httpPort: 8080,
+        httpsPort: 8443,
+        skipInstallTrust: true,
+        admin: false,
+      },
+      services: {
+        web: {
+          port: 3000,
+          domains: { development: ["test.localhost"] },
+        },
+      },
+    };
+
+    const caddyfileDefault = generateDevCaddyfile(contractDefault);
+    expect(caddyfileDefault).toContain("admin off");
+    expect(caddyfileDefault).toContain("skip_install_trust");
   });
 
   it("handles multiple services and multiple dev domains with correct local ports", () => {

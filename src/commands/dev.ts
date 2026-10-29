@@ -28,7 +28,9 @@ export function generateDevCaddyfile(
   contract: PegasContract,
   ports: DevPorts = { httpsPort: 8443, httpPort: 8080 }
 ): string {
-  const globalBlock = `{\n    admin off\n    http_port ${ports.httpPort}\n    https_port ${ports.httpsPort}\n    skip_install_trust\n}`;
+  const adminLine = contract.devGateway?.admin ? "" : "    admin off\n";
+  const trustLine = contract.devGateway?.skipInstallTrust !== false ? "    skip_install_trust\n" : "";
+  const globalBlock = `{\n${adminLine}    http_port ${ports.httpPort}\n    https_port ${ports.httpsPort}\n${trustLine}}`;
   const blocks: string[] = [globalBlock];
 
   const services = contract.services || {};

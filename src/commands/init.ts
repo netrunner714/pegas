@@ -13,7 +13,7 @@ const DOCS_PEGAS_MD = `# Pegas
 ## Контракт сервисов
 Конфигурация роутинга объявлена в файле \`pegas.json\`:
 - \`port\`: порт приложения внутри контейнера (по умолчанию 3000)
-- \`devGateway\`: порты локального шлюза дева (\`httpPort: 8080\`, \`httpsPort: 8443\`)
+- \`devGateway\`: параметры локального шлюза дева (\`httpPort: 8080\`, \`httpsPort: 8443\`, \`skipInstallTrust: true\`, \`admin: false\`)
 - \`domains.development\`: локальные домены разработки (например: \`app.localhost\`)
 - \`domains.stage\`: домены стейджинга (например: \`stage.app.com\`)
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt

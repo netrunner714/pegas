@@ -265,6 +265,8 @@ export function createDefaultContract(
     devGateway: {
       httpPort: 8080,
       httpsPort: 8443,
+      skipInstallTrust: true,
+      admin: false,
     },
     services: {
       [serviceName]: {
