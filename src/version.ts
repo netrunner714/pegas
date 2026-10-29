@@ -26,3 +26,12 @@ export function compareSemver(a: string, b: string): number {
   return patA - patB;
 }
 
+/**
+ * Checks if two versions share the same major version.
+ */
+export function isSameMajor(a: string, b: string): boolean {
+  const [majA] = parseSemver(a);
+  const [majB] = parseSemver(b);
+  return majA === majB;
+}
+

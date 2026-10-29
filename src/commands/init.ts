@@ -6,6 +6,7 @@ import { setupProjectCompose } from "../compose.js";
 import { setupProjectContract, updatePackageJson } from "../contract.js";
 import { findOrDownloadCaddy } from "../binary.js";
 import { VERSION, compareSemver } from "../version.js";
+import { detectPackageManager, getUpdateCommand } from "../pm.js";
 
 const DOCS_PEGAS_MD = `# Pegas
 
@@ -101,6 +102,21 @@ export async function setupDevBinary(dryRun = false): Promise<string> {
   }
 }
 
+export async function getProjectVersion(projectDir: string): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(path.join(projectDir, "package.json"), "utf-8");
+    const pkg = JSON.parse(raw);
+    const dep =
+      pkg.devDependencies?.["@netrunner714/pegas"] ||
+      pkg.devDependencies?.pegas ||
+      pkg.dependencies?.["@netrunner714/pegas"] ||
+      pkg.dependencies?.pegas;
+    if (dep) return dep.replace(/^[^0-9]*/, "");
+  } catch {}
+
+  return checkInstalledVersion(projectDir);
+}
+
 export async function checkInstalledVersion(projectDir: string): Promise<string | null> {
   const localPkgPath = path.join(projectDir, "node_modules", "@netrunner714", "pegas", "package.json");
   const fallbackPkgPath = path.join(projectDir, "node_modules", "pegas", "package.json");
@@ -158,21 +174,21 @@ export async function handleProjectInit(
   const pkgActions = await updatePackageJson(cwd, dryRun);
   actions.push(...pkgActions);
 
-  // 2b. Check installed node_modules version vs CLI VERSION
-  const installedVer = await checkInstalledVersion(cwd);
-  if (installedVer && compareSemver(VERSION, installedVer) > 0) {
-    actions.push(
-      `В node_modules установлена версия v${installedVer} (актуальная: v${VERSION}). Выполните 'npm install' или 'bun install' для обновления`
-    );
+  // 2b. Check current version vs target version
+  const currentVer = await getProjectVersion(cwd);
+  if (currentVer && compareSemver(VERSION, currentVer) > 0) {
+    const pm = await detectPackageManager(cwd);
+    const updateCmd = getUpdateCommand(pm);
+    actions.push(`Текущая: v${currentVer}, актуальная: v${VERSION}. Для обновления: ${updateCmd} (или 'pegas update')`);
   }
 
   // 2c. Check latest version from npm registry (non-blocking)
   const skipNpm = options.skipNpmCheck ?? Boolean(process.env.PEGAS_SKIP_NPM_CHECK || process.env.NODE_ENV === "test");
   const npmVer = skipNpm ? null : await checkNpmLatestVersion();
   if (npmVer && compareSemver(npmVer, VERSION) > 0) {
-    actions.push(
-      `Доступна более новая версия в npm: v${npmVer} (текущая: v${VERSION}). Для обновления: npm i -D @netrunner714/pegas@latest`
-    );
+    const pm = await detectPackageManager(cwd);
+    const updateCmd = getUpdateCommand(pm);
+    actions.push(`Текущая: v${VERSION}, актуальная в npm: v${npmVer}. Для обновления: ${updateCmd} (или 'pegas update --latest')`);
   }
 
   // 3. Setup .gitignore (.pegas)

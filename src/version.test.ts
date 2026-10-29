@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { VERSION, parseSemver, compareSemver } from "./version.js";
+import { VERSION, parseSemver, compareSemver, isSameMajor } from "./version.js";
 
 describe("version utilities", () => {
   it("exports valid VERSION string from package.json", () => {
@@ -29,5 +29,12 @@ describe("version utilities", () => {
 
     expect(compareSemver("1.1.1", "1.1.1")).toBe(0);
     expect(compareSemver("1.1.1", "^1.1.1")).toBe(0);
+  });
+
+  it("isSameMajor checks if versions share the same major version", () => {
+    expect(isSameMajor("1.1.0", "1.1.1")).toBe(true);
+    expect(isSameMajor("^1.0.0", "1.99.9")).toBe(true);
+    expect(isSameMajor("1.1.1", "2.0.0")).toBe(false);
+    expect(isSameMajor("2.1.0", "1.9.9")).toBe(false);
   });
 });

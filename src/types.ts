@@ -26,6 +26,14 @@ export interface InitOptions {
   noExit?: boolean;
 }
 
+export interface UpdateOptions {
+  latest?: boolean;
+  dryRun?: boolean;
+  json?: boolean;
+  cwd?: string;
+  noExit?: boolean;
+}
+
 export interface RouteInfo {
   domain: string;
   upstream: string;

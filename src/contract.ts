@@ -343,7 +343,7 @@ export async function updatePackageJson(
       actions.push("Добавлен скрипт 'deploy': 'pegas up --env production' в package.json");
     }
 
-    // 3. Add or upgrade pegas in devDependencies
+    // 3. Add pegas to devDependencies if missing (init does not bump version automatically)
     if (!pkg.devDependencies) {
       pkg.devDependencies = {};
     }
@@ -353,18 +353,44 @@ export async function updatePackageJson(
     if (!currentDep) {
       pkg.devDependencies["@netrunner714/pegas"] = targetDep;
       actions.push(`Добавлен '@netrunner714/pegas' (${targetDep}) в devDependencies в package.json`);
-    } else if (compareSemver(VERSION, currentDep) > 0) {
-      pkg.devDependencies["@netrunner714/pegas"] = targetDep;
-      if (pkg.devDependencies.pegas && pkg.devDependencies["@netrunner714/pegas"]) {
-        delete pkg.devDependencies.pegas;
-      }
-      actions.push(`Обновлен '@netrunner714/pegas' в devDependencies: ${currentDep} -> ${targetDep}`);
     }
 
-    if (!dryRun) {
+    if (actions.length > 0 && !dryRun) {
       await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
     }
   } catch {}
 
   return actions;
+}
+
+/**
+ * Upgrades the @netrunner714/pegas dependency in package.json to the target version.
+ * Called explicitly by `pegas update`.
+ */
+export async function upgradePackageJson(
+  projectDir: string,
+  targetVersion: string,
+  dryRun = false
+): Promise<{ updated: boolean; oldVersion: string; newVersion: string }> {
+  const pkgPath = path.join(projectDir, "package.json");
+  const raw = await fs.readFile(pkgPath, "utf-8");
+  const pkg = JSON.parse(raw);
+  if (!pkg.devDependencies) {
+    pkg.devDependencies = {};
+  }
+
+  const current = pkg.devDependencies["@netrunner714/pegas"] || pkg.devDependencies.pegas || "";
+  const cleanTarget = targetVersion.replace(/^[^0-9]*/, "");
+  const targetDep = `^${cleanTarget}`;
+
+  pkg.devDependencies["@netrunner714/pegas"] = targetDep;
+  if (pkg.devDependencies.pegas && pkg.devDependencies["@netrunner714/pegas"]) {
+    delete pkg.devDependencies.pegas;
+  }
+
+  if (!dryRun) {
+    await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+  }
+
+  return { updated: true, oldVersion: current, newVersion: targetDep };
 }

@@ -14,6 +14,7 @@ import { handleRemove } from "./commands/remove.js";
 import { handleReload } from "./commands/reload.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
+import { handleUpdate } from "./commands/update.js";
 
 import { VERSION } from "./version.js";
 export { VERSION };
@@ -41,6 +42,7 @@ USAGE:
 
 COMMANDS:
   init                     Init Pegas in current project
+  update                   Update @netrunner714/pegas to latest version
   up --env <name>          Bring up environment (development, stage, production)
   dev [-- <command>]       Alias for 'pegas up --env development'
   deploy                   Alias for 'pegas up --env production'
@@ -51,6 +53,10 @@ COMMANDS:
   reload                   Validate and hot-reload Caddy configuration
   status                   Check Docker and gateway health
   llms                     Print machine-readable LLM context
+
+OPTIONS FOR 'update':
+      --latest             Upgrade across major versions (e.g. 1.x -> 2.x)
+      --dry-run            Print planned updates without writing to disk
 
 OPTIONS FOR 'up':
   -e, --env <name>         Target environment contour (development, stage, production, etc.)
@@ -97,10 +103,10 @@ export function tryLocalDelegation(args = process.argv.slice(2)): void {
     return;
   }
 
-  // Never delegate `init` to local node_modules.
-  // Running `pegas init` is intended to initialize or update the project
+  // Never delegate `init` or `update` to local node_modules.
+  // Running `pegas init` or `pegas update` is intended to initialize or update the project
   // using the currently invoked CLI, avoiding entrapment in outdated node_modules.
-  if (args[0] === "init" || args.includes("init")) {
+  if (args[0] === "init" || args.includes("init") || args[0] === "update" || args.includes("update")) {
     return;
   }
 
@@ -147,6 +153,7 @@ export interface MainDispatchers {
   handleReload?: typeof handleReload;
   handleStatus?: typeof handleStatus;
   handleLlms?: typeof handleLlms;
+  handleUpdate?: typeof handleUpdate;
 }
 
 export interface MainOptions {
@@ -170,6 +177,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleReload: options.dispatchers?.handleReload || handleReload,
     handleStatus: options.dispatchers?.handleStatus || handleStatus,
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
+    handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
   };
 
   const rawArgs = argv;
@@ -208,6 +216,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       "gateway-dir": { type: "string" },
       cwd: { type: "string" },
       write: { type: "boolean", default: false },
+      latest: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
@@ -223,6 +232,16 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       await dispatch.handleInit({
         cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
+        json: values.json as boolean | undefined,
+      });
+      break;
+    }
+
+    case "update": {
+      await dispatch.handleUpdate({
+        cwd: values.cwd as string | undefined,
+        latest: values.latest as boolean | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
       });

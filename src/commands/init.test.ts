@@ -12,6 +12,7 @@ import {
   handleProjectInit,
   handleInit,
 } from "./init.js";
+import { VERSION } from "../version.js";
 
 describe("pegas init (unit)", () => {
   it("setupAgentsMd creates, appends, and updates AGENTS.md idempotently", async () => {
@@ -241,12 +242,16 @@ describe("pegas init (unit)", () => {
 
     try {
       await handleProjectInit(tmpProj, true, false, { skipNpmCheck: true });
+
+      const json = JSON.parse(logs[0]);
+      expect(json.actions.some((a: string) => a.includes("Текущая: v1.0.0") && a.includes(`актуальная: v${VERSION}`))).toBe(true);
+
+      // Verify init does NOT bump the version automatically
+      const unchangedPkg = JSON.parse(await fs.readFile(path.join(tmpProj, "package.json"), "utf-8"));
+      expect(unchangedPkg.devDependencies["@netrunner714/pegas"]).toBe("^1.0.0");
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
     }
-
-    const json = JSON.parse(logs[0]);
-    expect(json.actions.some((a: string) => a.includes("node_modules установлена версия v1.0.0"))).toBe(true);
   });
 });

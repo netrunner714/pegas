@@ -181,6 +181,7 @@ describe("tryLocalDelegation", () => {
 
       // Even though local pegas exists, passing ["init"] prevents delegation
       expect(() => tryLocalDelegation(["init"])).not.toThrow();
+      expect(() => tryLocalDelegation(["update"])).not.toThrow();
     } finally {
       process.chdir(origCwd);
       if (origDelegated !== undefined) {
@@ -289,6 +290,31 @@ describe("main CLI command routing", () => {
 
     expect(calls.init).toEqual({
       gatewayDir: "/etc/pegas",
+      dryRun: true,
+      json: true,
+    });
+  });
+
+  it("dispatches 'update' command with parsed options", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleUpdate: async (opts) => {
+        calls.update = opts;
+      },
+    };
+
+    await main(
+      [
+        "update",
+        "--latest",
+        "--dry-run",
+        "--json",
+      ],
+      { dispatchers }
+    );
+
+    expect(calls.update).toEqual({
+      latest: true,
       dryRun: true,
       json: true,
     });
