@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -32,3 +34,97 @@ jobs:
 
       - name: Run E2E tests
         run: bun run test:e2e
+
+  publish:
+    name: Build, Release & Publish
+    needs: test
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Check version bump
+        id: check_version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Direct release trigger detected."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version >/dev/null 2>&1; then
+            echo "Version ${CURRENT_VERSION} is already published to npmjs.org. Skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version ${CURRENT_VERSION} is not yet published to npmjs.org. Releasing!"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build dist bundle
+        if: steps.check_version.outputs.should_release == 'true'
+        run: bun run build
+
+      - name: Publish to NPM
+        if: steps.check_version.outputs.should_release == 'true'
+        run: |
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to GitHub Packages
+        if: steps.check_version.outputs.should_release == 'true'
+        run: |
+          RC_FILE="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "@netrunner714:registry=https://npm.pkg.github.com" >> "$RC_FILE"
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> "$RC_FILE"
+          echo "@netrunner714:registry=https://npm.pkg.github.com" >> ~/.npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+
+          CURRENT_VERSION="${{ steps.check_version.outputs.current_version }}"
+          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "Version ${CURRENT_VERSION} is already published to GitHub Packages, skipping."
+          else
+            npm publish --registry=https://npm.pkg.github.com
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Git Tag and GitHub Release
+        if: steps.check_version.outputs.should_release == 'true'
+        run: |
+          CURRENT_VERSION="${{ steps.check_version.outputs.current_version }}"
+          TAG_NAME="v${CURRENT_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse "${TAG_NAME}" >/dev/null 2>&1; then
+            git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
+            git push origin "${TAG_NAME}" || true
+          fi
+
+          gh release create "${TAG_NAME}" --generate-notes --title "Release ${TAG_NAME}" || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
