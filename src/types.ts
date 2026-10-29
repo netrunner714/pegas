@@ -21,10 +21,6 @@ export interface AddOptions {
 export interface InitOptions {
   cwd?: string;
   gatewayDir?: string;
-  email?: string;
-  networkName?: string;
-  server?: boolean;
-  project?: boolean;
   dryRun?: boolean;
   json?: boolean;
   noExit?: boolean;

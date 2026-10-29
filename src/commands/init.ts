@@ -1,14 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import { InitOptions } from "../types.js";
-import {
-  checkDocker,
-  checkDockerCompose,
-  ensureDockerNetwork,
-  startGatewayContainer,
-  validateCaddyConfig,
-} from "../docker.js";
 import { findProjectRoot } from "../gateway.js";
 import { setupProjectCompose } from "../compose.js";
 import { setupProjectContract, updatePackageJson } from "../contract.js";
@@ -132,155 +124,11 @@ export async function handleProjectInit(
   console.log("  2. Start local dev with: npm run dev\n");
 }
 
-export async function handleServerInit(options: InitOptions): Promise<void> {
-  const isJson = options.json ?? false;
-
-  // 1. Check Docker
-  const hasDocker = await checkDocker();
-  if (!hasDocker) {
-    if (isJson) {
-      console.log(JSON.stringify({ error: "Docker daemon is not running or not installed." }));
-    } else {
-      console.error("❌ Error: Docker daemon is not running or not installed.");
-    }
-    if (!options.noExit) {
-      process.exit(1);
-    }
-    return;
-  }
-
-  const hasCompose = await checkDockerCompose();
-  if (!hasCompose) {
-    if (isJson) {
-      console.log(JSON.stringify({ error: "Docker Compose is not available." }));
-    } else {
-      console.error("❌ Error: Docker Compose is not available.");
-    }
-    if (!options.noExit) {
-      process.exit(1);
-    }
-    return;
-  }
-
-  // 2. Gateway directory
-  const gatewayDir = options.gatewayDir
-    ? path.resolve(options.gatewayDir)
-    : path.join(os.homedir(), "gateway");
-
-  await fs.mkdir(gatewayDir, { recursive: true });
-  const confDir = path.join(gatewayDir, "conf.d");
-  await fs.mkdir(confDir, { recursive: true });
-
-  // 3. Ensure Docker network
-  const networkName = options.networkName || "pegas-network";
-  await ensureDockerNetwork(networkName);
-
-  // 4. Create Caddyfile if not exists
-  const caddyfilePath = path.join(gatewayDir, "Caddyfile");
-  try {
-    await fs.access(caddyfilePath);
-  } catch {
-    const globalOptions = options.email ? `{\n    email ${options.email}\n}` : `{\n    # Global options\n}`;
-    const defaultCaddyfile = `${globalOptions}\n\nimport /etc/caddy/conf.d/*.caddy\n`;
-    await fs.writeFile(caddyfilePath, defaultCaddyfile, "utf-8");
-  }
-
-  // 5. Create docker-compose.yml if not exists
-  const composePath = path.join(gatewayDir, "docker-compose.yml");
-  try {
-    await fs.access(composePath);
-  } catch {
-    const defaultCompose = `services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: gateway-caddy
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./conf.d:/etc/caddy/conf.d:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - ${networkName}
-
-networks:
-  ${networkName}:
-    external: true
-
-volumes:
-  caddy_data:
-  caddy_config:
-`;
-    await fs.writeFile(composePath, defaultCompose, "utf-8");
-  }
-
-  // 6. Start Caddy
-  const startRes = await startGatewayContainer(gatewayDir);
-  if (!startRes.success) {
-    if (isJson) {
-      console.log(JSON.stringify({ error: "Failed to start Caddy container", details: startRes.stderr }));
-    } else {
-      console.error("❌ Failed to start Caddy container:", startRes.stderr);
-    }
-    if (!options.noExit) {
-      process.exit(1);
-    }
-    return;
-  }
-
-  const validateRes = await validateCaddyConfig(gatewayDir);
-
-  if (isJson) {
-    console.log(
-      JSON.stringify({
-        status: "success",
-        gatewayDir,
-        network: networkName,
-        validated: validateRes.success,
-      })
-    );
-  } else {
-    console.log("\n🚀 Pegas server gateway initialized successfully!");
-    console.log(`   Gateway directory: ${gatewayDir}`);
-    console.log(`   Docker network:    ${networkName}`);
-    console.log(`   Caddy container:   Running on :80 and :443`);
-    console.log("\nNext step: run `pegas add <domain> --upstream <service:port>` to route your first site.\n");
-  }
-}
-
-export async function handleInit(options: InitOptions): Promise<void> {
+export async function handleInit(options: InitOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const dryRun = options.dryRun ?? false;
 
-  // If explicitly requested server
-  if (options.server) {
-    await handleServerInit(options);
-    return;
-  }
-
-  // If explicitly requested project
-  if (options.project) {
-    await handleProjectInit(cwd, isJson, dryRun);
-    return;
-  }
-
-  // Smart detection:
-  // Climb up to find .git or package.json
-  const projectRoot = await findProjectRoot(cwd);
-
-  if (projectRoot) {
-    await handleProjectInit(projectRoot, isJson, dryRun);
-  } else {
-    await handleServerInit(options);
-  }
+  const projectRoot = (await findProjectRoot(cwd)) || cwd;
+  await handleProjectInit(projectRoot, isJson, dryRun);
 }

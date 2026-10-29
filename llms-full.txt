@@ -71,9 +71,15 @@ The file `pegas.json` resides in the project root and is version-controlled:
 ## 3. CLI Command Reference
 
 ### `pegas init`
-Initializes a project or VPS gateway.
-- Inside a repository: generates `pegas.json`, patches `docker-compose.yml`, updates `package.json`, creates `docs/pegas.md`, and adds `.pegas` to `.gitignore`.
-- On a server (`--server`): provisions `~/gateway`, creates `pegas-network`, and starts `gateway-caddy`.
+Initializes a project and embeds the Pegas orchestration contract.
+- Generates `pegas.json` with detected project slug, service name, and port.
+- Patches `docker-compose.yml` (converts exposed ports to `expose`, attaches `pegas-network`, sets log rotation).
+- Updates `package.json` (`devDependencies`, wraps `dev` script, adds `deploy` script).
+- Creates `docs/pegas.md` AI-agent architectural guidance.
+- Adds `.pegas` to `.gitignore`.
+- Options:
+  - `--dry-run`: Preview planned files and modifications without writing to disk.
+  - `--json`: Machine-readable JSON output for AI agents.
 
 ### `pegas dev [-- <command>]`
 Rootless local HTTPS development proxy.

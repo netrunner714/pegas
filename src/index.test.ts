@@ -256,12 +256,6 @@ describe("main CLI command routing", () => {
         "init",
         "--gateway-dir",
         "/etc/pegas",
-        "--server",
-        "--project",
-        "--email",
-        "test@pegas.io",
-        "--network",
-        "custom-net",
         "--dry-run",
         "--json",
       ],
@@ -270,10 +264,6 @@ describe("main CLI command routing", () => {
 
     expect(calls.init).toEqual({
       gatewayDir: "/etc/pegas",
-      server: true,
-      project: true,
-      email: "test@pegas.io",
-      networkName: "custom-net",
       dryRun: true,
       json: true,
     });

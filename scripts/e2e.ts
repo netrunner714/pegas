@@ -313,11 +313,32 @@ async function runUnifiedE2E() {
     // Configure gateway Caddyfile with auto_https off to allow physical HTTP testing without Let's Encrypt
     const testCaddyfile = `{\n    auto_https off\n    http_port 80\n    https_port 80\n}\n\nimport /etc/caddy/conf.d/*.caddy\n`;
     await fs.writeFile(path.join(gatewayDir, "Caddyfile"), testCaddyfile, "utf-8");
+    await fs.mkdir(path.join(gatewayDir, "conf.d"), { recursive: true });
 
-    // Initialize server gateway (preserves existing Caddyfile)
-    const initGwRes = await execAsync("node", [BIN_PATH, "init", "--server", "--gateway-dir", gatewayDir]);
-    if (initGwRes.code !== 0) {
-      throw new Error(`Failed to initialize server gateway: ${initGwRes.stderr}`);
+    const testCompose = `services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: gateway-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./conf.d:/etc/caddy/conf.d:ro
+    networks:
+      - pegas-network
+
+networks:
+  pegas-network:
+    external: true
+`;
+    await fs.writeFile(path.join(gatewayDir, "docker-compose.yml"), testCompose, "utf-8");
+    await execAsync("docker", ["network", "create", "pegas-network"]).catch(() => {});
+    await execAsync("docker", ["rm", "-f", "gateway-caddy"]).catch(() => {});
+    const startGwRes = await execAsync("docker", ["compose", "up", "-d"], { cwd: gatewayDir });
+    if (startGwRes.code !== 0) {
+      throw new Error(`Failed to initialize test gateway container: ${startGwRes.stderr}`);
     }
     logSuccess(`Server gateway container running in ${gatewayDir} on network 'pegas-network'`);
 

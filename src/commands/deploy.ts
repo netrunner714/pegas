@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
-import { findProjectRoot, findGatewayDir, getProjectRouteFilePath } from "../gateway.js";
+import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir } from "../gateway.js";
 import { CONTRACT_FILENAME, normalizeDomain } from "../contract.js";
 import { PegasContract } from "../types.js";
-import { handleServerInit } from "./init.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { handleReload } from "./reload.js";
 import { parseCaddyProjectFile } from "./list.js";
@@ -208,18 +207,9 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 
   const gatewayDir = await findGatewayDir(options.gatewayDir);
-
-  // Auto-bootstrap server gateway if not yet initialized
-  const caddyfilePath = path.join(gatewayDir, "Caddyfile");
-  try {
-    await fs.access(caddyfilePath);
-  } catch {
-    if (!options.dryRun) {
-      if (!isJson) {
-        console.log("ℹ️  Server gateway not initialized yet. Auto-bootstrapping Pegas on the fly...");
-      }
-      await handleServerInit({ gatewayDir, json: options.json });
-    }
+  const confDir = getConfDir(gatewayDir);
+  if (!options.dryRun) {
+    await fs.mkdir(confDir, { recursive: true });
   }
 
   // Anti-Hijacking Domain Collision Check
@@ -243,7 +233,6 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   }
 
   const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName);
-  const confDir = path.join(gatewayDir, "conf.d");
   const currentProjectFileName = path.basename(projectRouteFile);
 
   try {

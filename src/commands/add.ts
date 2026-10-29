@@ -2,9 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { AddOptions } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
-import { findGatewayDir, getRouteFilePath } from "../gateway.js";
+import { findGatewayDir, getRouteFilePath, getConfDir } from "../gateway.js";
 import { validateCaddyConfig, reloadCaddyConfig } from "../docker.js";
-import { handleServerInit } from "./init.js";
 
 export async function createOrUpdateRouteFile(options: {
   domain: string;
@@ -58,18 +57,9 @@ export async function handleAdd(options: AddOptions): Promise<void> {
   }
 
   const gatewayDir = await findGatewayDir(options.gatewayDir);
-
-  // Auto-bootstrap server gateway if not yet initialized
-  const caddyfilePath = path.join(gatewayDir, "Caddyfile");
-  try {
-    await fs.access(caddyfilePath);
-  } catch {
-    if (!options.dryRun) {
-      if (!isJson) {
-        console.log("ℹ️  Server gateway not initialized yet. Auto-bootstrapping Pegas on the fly...");
-      }
-      await handleServerInit({ gatewayDir, json: options.json });
-    }
+  const confDir = getConfDir(gatewayDir);
+  if (!options.dryRun) {
+    await fs.mkdir(confDir, { recursive: true });
   }
 
   const routeFilePath = getRouteFilePath(gatewayDir, options.domain);

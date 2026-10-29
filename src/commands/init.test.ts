@@ -1,27 +1,8 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-
-let mockDockerOk = true;
-let mockComposeOk = true;
-let mockStartSuccess = true;
-let mockNetworkOk = true;
-
-mock.module("../docker.js", () => ({
-  checkDocker: async () => mockDockerOk,
-  checkDockerCompose: async () => mockComposeOk,
-  ensureDockerNetwork: async () => mockNetworkOk,
-  startGatewayContainer: async () => ({
-    success: mockStartSuccess,
-    stderr: mockStartSuccess ? "" : "daemon start failed",
-  }),
-  validateCaddyConfig: async () => ({
-    success: true,
-  }),
-}));
-
-import { setupGitignore, handleProjectInit, handleServerInit, handleInit } from "./init.js";
+import { setupGitignore, handleProjectInit, handleInit } from "./init.js";
 
 describe("pegas init (unit)", () => {
   it("setupGitignore adds .pegas if missing and is idempotent", async () => {
@@ -143,114 +124,7 @@ describe("pegas init (unit)", () => {
     expect(await fs.access(path.join(tmpProj, ".gitignore")).then(() => true).catch(() => false)).toBe(false);
   });
 
-  it("handleServerInit validates Docker and Docker Compose availability", async () => {
-    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-srv-"));
-    const logs: string[] = [];
-    const errors: string[] = [];
-    const origLog = console.log;
-    const origError = console.error;
-    console.log = (...args) => logs.push(args.join(" "));
-    console.error = (...args) => errors.push(args.join(" "));
-
-    try {
-      // Docker missing (json and text)
-      mockDockerOk = false;
-      await handleServerInit({ gatewayDir: tmpGateway, noExit: true, json: true });
-      await handleServerInit({ gatewayDir: tmpGateway, noExit: true, json: false });
-
-      // Compose missing (json and text)
-      mockDockerOk = true;
-      mockComposeOk = false;
-      await handleServerInit({ gatewayDir: tmpGateway, noExit: true, json: true });
-      await handleServerInit({ gatewayDir: tmpGateway, noExit: true, json: false });
-    } finally {
-      console.log = origLog;
-      console.error = origError;
-      mockDockerOk = true;
-      mockComposeOk = true;
-      await fs.rm(tmpGateway, { recursive: true, force: true });
-    }
-
-    expect(logs.some((l) => l.includes("Docker daemon is not running"))).toBe(true);
-    expect(errors.some((e) => e.includes("Docker daemon is not running"))).toBe(true);
-    expect(logs.some((l) => l.includes("Docker Compose is not available"))).toBe(true);
-    expect(errors.some((e) => e.includes("Docker Compose is not available"))).toBe(true);
-  });
-
-  it("handleServerInit bootstraps gateway directory, configs, network, and container", async () => {
-    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-full-"));
-    mockDockerOk = true;
-    mockComposeOk = true;
-    mockStartSuccess = true;
-
-    const logs: string[] = [];
-    const origLog = console.log;
-    console.log = (...args) => logs.push(args.join(" "));
-
-    try {
-      // Boot with custom email and custom network in JSON mode
-      await handleServerInit({
-        gatewayDir: tmpGateway,
-        email: "admin@mycorp.com",
-        networkName: "custom-pegas-net",
-        noExit: true,
-        json: true,
-      });
-
-      const caddyfile = await fs.readFile(path.join(tmpGateway, "Caddyfile"), "utf-8");
-      expect(caddyfile).toContain("email admin@mycorp.com");
-      expect(caddyfile).toContain("import /etc/caddy/conf.d/*.caddy");
-
-      const compose = await fs.readFile(path.join(tmpGateway, "docker-compose.yml"), "utf-8");
-      expect(compose).toContain("custom-pegas-net");
-
-      // Boot in text mode
-      await handleServerInit({
-        gatewayDir: tmpGateway,
-        noExit: true,
-        json: false,
-      });
-    } finally {
-      console.log = origLog;
-      await fs.rm(tmpGateway, { recursive: true, force: true });
-    }
-
-    expect(logs.some((l) => l.includes('"status":"success"') && l.includes("custom-pegas-net"))).toBe(true);
-    expect(logs.some((l) => l.includes("Pegas server gateway initialized successfully"))).toBe(true);
-  });
-
-  it("handleServerInit handles container startup failure", async () => {
-    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-fail-"));
-    mockDockerOk = true;
-    mockComposeOk = true;
-    mockStartSuccess = false;
-
-    const logs: string[] = [];
-    const errors: string[] = [];
-    const origLog = console.log;
-    const origError = console.error;
-    console.log = (...args) => logs.push(args.join(" "));
-    console.error = (...args) => errors.push(args.join(" "));
-
-    try {
-      // JSON mode
-      await handleServerInit({ gatewayDir: tmpGateway, noExit: true, json: true });
-
-      // Text mode
-      await handleServerInit({ gatewayDir: tmpGateway, noExit: true, json: false });
-    } finally {
-      console.log = origLog;
-      console.error = origError;
-      mockStartSuccess = true;
-      await fs.rm(tmpGateway, { recursive: true, force: true });
-    }
-
-    expect(logs.some((l) => l.includes("Failed to start Caddy container"))).toBe(true);
-    expect(errors.some((e) => e.includes("Failed to start Caddy container"))).toBe(true);
-  });
-
-  it("handleInit dispatches to server or project based on options", async () => {
-    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-dispatch-gw-"));
+  it("handleInit initializes project and respects options", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-dispatch-proj-"));
 
     await fs.writeFile(
@@ -263,20 +137,17 @@ describe("pegas init (unit)", () => {
     console.log = (...args) => logs.push(args.join(" "));
 
     try {
-      // 1. Explicit --server
-      await handleInit({ server: true, gatewayDir: tmpGateway, noExit: true, json: true });
-
-      // 2. Explicit --project (in isolated tmp directory)
-      await handleInit({ project: true, cwd: tmpProj, json: true });
-
-      // 3. Smart detection (pointing to tmpProj)
+      // 1. Standard init
       await handleInit({ cwd: tmpProj, json: true });
+
+      // 2. Dry run init
+      await handleInit({ cwd: tmpProj, dryRun: true, json: true });
     } finally {
       console.log = origLog;
-      await fs.rm(tmpGateway, { recursive: true, force: true });
       await fs.rm(tmpProj, { recursive: true, force: true });
     }
 
     expect(logs.some((l) => l.includes('"status":"success"'))).toBe(true);
+    expect(logs.some((l) => l.includes('"status":"dry-run"'))).toBe(true);
   });
 });

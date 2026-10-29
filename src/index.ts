@@ -38,7 +38,7 @@ USAGE:
   $ pegas <command> [options]
 
 COMMANDS:
-  init                     Init Pegas in current project (or --server for host)
+  init                     Init Pegas in current project
   dev [-- <command>]       Run local dev HTTPS proxy and start dev command (e.g. pegas dev -- next dev)
   deploy                   Declarative deploy: configure Caddy routes from pegas.json and start containers
   down                     Tear down project containers and remove Caddy routes
@@ -50,7 +50,6 @@ COMMANDS:
   llms                     Print machine-readable LLM context
 
 OPTIONS FOR 'init':
-      --server             Initialize host gateway instead of project
       --dry-run            Print planned project files without writing to disk
 
 OPTIONS FOR 'add':
@@ -185,10 +184,6 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       infra: { type: "boolean" },
       "no-infra": { type: "boolean" },
       "gateway-dir": { type: "string" },
-      server: { type: "boolean", default: false },
-      project: { type: "boolean", default: false },
-      email: { type: "string" },
-      network: { type: "string" },
       write: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
       help: { type: "boolean", short: "h" },
@@ -204,10 +199,6 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "init": {
       await dispatch.handleInit({
         gatewayDir: values["gateway-dir"] as string | undefined,
-        server: values.server as boolean | undefined,
-        project: values.project as boolean | undefined,
-        email: values.email as string | undefined,
-        networkName: values.network as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
       });

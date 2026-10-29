@@ -214,7 +214,7 @@ The `pegas.json` file is version-controlled in your repository:
 pegas <command> [options]
 
 COMMANDS:
-  init                     Init Pegas in current project (or --server for VPS gateway)
+  init                     Init Pegas in current project
   dev [-- <command>]       Run local dev HTTPS proxy and start dev command (e.g. pegas dev -- next dev)
   deploy                   Declarative deploy: configure Caddy routes & start containers
   down                     Tear down project containers and remove Caddy routes
@@ -224,6 +224,9 @@ COMMANDS:
   reload                   Validate and hot-reload Caddy configuration
   status                   Check Docker and gateway health
   llms                     Print machine-readable LLM context
+
+OPTIONS FOR 'init':
+      --dry-run            Print planned project files without writing to disk
 
 OPTIONS FOR 'dev':
       --infra              Boot infrastructure services defined in docker-compose.yml

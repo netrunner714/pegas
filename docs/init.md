@@ -1,45 +1,66 @@
 # Команда `pegas init`
 
-Инициализирует окружение. Поведение зависит от контекста выполнения.
-
----
-
-## 1. Сценарий: В проекте (есть `package.json`)
-
-Выполняется разработчиком на этапе локальной разработки в корне репозитория проекта.
+Инициализирует проект и закладывает контракт оркестрации Pegas на этапе разработки.
 
 ```bash
+# Инициализация текущего проекта
 pegas init
-```
 
-### Фактические действия:
-1. Читает `package.json`.
-2. Записывает `"pegas": "^0.1.0"` в секцию `devDependencies`.
-3. Создаёт папку `docs/` (если отсутствует) и файл `docs/pegas.md`.
-4. Проверяет наличие `docker-compose.yml` (или `compose.yaml`).
-5. Выводит в консоль результат:
-   * добавлен ли пакет в `devDependencies`;
-   * создан ли `docs/pegas.md`;
-   * найден или не найден compose-файл.
+# Безопасный предпросмотр без записи файлов
+pegas init --dry-run
+
+# Машиночитаемый JSON для AI-агентов
+pegas init --json
+```
 
 ---
 
-## 2. Сценарий: На сервере (нет `package.json` или передан `--server`)
+## 1. Что делает `pegas init` в проекте
 
-Выполняется на VPS для развёртывания базовой инфраструктуры шлюза.
+Выполняется разработчиком или AI-агентом в корне репозитория проекта:
+
+1. **Создаёт декларативный контракт (`pegas.json`)**:
+   - Автоматически вычисляет имя проекта (slug) из `package.json` или директории.
+   - Детектирует основной веб-сервис и порт в `docker-compose.yml`.
+   - Прописывает dev-домены (`<проект>.localhost`) и prod-домены (`<проект>.com`).
+2. **Обвязывает `package.json`**:
+   - Добавляет пакет `@netrunner714/pegas` в `devDependencies`.
+   - Оборачивает скрипт `dev` в `pegas dev -- <команда>` (или создаёт `dev: "pegas dev"`).
+   - Добавляет команду `deploy: "pegas deploy"`.
+3. **Хирургия Docker Compose (`docker-compose.yml`)**:
+   - Если файла нет — создаёт типовой compose-файл.
+   - Если файл есть — трансформирует конфликтующие внешние порты (`ports: 3000:3000`) в `expose: 3000`.
+   - Настраивает логирование (`json-file` с ротацией).
+   - Подключает проект к внешней сети `pegas-network`.
+4. **Создаёт документацию для ИИ-агентов (`docs/pegas.md`)**:
+   - Правила контракта, адреса upstream и команды для Cursor, Claude Code, Cline.
+5. **Защищает VCS (`.gitignore`)**:
+   - Добавляет служебную директорию `.pegas` в `.gitignore`.
+
+---
+
+## 2. Безопасный предпросмотр (`--dry-run`)
+
+Флаг `--dry-run` позволяет проверить, какие изменения будут внесены в проект, без физической записи на диск:
 
 ```bash
-pegas init --server
-# или просто `pegas init` в директории без package.json
+pegas init --dry-run
 ```
 
-### Фактические действия:
-1. Проверяет доступность Docker демона и Docker Compose.
-2. Создаёт внешнюю Docker-сеть `pegas-network` (если отсутствует).
-3. Создаёт директорию `~/gateway` (или путь из `--gateway-dir`) с подпапкой `conf.d/`.
-4. Создаёт файл `~/gateway/Caddyfile` с директивой `import /etc/caddy/conf.d/*.caddy`.
-5. Создаёт файл `~/gateway/docker-compose.yml` (контейнер `gateway-caddy`, образ `caddy:2-alpine`, порты 80, 443, 443/udp).
-6. Запускает контейнер Caddy: `docker compose up -d`.
+Выведет список запланированных действий:
+```text
+📋 [dry-run] Pegas project initialization preview:
+
+  • Создан контракт pegas.json для проекта 'my-app'
+  • Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas dev --'
+  • Добавлен скрипт 'deploy': 'pegas deploy' в package.json
+  • Добавлен '@netrunner714/pegas' в devDependencies в package.json
+  • Добавлена запись .pegas в .gitignore
+  • Сгенерирован docs/pegas.md
+  • Создан docker-compose.yml с expose и сетью pegas-network
+
+No changes were written to disk. Run 'pegas init' to apply.
+```
 
 ---
 
