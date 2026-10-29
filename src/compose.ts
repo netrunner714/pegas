@@ -434,6 +434,9 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
     }
   }
 
+  const nonProxyServices = services.filter((s) => !omittedServices.has(s.name));
+  const nonInfraServices = nonProxyServices.filter((s) => !isInfraService(s.name, s.lines));
+
   // Step 3: Process non-proxy services
   function processService(entry: ServiceEntry): string[] {
     const sLines = stripOmittedDependsOn(entry.lines, omittedServices);
@@ -442,8 +445,17 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
     const hasExpose = sLines.some((l) => /^\s*expose:\s*$/.test(l));
     const hasPegasNetworkAlready = sLines.some((l) => l.includes("pegas-network"));
 
-    // Web service criteria: not infra, and exposes or has ports or pegas-network
-    const isWeb = !isInfra && (hasPorts || hasExpose || hasPegasNetworkAlready);
+    // Web service criteria:
+    // 1. Not infra, and exposes or has ports or pegas-network
+    // 2. OR not infra, and is the sole non-infra service (or named web/app/site/server) when a proxy was omitted!
+    const isSoleOrNamedApp =
+      !isInfra &&
+      (nonInfraServices.length === 1 ||
+        ["web", "app", "site", "frontend", "server", "backend"].includes(entry.name.toLowerCase()));
+    const isWeb =
+      !isInfra &&
+      (hasPorts || hasExpose || hasPegasNetworkAlready || (omittedServices.size > 0 && isSoleOrNamedApp));
+
     if (!isWeb) {
       return [entry.header, ...sLines];
     }
@@ -588,6 +600,19 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
       });
       if (netIdx !== -1) {
         insertIdx = netIdx;
+      }
+
+      if (exposedPorts.length === 0) {
+        // Check for PORT in environment or fallback to 3000
+        let detectedPort = "3000";
+        for (const l of sLines) {
+          const m = l.match(/PORT\s*=\s*["']?(\d+)["']?/i) || l.match(/PORT\s*:\s*["']?(\d+)["']?/i);
+          if (m) {
+            detectedPort = m[1];
+            break;
+          }
+        }
+        exposedPorts.push(detectedPort);
       }
 
       if (exposedPorts.length > 0) {

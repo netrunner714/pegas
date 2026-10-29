@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { PegasContract, ServiceContract } from "./types.js";
+import { isProxyService, isInfraService } from "./compose.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
@@ -147,49 +148,106 @@ export async function detectComposeWebService(
     "compose.yml",
     "compose.yaml",
   ];
+
   for (const f of composeFiles) {
     try {
       const content = await fs.readFile(path.join(projectDir, f), "utf-8");
-      const lines = content.replace(/\r\n/g, "\n").split("\n");
+      const normalized = content.replace(/\r\n/g, "\n");
+      const lines = normalized.split("\n");
+
+      interface ParsedSvc {
+        name: string;
+        lines: string[];
+        ports: string[];
+        envPort?: string;
+      }
+
+      const services: ParsedSvc[] = [];
       let inServices = false;
       let serviceIndent: number | null = null;
-      let currentService: string | null = null;
-      let currentPorts: string[] = [];
+      let currentSvc: ParsedSvc | null = null;
 
       for (const line of lines) {
         const trimmed = line.trim();
         const indent = line.search(/\S/);
+
         if (indent === 0 && /^services:\s*$/.test(line)) {
           inServices = true;
           continue;
         }
+
         if (indent === 0 && inServices && /^[a-zA-Z0-9_-]+:\s*$/.test(line)) {
+          if (currentSvc) {
+            services.push(currentSvc);
+            currentSvc = null;
+          }
           break;
         }
+
         if (inServices) {
           if (serviceIndent === null && indent > 0 && /^[a-zA-Z0-9._-]+:\s*$/.test(trimmed)) {
             serviceIndent = indent;
           }
+
           if (serviceIndent !== null && indent === serviceIndent && /^[a-zA-Z0-9._-]+:\s*$/.test(trimmed)) {
-            if (currentService && currentPorts.length > 0) {
-              const clean = currentPorts[0].replace(/['"]/g, "").trim();
-              const portMatch = clean.match(/:(\d+)$/) || clean.match(/(\d+)$/);
-              return { name: currentService, port: portMatch ? portMatch[1] : "3000" };
+            if (currentSvc) {
+              services.push(currentSvc);
             }
-            currentService = trimmed.replace(/:\s*$/, "");
-            currentPorts = [];
-          } else if (currentService && /^\s*-\s*["']?\d+/.test(line)) {
-            currentPorts.push(line.trim());
+            currentSvc = {
+              name: trimmed.replace(/:\s*$/, ""),
+              lines: [],
+              ports: [],
+            };
+            continue;
+          }
+
+          if (currentSvc) {
+            currentSvc.lines.push(line);
+            if (/^\s*-\s*["']?\d+/.test(line)) {
+              currentSvc.ports.push(trimmed);
+            }
+            const portEnvMatch =
+              trimmed.match(/^-\s*PORT\s*=\s*["']?(\d+)["']?/i) ||
+              trimmed.match(/^PORT\s*:\s*["']?(\d+)["']?/i);
+            if (portEnvMatch) {
+              currentSvc.envPort = portEnvMatch[1];
+            }
           }
         }
       }
-      if (currentService && currentPorts.length > 0) {
-        const clean = currentPorts[0].replace(/['"]/g, "").trim();
-        const portMatch = clean.match(/:(\d+)$/) || clean.match(/(\d+)$/);
-        return { name: currentService, port: portMatch ? portMatch[1] : "3000" };
+
+      if (currentSvc) {
+        services.push(currentSvc);
       }
+
+      // Filter out proxies and infra
+      const candidates = services.filter(
+        (s) => !isProxyService(s.name, s.lines) && !isInfraService(s.name, s.lines)
+      );
+
+      if (candidates.length === 0) continue;
+
+      // Prefer candidate matching standard web names: web, app, site, frontend, etc.
+      const preferredNames = ["web", "app", "site", "frontend", "server", "backend"];
+      let chosen = candidates.find((c) => preferredNames.includes(c.name.toLowerCase()));
+      if (!chosen) {
+        // Otherwise prefer one with ports
+        chosen = candidates.find((c) => c.ports.length > 0) || candidates[0];
+      }
+
+      let port = "3000";
+      if (chosen.ports.length > 0) {
+        const clean = chosen.ports[0].replace(/['"]/g, "").trim();
+        const portMatch = clean.match(/:(\d+)$/) || clean.match(/(\d+)$/);
+        if (portMatch) port = portMatch[1];
+      } else if (chosen.envPort) {
+        port = chosen.envPort;
+      }
+
+      return { name: chosen.name, port };
     } catch {}
   }
+
   return null;
 }
 
