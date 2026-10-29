@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
+import { VERSION } from "./version.js";
 import {
   setupProjectContract,
   updatePackageJson,
@@ -138,7 +139,7 @@ describe("contract & package.json integration", () => {
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
     expect(updated.scripts.dev).toBe("pegas up --env development -- next dev");
     expect(updated.scripts.deploy).toBe("pegas up --env production");
-    expect(updated.devDependencies["@netrunner714/pegas"]).toBe("^1.1.1");
+    expect(updated.devDependencies["@netrunner714/pegas"]).toBe(`^${VERSION}`);
 
     // Test idempotence
     const secondActions = await updatePackageJson(tmpDir);

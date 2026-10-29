@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
+import { VERSION } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
@@ -347,7 +348,7 @@ export async function updatePackageJson(
       pkg.devDependencies = {};
     }
     if (!pkg.devDependencies["@netrunner714/pegas"] && !pkg.devDependencies.pegas) {
-      pkg.devDependencies["@netrunner714/pegas"] = "^1.1.1";
+      pkg.devDependencies["@netrunner714/pegas"] = `^${VERSION}`;
       actions.push("Добавлен '@netrunner714/pegas' в devDependencies в package.json");
     }
 

@@ -15,7 +15,8 @@ import { handleReload } from "./commands/reload.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 
-export const VERSION = "1.1.1";
+import { VERSION } from "./version.js";
+export { VERSION };
 
 export function validateNodeVersion(current = process.versions.node): boolean {
   if (!current) return true;
