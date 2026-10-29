@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { PegasContract } from "./types.js";
+import { PegasContract, ServiceContract } from "./types.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
@@ -21,6 +21,75 @@ export function normalizeDomain(raw: string): string {
   // Strip trailing dots
   domain = domain.replace(/\.+$/, "");
   return domain;
+}
+
+/**
+ * Resolves the upstream target for a service (e.g. "web:3000").
+ * Prefers explicit `upstream` if defined, otherwise constructs from `serviceName:port`.
+ */
+export function getServiceUpstream(serviceName: string, serviceConfig: ServiceContract): string {
+  if (serviceConfig.upstream) return serviceConfig.upstream;
+  const port = serviceConfig.port ?? 3000;
+  return `${serviceName}:${port}`;
+}
+
+/**
+ * Extracts numeric port from service configuration.
+ */
+export function getServicePort(serviceConfig: ServiceContract): number {
+  if (serviceConfig.port !== undefined) {
+    const p = typeof serviceConfig.port === "string" ? parseInt(serviceConfig.port, 10) : serviceConfig.port;
+    if (!isNaN(p)) return p;
+  }
+  if (serviceConfig.upstream) {
+    const match = serviceConfig.upstream.match(/:(\d+)$/);
+    if (match) return parseInt(match[1], 10);
+  }
+  return 3000;
+}
+
+/**
+ * Returns domains configured for the specified environment name,
+ * with standard aliases (dev <-> development, prod <-> production).
+ */
+export function getEnvironmentDomains(
+  serviceConfig: ServiceContract,
+  env: string
+): string[] {
+  if (!serviceConfig.domains) return [];
+  if (Array.isArray(serviceConfig.domains[env])) {
+    return serviceConfig.domains[env]!;
+  }
+  if (env === "dev" && Array.isArray(serviceConfig.domains.development)) {
+    return serviceConfig.domains.development!;
+  }
+  if (env === "development" && Array.isArray(serviceConfig.domains.dev)) {
+    return serviceConfig.domains.dev!;
+  }
+  if (env === "prod" && Array.isArray(serviceConfig.domains.production)) {
+    return serviceConfig.domains.production!;
+  }
+  if (env === "production" && Array.isArray(serviceConfig.domains.prod)) {
+    return serviceConfig.domains.prod!;
+  }
+  return [];
+}
+
+/**
+ * Lists all environment names configured in any service in the contract.
+ */
+export function listAvailableEnvironments(contract: PegasContract): string[] {
+  const envs = new Set<string>();
+  for (const sCfg of Object.values(contract.services || {})) {
+    if (sCfg.domains) {
+      for (const [env, domains] of Object.entries(sCfg.domains)) {
+        if (Array.isArray(domains) && domains.length > 0) {
+          envs.add(env);
+        }
+      }
+    }
+  }
+  return Array.from(envs);
 }
 
 /**
@@ -130,23 +199,25 @@ export async function detectComposeWebService(
 export function createDefaultContract(
   slug: string,
   serviceName = "web",
-  port = "3000"
+  port: number | string = 3000
 ): PegasContract {
+  const portNum = typeof port === "string" ? parseInt(port, 10) || 3000 : port;
   return {
     projectName: slug,
     services: {
       [serviceName]: {
-        upstream: `${serviceName}:${port}`,
+        port: portNum,
         domains: {
-          dev: [`${slug}.localhost`],
-          prod: [`${slug}.com`],
+          development: [`${slug}.localhost`],
+          stage: [`stage.${slug}.com`],
+          production: [`${slug}.com`],
         },
       },
     },
   };
 }
 
-export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", "3000");
+export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", 3000);
 
 export async function setupProjectContract(
   projectDir: string,
@@ -192,19 +263,19 @@ export async function updatePackageJson(
 
     // 1. Update dev script with pegas wrapper
     if (pkg.scripts.dev) {
-      if (!pkg.scripts.dev.includes("pegas dev")) {
-        pkg.scripts.dev = `pegas dev -- ${pkg.scripts.dev}`;
-        actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas dev --'");
+      if (!pkg.scripts.dev.includes("pegas up") && !pkg.scripts.dev.includes("pegas dev")) {
+        pkg.scripts.dev = `pegas up --env development -- ${pkg.scripts.dev}`;
+        actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas up --env development --'");
       }
     } else {
-      pkg.scripts.dev = "pegas dev";
-      actions.push("Добавлен скрипт 'dev': 'pegas dev' в package.json");
+      pkg.scripts.dev = "pegas up --env development";
+      actions.push("Добавлен скрипт 'dev': 'pegas up --env development' в package.json");
     }
 
     // 2. Add deploy script
-    if (!pkg.scripts.deploy || !pkg.scripts.deploy.includes("pegas deploy")) {
-      pkg.scripts.deploy = "pegas deploy";
-      actions.push("Добавлен скрипт 'deploy': 'pegas deploy' в package.json");
+    if (!pkg.scripts.deploy || (!pkg.scripts.deploy.includes("pegas up") && !pkg.scripts.deploy.includes("pegas deploy"))) {
+      pkg.scripts.deploy = "pegas up --env production";
+      actions.push("Добавлен скрипт 'deploy': 'pegas up --env production' в package.json");
     }
 
     // 3. Add pegas to devDependencies
@@ -212,7 +283,7 @@ export async function updatePackageJson(
       pkg.devDependencies = {};
     }
     if (!pkg.devDependencies["@netrunner714/pegas"] && !pkg.devDependencies.pegas) {
-      pkg.devDependencies["@netrunner714/pegas"] = "^1.0.0";
+      pkg.devDependencies["@netrunner714/pegas"] = "^1.1.0";
       actions.push("Добавлен '@netrunner714/pegas' в devDependencies в package.json");
     }
 

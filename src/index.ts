@@ -4,6 +4,7 @@ import path from "node:path";
 import child_process from "node:child_process";
 import { parseArgs } from "node:util";
 import { handleInit } from "./commands/init.js";
+import { handleUp } from "./commands/up.js";
 import { handleDeploy } from "./commands/deploy.js";
 import { handleDown } from "./commands/down.js";
 import { handleDev } from "./commands/dev.js";
@@ -14,7 +15,7 @@ import { handleReload } from "./commands/reload.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 
-export const VERSION = "1.0.2";
+export const VERSION = "1.1.0";
 
 export function validateNodeVersion(current = process.versions.node): boolean {
   if (!current) return true;
@@ -39,8 +40,9 @@ USAGE:
 
 COMMANDS:
   init                     Init Pegas in current project
-  dev [-- <command>]       Run local dev HTTPS proxy and start dev command (e.g. pegas dev -- next dev)
-  deploy                   Declarative deploy: configure Caddy routes from pegas.json and start containers
+  up --env <name>          Bring up environment (development, stage, production)
+  dev [-- <command>]       Alias for 'pegas up --env development'
+  deploy                   Alias for 'pegas up --env production'
   down                     Tear down project containers and remove Caddy routes
   add <domain> [options]   Route a domain to an internal container upstream
   list, ls                 List all active domain routes
@@ -49,7 +51,14 @@ COMMANDS:
   status                   Check Docker and gateway health
   llms                     Print machine-readable LLM context
 
+OPTIONS FOR 'up':
+  -e, --env <name>         Target environment contour (development, stage, production, etc.)
+      --strict-dns         Abort deployment if DNS records do not match server IP
+      --skip-dns-check     Bypass DNS pre-flight verification
+      --dry-run            Simulate execution without starting containers or updating Caddy
+
 OPTIONS FOR 'init':
+      --dry-run            Print planned project files without writing to disk
       --dry-run            Print planned project files without writing to disk
 
 OPTIONS FOR 'add':
@@ -120,6 +129,7 @@ export function tryLocalDelegation(): void {
 
 export interface MainDispatchers {
   handleInit?: typeof handleInit;
+  handleUp?: typeof handleUp;
   handleDeploy?: typeof handleDeploy;
   handleDown?: typeof handleDown;
   handleDev?: typeof handleDev;
@@ -142,6 +152,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
   const dispatch = {
     handleInit: options.dispatchers?.handleInit || handleInit,
+    handleUp: options.dispatchers?.handleUp || handleUp,
     handleDeploy: options.dispatchers?.handleDeploy || handleDeploy,
     handleDown: options.dispatchers?.handleDown || handleDown,
     handleDev: options.dispatchers?.handleDev || handleDev,
@@ -170,6 +181,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
   const { values, positionals } = parseArgs({
     args: pegasArgs,
     options: {
+      env: { type: "string", short: "e" },
       upstream: { type: "string", short: "u" },
       spa: { type: "boolean", default: false },
       "api-upstream": { type: "string" },
@@ -205,6 +217,22 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       break;
     }
 
+    case "up": {
+      const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : [];
+      await dispatch.handleUp({
+        env: values.env as string | undefined,
+        gatewayDir: values["gateway-dir"] as string | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
+        skipUp: values["skip-up"] as boolean | undefined,
+        skipReadiness: values["skip-readiness"] as boolean | undefined,
+        strictDns: values["strict-dns"] as boolean | undefined,
+        skipDnsCheck: values["skip-dns-check"] as boolean | undefined,
+        json: values.json as boolean | undefined,
+        command: userCmd,
+      });
+      break;
+    }
+
     case "dev": {
       const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : positionals.slice(1);
       let infra: boolean | undefined = undefined;
@@ -222,6 +250,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
     case "deploy": {
       await dispatch.handleDeploy({
+        env: (values.env as string | undefined) || "production",
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         skipUp: values["skip-up"] as boolean | undefined,

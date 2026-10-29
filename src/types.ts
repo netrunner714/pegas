@@ -36,11 +36,32 @@ export interface RouteInfo {
 }
 
 export interface ServiceContract {
-  upstream: string;
+  port?: number | string;
+  upstream?: string;
   domains: {
-    dev: string[];
-    prod: string[];
+    development?: string[];
+    stage?: string[];
+    production?: string[];
+    dev?: string[];
+    prod?: string[];
+    [environment: string]: string[] | undefined;
   };
+}
+
+export interface UpOptions {
+  env?: string;
+  cwd?: string;
+  gatewayDir?: string;
+  dryRun?: boolean;
+  json?: boolean;
+  noExit?: boolean;
+  skipReadiness?: boolean;
+  readinessTimeoutMs?: number;
+  gracePeriodMs?: number;
+  strictDns?: boolean;
+  skipDnsCheck?: boolean;
+  serverIp?: string;
+  skipUp?: boolean;
 }
 
 export interface PegasContract {

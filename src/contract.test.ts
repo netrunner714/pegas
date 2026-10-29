@@ -58,9 +58,9 @@ describe("contract & package.json integration", () => {
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe("my-awesome-site");
-    expect(content.services.web.upstream).toBe("web:3000");
-    expect(content.services.web.domains.dev).toEqual(["my-awesome-site.localhost"]);
-    expect(content.services.web.domains.prod).toEqual(["my-awesome-site.com"]);
+    expect(content.services.web.port).toBe(3000);
+    expect(content.services.web.domains.development).toEqual(["my-awesome-site.localhost"]);
+    expect(content.services.web.domains.production).toEqual(["my-awesome-site.com"]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -80,7 +80,7 @@ describe("contract & package.json integration", () => {
 
     const res = await setupProjectContract(tmpDir);
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
-    expect(content.services.backend.upstream).toBe("backend:8000");
+    expect(content.services.backend.port).toBe(8000);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -95,8 +95,8 @@ describe("contract & package.json integration", () => {
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe(slug);
-    expect(content.services.web.domains.dev).toEqual([`${slug}.localhost`]);
-    expect(content.services.web.domains.prod).toEqual([`${slug}.com`]);
+    expect(content.services.web.domains.development).toEqual([`${slug}.localhost`]);
+    expect(content.services.web.domains.production).toEqual([`${slug}.com`]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -130,15 +130,15 @@ describe("contract & package.json integration", () => {
     expect(actions.length).toBeGreaterThan(0);
 
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
-    expect(updated.scripts.dev).toBe("pegas dev -- next dev");
-    expect(updated.scripts.deploy).toBe("pegas deploy");
-    expect(updated.devDependencies["@netrunner714/pegas"]).toBe("^1.0.0");
+    expect(updated.scripts.dev).toBe("pegas up --env development -- next dev");
+    expect(updated.scripts.deploy).toBe("pegas up --env production");
+    expect(updated.devDependencies["@netrunner714/pegas"]).toBe("^1.1.0");
 
     // Test idempotence
     const secondActions = await updatePackageJson(tmpDir);
     expect(secondActions.length).toBe(0);
     const updatedAgain = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
-    expect(updatedAgain.scripts.dev).toBe("pegas dev -- next dev");
+    expect(updatedAgain.scripts.dev).toBe("pegas up --env development -- next dev");
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -158,7 +158,7 @@ describe("contract & package.json integration", () => {
     expect(contractRes.created).toBe(true);
     expect(contractRes.slug).toBe("dry-app");
     expect(contractRes.contract).toBeDefined();
-    expect(contractRes.contract?.services?.web?.domains?.dev).toEqual(["dry-app.localhost"]);
+    expect(contractRes.contract?.services?.web?.domains?.development).toEqual(["dry-app.localhost"]);
     expect(await fs.access(path.join(tmpDir, CONTRACT_FILENAME)).then(() => true).catch(() => false)).toBe(false);
 
     // Test dry-run package.json update

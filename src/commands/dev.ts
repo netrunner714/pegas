@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import child_process, { ChildProcess } from "node:child_process";
 import { findProjectRoot } from "../gateway.js";
-import { CONTRACT_FILENAME } from "../contract.js";
+import { CONTRACT_FILENAME, getEnvironmentDomains, getServicePort } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { findOrDownloadCaddy } from "../binary.js";
 import { findAvailablePort } from "../ports.js";
@@ -31,19 +31,12 @@ export function generateDevCaddyfile(
 
   const services = contract.services || {};
   for (const [, serviceConfig] of Object.entries(services)) {
-    const devDomains = serviceConfig.domains?.dev;
+    const devDomains = getEnvironmentDomains(serviceConfig, "development");
     if (!Array.isArray(devDomains) || devDomains.length === 0) {
       continue;
     }
 
-    // Extract target port from upstream (e.g. "app:3000" -> 3000)
-    let port = "3000";
-    if (serviceConfig.upstream) {
-      const match = serviceConfig.upstream.match(/:(\d+)$/);
-      if (match) {
-        port = match[1];
-      }
-    }
+    const port = String(getServicePort(serviceConfig));
 
     const domainList = devDomains
       .map((d) => d.trim())
@@ -256,12 +249,29 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     const cmdStr = userCmdArgs.join(" ");
     console.log(`📦 Running command: ${cmdStr}\n`);
 
+    let primaryDevDomain = "";
+    for (const sCfg of Object.values(contract.services || {})) {
+      const dList = getEnvironmentDomains(sCfg, "development");
+      if (dList.length > 0) {
+        primaryDevDomain = dList[0];
+        break;
+      }
+    }
+
+    const devEnv = {
+      ...process.env,
+      NODE_ENV: "development",
+      PEGAS_ENV: "development",
+      ...(primaryDevDomain ? { APP_DOMAIN: primaryDevDomain } : {}),
+    };
+
     await new Promise<void>((resolve) => {
       userProc = child_process.spawn(cmdBinary, cmdArgs, {
         shell: isWin,
         stdio: "inherit",
         cwd: projectRoot,
         detached: !isWin,
+        env: devEnv,
       });
 
       userProc.on("exit", (code) => {

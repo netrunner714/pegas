@@ -2,7 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain } from "../contract.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream } from "../contract.js";
+import { findPegasCompose, setupProjectCompose } from "../compose.js";
 import { PegasContract } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { handleReload } from "./reload.js";
@@ -10,6 +11,7 @@ import { parseCaddyProjectFile } from "./list.js";
 import { validateDomains } from "../dns.js";
 
 export interface DeployOptions {
+  env?: string;
   gatewayDir?: string;
   dryRun?: boolean;
   skipUp?: boolean;
@@ -42,6 +44,7 @@ export async function waitForContainerReadiness(
     timeoutMs?: number;
     pollIntervalMs?: number;
     gracePeriodMs?: number;
+    composeFile?: string;
   } = {}
 ): Promise<ReadinessResult> {
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -56,9 +59,15 @@ export async function waitForContainerReadiness(
   while (Date.now() < deadline) {
     let containerId = "";
     try {
+      const composeArgs = ["compose"];
+      if (options.composeFile) {
+        composeArgs.push("--project-directory", projectRoot, "-f", options.composeFile);
+      }
+      composeArgs.push("ps", "-q", serviceName);
+
       const psRes = child_process.execFileSync(
         "docker",
-        ["compose", "ps", "-q", serviceName],
+        composeArgs,
         { cwd: projectRoot, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 3000 }
       );
       containerId = psRes.trim().split("\n")[0]?.trim();
@@ -151,6 +160,7 @@ export function resolveScopedUpstream(upstream: string, projectName: string): st
 export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
+  const env = options.env || "production";
 
   // 1. Find project root and contract
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
@@ -171,10 +181,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       console.error(`   Run 'pegas init' to generate it.`);
     }
     if (!options.noExit) {
-      if (!options.noExit) {
-        process.exit(1);
-      }
-      return;
+      process.exit(1);
     }
     return;
   }
@@ -195,10 +202,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       console.error(`   ${err.message}`);
     }
     if (!options.noExit) {
-      if (!options.noExit) {
-        process.exit(1);
-      }
-      return;
+      process.exit(1);
     }
     return;
   }
@@ -215,7 +219,8 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   // Anti-Hijacking Domain Collision Check
   const requestedDomains: string[] = [];
   for (const [, serviceConfig] of Object.entries(contract.services || {})) {
-    for (const d of serviceConfig.domains?.prod || []) {
+    const domains = getEnvironmentDomains(serviceConfig, env);
+    for (const d of domains) {
       const norm = normalizeDomain(d);
       if (norm && norm !== "yourdomain.com") {
         if (!requestedDomains.includes(norm)) {
@@ -306,23 +311,40 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   // 4. Cold Start: Start project containers FIRST so they begin spinning up
   if (!options.dryRun && !options.skipUp) {
     if (!isJson) {
-      console.log("\n🚀 [1/3] Starting project containers with Docker Compose...");
+      console.log(`\n🚀 [1/3] Starting project containers for environment '${env}' with Docker Compose...`);
     }
+
+    // Sync non-invasive compose manifest if root compose exists
+    await setupProjectCompose(projectRoot, projectName);
+    const composeFile = await findPegasCompose(projectRoot);
+    const composeCmd = composeFile
+      ? `docker compose --project-directory . -f ${composeFile} up -d`
+      : "docker compose up -d";
+
+    const primaryDomain = requestedDomains[0] || "";
+    const deployEnv = {
+      ...process.env,
+      PEGAS_ENV: env,
+      NODE_ENV: "production",
+      ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
+    };
+
     try {
-      child_process.execSync("docker compose up -d", {
+      child_process.execSync(composeCmd, {
         stdio: "inherit",
         cwd: projectRoot,
+        env: deployEnv,
       });
     } catch (err: any) {
       if (isJson) {
         console.log(
           JSON.stringify({
-            error: "Failed to execute 'docker compose up -d'",
+            error: `Failed to execute '${composeCmd}'`,
             details: err.message,
           })
         );
       } else {
-        console.error("❌ Error: Failed to execute 'docker compose up -d':", err.message);
+        console.error(`❌ Error: Failed to execute '${composeCmd}':`, err.message);
       }
       if (!options.noExit) {
         process.exit(1);
@@ -334,7 +356,8 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     if (!options.skipReadiness) {
       const servicesToCheck: string[] = [];
       for (const [sName, sCfg] of Object.entries(contract.services || {})) {
-        if (Array.isArray(sCfg.domains?.prod) && sCfg.domains.prod.length > 0) {
+        const domains = getEnvironmentDomains(sCfg, env);
+        if (domains.length > 0) {
           servicesToCheck.push(sName);
         }
       }
@@ -347,6 +370,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
           const checkRes = await waitForContainerReadiness(projectRoot, sName, {
             timeoutMs: options.readinessTimeoutMs,
             gracePeriodMs: options.gracePeriodMs,
+            composeFile: composeFile || undefined,
           });
           if (!checkRes.ready) {
             const errMsg = `Service '${sName}' failed readiness check: ${checkRes.reason}`;
@@ -357,10 +381,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
               console.error(`   Deployment aborted before updating Caddy routes.`);
             }
             if (!options.noExit) {
-              if (!options.noExit) {
-        process.exit(1);
-      }
-      return;
+              process.exit(1);
             }
             return;
           }
@@ -382,23 +403,16 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
 
   const services = contract.services || {};
   for (const [serviceName, serviceConfig] of Object.entries(services)) {
-    const prodDomains = serviceConfig.domains?.prod;
-    const upstream = serviceConfig.upstream;
+    const envDomains = getEnvironmentDomains(serviceConfig, env);
+    const upstream = getServiceUpstream(serviceName, serviceConfig);
 
-    if (!Array.isArray(prodDomains) || prodDomains.length === 0) {
-      continue;
-    }
-
-    if (!upstream) {
-      if (!isJson) {
-        console.warn(`⚠️  Warning: Service '${serviceName}' has prod domains but no upstream. Skipping.`);
-      }
+    if (!Array.isArray(envDomains) || envDomains.length === 0) {
       continue;
     }
 
     const scopedUpstream = resolveScopedUpstream(upstream, projectName);
 
-    for (const domain of prodDomains) {
+    for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
       if (!normDomain) continue;
 
@@ -429,10 +443,10 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
         console.log(`  - Route: https://${r.domain} -> ${r.upstream}`);
       }
       if (snippets.length === 0) {
-        console.log("  (No production domains to configure)");
+        console.log(`  (No ${env} domains to configure)`);
       }
     } else {
-      console.log(JSON.stringify({ status: "dry-run", project: projectName, file: projectRouteFile, routes: deployedRoutes }));
+      console.log(JSON.stringify({ status: "dry-run", env, project: projectName, file: projectRouteFile, routes: deployedRoutes }));
     }
     return;
   }
@@ -446,7 +460,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   let fileModified = false;
   if (snippets.length > 0) {
     const combinedCaddyfile =
-      `# Auto-generated by Pegas for project: ${projectName}\n# Do not edit manually; update pegas.json instead.\n\n` +
+      `# Auto-generated by Pegas for project: ${projectName} [${env}]\n# Do not edit manually; update pegas.json instead.\n\n` +
       snippets.join("\n\n") +
       "\n";
 
@@ -462,7 +476,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       }
     }
   } else if (originalContent !== null) {
-    // If all prod routes were removed, delete old project caddyfile
+    // If all routes were removed, delete old project caddyfile
     await fs.unlink(projectRouteFile).catch(() => {});
     fileModified = true;
     if (!isJson) {
@@ -470,7 +484,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     }
   } else {
     if (!isJson) {
-      console.log("\nℹ️  [2/3] No active production domains found in 'pegas.json'.");
+      console.log(`\nℹ️  [2/3] No active ${env} domains found in 'pegas.json'.`);
     }
   }
 
@@ -507,6 +521,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     console.log(
       JSON.stringify({
         status: "success",
+        env,
         project: projectName,
         routeFile: projectRouteFile,
         routes: deployedRoutes,
@@ -515,5 +530,5 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     return;
   }
 
-  console.log(`\n🎉 Project '${projectName}' successfully deployed to Pegas gateway!\n`);
+  console.log(`\n🎉 Project '${projectName}' [${env}] successfully deployed to Pegas gateway!\n`);
 }

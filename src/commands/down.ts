@@ -3,6 +3,7 @@ import path from "node:path";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath } from "../gateway.js";
 import { CONTRACT_FILENAME } from "../contract.js";
+import { findPegasCompose } from "../compose.js";
 import { handleReload } from "./reload.js";
 
 export interface DownOptions {
@@ -58,11 +59,16 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
 
   // Stop containers with docker compose down
   if (!options.skipComposeDown) {
+    const composeFile = await findPegasCompose(projectRoot);
+    const composeCmd = composeFile
+      ? `docker compose --project-directory . -f ${composeFile} down`
+      : "docker compose down";
+
     if (!isJson) {
-      console.log(`\n🛑 [2/2] Stopping project containers with 'docker compose down'...\n`);
+      console.log(`\n🛑 [2/2] Stopping project containers with '${composeCmd}'...\n`);
     }
     try {
-      child_process.execSync("docker compose down", {
+      child_process.execSync(composeCmd, {
         stdio: "inherit",
         cwd: projectRoot,
       });
@@ -70,12 +76,12 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
       if (isJson) {
         console.log(
           JSON.stringify({
-            error: "Failed to execute 'docker compose down'",
+            error: `Failed to execute '${composeCmd}'`,
             details: err.message,
           })
         );
       } else {
-        console.error("❌ Error: Failed to execute 'docker compose down':", err.message);
+        console.error(`❌ Error: Failed to execute '${composeCmd}':`, err.message);
       }
       if (!options.noExit) {
         process.exit(1);

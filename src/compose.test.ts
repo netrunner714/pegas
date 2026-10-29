@@ -122,13 +122,13 @@ networks:
     expect(twice).toBe(once);
   });
 
-  it("creates clean docker-compose.yml if missing in directory", async () => {
+  it("creates clean .pegas/docker-compose.yml if missing in directory", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-compose-"));
     const slug = path.basename(tmpDir).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
     const res = await setupProjectCompose(tmpDir, slug);
 
     expect(res.created).toBe(true);
-    expect(res.file).toBe("docker-compose.yml");
+    expect(res.file).toBe(path.join(".pegas", "docker-compose.yml"));
 
     const createdContent = await fs.readFile(path.join(tmpDir, res.file), "utf-8");
     expect(createdContent).toContain('expose:\n      - "3000"');
@@ -137,23 +137,29 @@ networks:
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("patches existing compose.yaml if present", async () => {
+  it("patches existing compose.yaml into .pegas/docker-compose.yml while leaving original untouched", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-compose-"));
+    const originalContent = 'services:\n  app:\n    build: .\n    ports:\n      - "5000:5000"\n';
     await fs.writeFile(
       path.join(tmpDir, "compose.yaml"),
-      'services:\n  app:\n    build: .\n    ports:\n      - "5000:5000"\n',
+      originalContent,
       "utf-8"
     );
 
     const res = await setupProjectCompose(tmpDir, "my-service");
-    expect(res.created).toBe(false);
-    expect(res.updated).toBe(true);
-    expect(res.file).toBe("compose.yaml");
+    expect(res.created).toBe(true);
+    expect(res.updated).toBe(false);
+    expect(res.file).toBe(path.join(".pegas", "docker-compose.yml"));
 
-    const updatedContent = await fs.readFile(path.join(tmpDir, "compose.yaml"), "utf-8");
-    expect(updatedContent).toContain('expose:\n      - "5000"');
-    expect(updatedContent).not.toContain("5000:5000");
-    expect(updatedContent).toContain("my-service-app");
+    // Root compose.yaml must remain completely untouched!
+    const rootContent = await fs.readFile(path.join(tmpDir, "compose.yaml"), "utf-8");
+    expect(rootContent).toBe(originalContent);
+
+    // .pegas/docker-compose.yml contains non-invasive projection
+    const pegasContent = await fs.readFile(path.join(tmpDir, res.file), "utf-8");
+    expect(pegasContent).toContain('expose:\n      - "5000"');
+    expect(pegasContent).not.toContain("5000:5000");
+    expect(pegasContent).toContain("my-service-app");
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -164,29 +170,58 @@ networks:
     const emptyRes = await setupProjectCompose(tmpEmpty, "empty-proj", true);
     expect(emptyRes.created).toBe(true);
     expect(emptyRes.updated).toBe(false);
-    expect(emptyRes.file).toBe("docker-compose.yml");
-    expect(await fs.access(path.join(tmpEmpty, "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
+    expect(emptyRes.file).toBe(path.join(".pegas", "docker-compose.yml"));
+    expect(await fs.access(path.join(tmpEmpty, ".pegas", "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
     await fs.rm(tmpEmpty, { recursive: true, force: true });
 
     // 2. Dry run when compose exists
     const tmpExisting = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-compose-patch-"));
-    const originalContent = 'services:\n  web:\n    image: nginx\n    ports:\n      - "80:80"\n';
+    const originalContent = 'services:\n  web:\n    image: node:alpine\n    ports:\n      - "3000:3000"\n';
     await fs.writeFile(path.join(tmpExisting, "docker-compose.yml"), originalContent, "utf-8");
 
     const patchRes = await setupProjectCompose(tmpExisting, "patch-proj", true);
-    expect(patchRes.created).toBe(false);
-    expect(patchRes.updated).toBe(true);
-    expect(patchRes.file).toBe("docker-compose.yml");
+    expect(patchRes.created).toBe(true);
+    expect(patchRes.updated).toBe(false);
+    expect(patchRes.file).toBe(path.join(".pegas", "docker-compose.yml"));
 
     const untouchedContent = await fs.readFile(path.join(tmpExisting, "docker-compose.yml"), "utf-8");
     expect(untouchedContent).toBe(originalContent);
+    expect(await fs.access(path.join(tmpExisting, ".pegas", "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
     await fs.rm(tmpExisting, { recursive: true, force: true });
+  });
+
+  it("omits reverse proxy services (caddy, nginx, traefik) and strips them from depends_on", () => {
+    const input = `services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    depends_on:
+      - caddy
+      - db
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+  db:
+    image: postgres:17
+    ports:
+      - "5432:5432"
+`;
+    const result = patchExistingCompose(input, "my-app");
+    expect(result).not.toContain("image: caddy:2-alpine");
+    expect(result).not.toContain("- caddy");
+    expect(result).toContain("- db");
+    expect(result).toContain("5432:5432");
+    expect(result).toContain('expose:\n      - "3000"');
+    expect(result).toContain("my-app-web");
   });
 
   it("injects Docker logging rotation for web services and preserves custom logging", () => {
     const input = `services:
   web:
-    image: nginx
+    image: node:alpine
     ports:
       - "80:80"
   custom-log:

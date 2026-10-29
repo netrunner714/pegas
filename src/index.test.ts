@@ -316,6 +316,7 @@ describe("main CLI command routing", () => {
     );
 
     expect(calls.deploy).toEqual({
+      env: "production",
       gatewayDir: "/var/caddy",
       dryRun: true,
       skipUp: true,
@@ -323,6 +324,29 @@ describe("main CLI command routing", () => {
       strictDns: true,
       skipDnsCheck: true,
       json: true,
+    });
+  });
+
+  it("dispatches 'up' command with environment and options", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleUp: async (opts) => {
+        calls.up = opts;
+      },
+    };
+
+    await main(["up", "--env", "stage", "--dry-run", "--json"], { dispatchers });
+
+    expect(calls.up).toEqual({
+      env: "stage",
+      gatewayDir: undefined,
+      dryRun: true,
+      skipUp: false,
+      skipReadiness: false,
+      strictDns: false,
+      skipDnsCheck: false,
+      json: true,
+      command: [],
     });
   });
 

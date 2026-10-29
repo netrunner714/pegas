@@ -11,13 +11,15 @@ const DOCS_PEGAS_MD = `# Pegas
 
 ## Контракт сервисов
 Конфигурация роутинга объявлена в файле \`pegas.json\`:
-- \`upstream\`: адрес контейнера во внутренней сети \`pegas-network\` (например: \`app:3000\`)
-- \`domains.dev\`: локальные домены разработки (например: \`app.localhost\`)
-- \`domains.prod\`: боевые домены с автоматическим SSL Let's Encrypt
+- \`port\`: порт приложения внутри контейнера (по умолчанию 3000)
+- \`domains.development\`: локальные домены разработки (например: \`app.localhost\`)
+- \`domains.stage\`: домены стейджинга (например: \`stage.app.com\`)
+- \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
 ## Команды
-* Локальная разработка: \`npm/pnpm/bun run dev\` (запускает \`pegas dev\`)
-* Деплой на продакшен: \`npm/pnpm/bun run deploy\` (запускает \`pegas deploy\`)
+* Локальная разработка: \`npm run dev\` (запускает \`pegas up --env development\`)
+* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas up --env production\`)
+* Деплой на стейджинг: \`pegas up --env stage\`
 * Остановка проекта: \`pegas down\`
 
 Документация: https://netrunner714.ru/pegas

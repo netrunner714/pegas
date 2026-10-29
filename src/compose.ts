@@ -98,6 +98,35 @@ export function isInfraService(serviceName: string, serviceLines: string[]): boo
   return false;
 }
 
+export const PROXY_SERVICE_NAMES = new Set([
+  "caddy",
+  "nginx",
+  "traefik",
+  "envoy",
+  "haproxy",
+  "gateway",
+  "reverse-proxy",
+  "proxy",
+]);
+
+export function isProxyService(serviceName: string, serviceLines: string[]): boolean {
+  const lowerName = serviceName.toLowerCase();
+  if (PROXY_SERVICE_NAMES.has(lowerName)) return true;
+  for (const name of PROXY_SERVICE_NAMES) {
+    if (lowerName === name || lowerName.startsWith(`${name}-`) || lowerName.endsWith(`-${name}`)) return true;
+  }
+  for (const line of serviceLines) {
+    const match = line.match(/^\s*image:\s*([^\s]+)/);
+    if (match) {
+      const img = match[1].toLowerCase();
+      for (const name of PROXY_SERVICE_NAMES) {
+        if (img.includes(name)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export interface InfraServiceInfo {
   name: string;
   hostPort?: string;
@@ -207,29 +236,216 @@ export function detectInfraServices(content: string): InfraServiceInfo[] {
   return infraServices;
 }
 
+export function stripOmittedDependsOn(lines: string[], omittedServices: Set<string>): string[] {
+  if (omittedServices.size === 0) return lines;
+
+  const result: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const match = line.match(/^(\s*)depends_on:\s*$/);
+    if (!match) {
+      result.push(line);
+      i++;
+      continue;
+    }
+
+    const depIndent = match[1].length;
+    const depHeader = line;
+    const keptDepLines: string[] = [];
+    i++;
+
+    while (i < lines.length) {
+      const childLine = lines[i];
+      const childTrimmed = childLine.trim();
+      const childIndent = childLine.search(/\S/);
+
+      if (childTrimmed === "" || childTrimmed.startsWith("#")) {
+        i++;
+        continue;
+      }
+
+      if (childIndent <= depIndent) {
+        break; // Exited depends_on block
+      }
+
+      // Format 1: List item: "  - caddy"
+      if (childTrimmed.startsWith("-")) {
+        const depName = childTrimmed.replace(/^-\s*/, "").split(/[\s:#]/)[0].trim();
+        if (omittedServices.has(depName)) {
+          i++;
+        } else {
+          keptDepLines.push(childLine);
+          i++;
+        }
+        continue;
+      }
+
+      // Format 2: Map item: "  caddy:" or "  caddy: { ... }"
+      const mapMatch = childTrimmed.match(/^([a-zA-Z0-9._-]+):/);
+      if (mapMatch) {
+        const depName = mapMatch[1];
+        const isOmitted = omittedServices.has(depName);
+        const mapItemIndent = childIndent;
+
+        if (isOmitted) {
+          i++;
+          // Skip sub-lines belonging to this map item
+          while (i < lines.length) {
+            const subLine = lines[i];
+            const subIndent = subLine.search(/\S/);
+            const subTrimmed = subLine.trim();
+            if (subTrimmed === "" || subTrimmed.startsWith("#")) {
+              i++;
+              continue;
+            }
+            if (subIndent > mapItemIndent) {
+              i++;
+            } else {
+              break;
+            }
+          }
+        } else {
+          keptDepLines.push(childLine);
+          i++;
+          while (i < lines.length) {
+            const subLine = lines[i];
+            const subIndent = subLine.search(/\S/);
+            const subTrimmed = subLine.trim();
+            if (subTrimmed === "" || subTrimmed.startsWith("#")) {
+              keptDepLines.push(subLine);
+              i++;
+              continue;
+            }
+            if (subIndent > mapItemIndent) {
+              keptDepLines.push(subLine);
+              i++;
+            } else {
+              break;
+            }
+          }
+        }
+        continue;
+      }
+
+      keptDepLines.push(childLine);
+      i++;
+    }
+
+    if (keptDepLines.length > 0) {
+      result.push(depHeader);
+      result.push(...keptDepLines);
+    }
+  }
+
+  return result;
+}
+
 export function patchExistingCompose(content: string, projectName = "app"): string {
   // Normalize Windows CRLF line endings
   const normalized = content.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
-  const outputLines: string[] = [];
+
+  // Step 1: Collect all services to detect proxy services
+  interface ServiceEntry {
+    name: string;
+    header: string;
+    lines: string[];
+    indent: number;
+  }
+
+  const services: ServiceEntry[] = [];
+  const otherLinesBeforeServices: string[] = [];
+  const otherLinesAfterServices: string[] = [];
 
   let inServices = false;
-  let serviceNameIndent: number | null = null;
-  let currentServiceName: string | null = null;
-  let currentServiceHeader: string | null = null;
-  let currentServiceLines: string[] = [];
-  let inNetworksSection = false;
+  let pastServices = false;
+  let serviceIndent: number | null = null;
+  let currentSvc: ServiceEntry | null = null;
 
-  function processService(name: string, header: string, sLines: string[]): string[] {
-    const isInfra = isInfraService(name, sLines);
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+    const lineIndent = line.search(/\S/);
+
+    if (lineIndent === 0 && /^[a-zA-Z0-9_-]+:\s*$/.test(line)) {
+      if (trimmed === "services:") {
+        inServices = true;
+        pastServices = false;
+        serviceIndent = null;
+        if (currentSvc) {
+          services.push(currentSvc);
+          currentSvc = null;
+        }
+        continue;
+      } else {
+        if (inServices) {
+          if (currentSvc) {
+            services.push(currentSvc);
+            currentSvc = null;
+          }
+          inServices = false;
+          pastServices = true;
+        }
+      }
+    }
+
+    if (inServices) {
+      if (serviceIndent === null && lineIndent > 0 && /^[a-zA-Z0-9._-]+:\s*$/.test(trimmed)) {
+        serviceIndent = lineIndent;
+      }
+
+      if (serviceIndent !== null && lineIndent === serviceIndent && /^[a-zA-Z0-9._-]+:\s*$/.test(trimmed)) {
+        if (currentSvc) {
+          services.push(currentSvc);
+        }
+        currentSvc = {
+          name: trimmed.replace(/:\s*$/, ""),
+          header: line,
+          lines: [],
+          indent: lineIndent,
+        };
+        continue;
+      }
+
+      if (currentSvc) {
+        currentSvc.lines.push(line);
+        continue;
+      }
+    }
+
+    if (!pastServices && !inServices) {
+      otherLinesBeforeServices.push(line);
+    } else {
+      otherLinesAfterServices.push(line);
+    }
+  }
+
+  if (currentSvc) {
+    services.push(currentSvc);
+  }
+
+  // Step 2: Identify proxy services to omit
+  const omittedServices = new Set<string>();
+  for (const s of services) {
+    if (isProxyService(s.name, s.lines)) {
+      omittedServices.add(s.name);
+    }
+  }
+
+  // Step 3: Process non-proxy services
+  function processService(entry: ServiceEntry): string[] {
+    const sLines = stripOmittedDependsOn(entry.lines, omittedServices);
+    const isInfra = isInfraService(entry.name, sLines);
     const hasPorts = sLines.some((l) => /^\s*ports:\s*$/.test(l));
     const hasExpose = sLines.some((l) => /^\s*expose:\s*$/.test(l));
     const hasPegasNetworkAlready = sLines.some((l) => l.includes("pegas-network"));
 
-    // Microservices / background workers without ports are not web-facing
+    // Web service criteria: not infra, and exposes or has ports or pegas-network
     const isWeb = !isInfra && (hasPorts || hasExpose || hasPegasNetworkAlready);
     if (!isWeb) {
-      return [header, ...sLines];
+      return [entry.header, ...sLines];
     }
 
     const remainingLines: string[] = [];
@@ -238,10 +454,10 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
     let hasPegasNetwork = false;
 
     // Detect indentation of keys inside this service
-    let propIndent = 4;
+    let propIndent = entry.indent + 2;
     for (const l of sLines) {
       const ind = l.search(/\S/);
-      if (ind > (serviceNameIndent ?? 2)) {
+      if (ind > entry.indent) {
         propIndent = ind;
         break;
       }
@@ -358,195 +574,149 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
     }
 
     // Web service transformations:
-    if (isWeb) {
-      // 1. Ensure expose: section exists if exposedPorts found
-      const hasExposeSection = remainingLines.some((l) => {
+    // 1. Ensure expose: section exists if exposedPorts found
+    const hasExposeSection = remainingLines.some((l) => {
+      const ind = l.search(/\S/);
+      return ind === propIndent && /^\s*expose:\s*$/.test(l);
+    });
+
+    if (!hasExposeSection) {
+      let insertIdx = remainingLines.length;
+      const netIdx = remainingLines.findIndex((l) => {
         const ind = l.search(/\S/);
-        return ind === propIndent && /^\s*expose:\s*$/.test(l);
+        return ind === propIndent && /^\s*networks:\s*$/.test(l);
+      });
+      if (netIdx !== -1) {
+        insertIdx = netIdx;
+      }
+
+      if (exposedPorts.length > 0) {
+        const unique = [...new Set(exposedPorts)];
+        const exposeLines = [
+          `${propIndentStr}expose:`,
+          ...unique.map((p) => `${itemIndentStr}- "${p}"`),
+        ];
+        remainingLines.splice(insertIdx, 0, ...exposeLines);
+      }
+    }
+
+    // 2. Ensure networks: default + pegas-network with scoped alias
+    const scopedAlias = `${projectName}-${entry.name}`;
+    const netIndentStr = " ".repeat(propIndent + 2);
+    const aliasIndentStr = " ".repeat(propIndent + 4);
+    const itemAliasIndentStr = " ".repeat(propIndent + 6);
+
+    const aliasSnippet = [
+      `${netIndentStr}default:`,
+      `${netIndentStr}pegas-network:`,
+      `${aliasIndentStr}aliases:`,
+      `${itemAliasIndentStr}- ${scopedAlias}`,
+    ];
+
+    if (!hasNetworks) {
+      remainingLines.push(`${propIndentStr}networks:`);
+      remainingLines.push(...aliasSnippet);
+    } else {
+      const netIdx = remainingLines.findIndex((l) => {
+        const ind = l.search(/\S/);
+        return ind === propIndent && /^\s*networks:\s*$/.test(l);
       });
 
-      if (!hasExposeSection) {
-        let insertIdx = remainingLines.length;
-        const netIdx = remainingLines.findIndex((l) => {
-          const ind = l.search(/\S/);
-          return ind === propIndent && /^\s*networks:\s*$/.test(l);
-        });
-        if (netIdx !== -1) {
-          insertIdx = netIdx;
+      if (netIdx !== -1) {
+        let existingPegasNetworkIdx = -1;
+        let hasScopedAlias = false;
+        let listPegasNetworkIdx = -1;
+
+        for (let k = netIdx + 1; k < remainingLines.length; k++) {
+          const nl = remainingLines[k];
+          const nind = nl.search(/\S/);
+          if (nind <= propIndent && nl.trim() !== "" && !nl.trim().startsWith("#")) {
+            break;
+          }
+          if (nl.trim() === "- pegas-network") {
+            listPegasNetworkIdx = k;
+          } else if (nl.trim() === "pegas-network:") {
+            existingPegasNetworkIdx = k;
+          }
+          if (nl.trim() === `- ${scopedAlias}`) {
+            hasScopedAlias = true;
+          }
         }
 
-        if (exposedPorts.length > 0) {
-          const unique = [...new Set(exposedPorts)];
-          const exposeLines = [
-            `${propIndentStr}expose:`,
-            ...unique.map((p) => `${itemIndentStr}- "${p}"`),
-          ];
-          remainingLines.splice(insertIdx, 0, ...exposeLines);
+        if (listPegasNetworkIdx !== -1) {
+          remainingLines.splice(listPegasNetworkIdx, 1, ...aliasSnippet.slice(1));
+        } else if (existingPegasNetworkIdx !== -1) {
+          if (!hasScopedAlias) {
+            let aliasHeaderIdx = -1;
+            for (let k = existingPegasNetworkIdx + 1; k < remainingLines.length; k++) {
+              const nl = remainingLines[k];
+              const nind = nl.search(/\S/);
+              if (nind <= propIndent + 2 && nl.trim() !== "" && !nl.trim().startsWith("#")) {
+                break;
+              }
+              if (nl.trim() === "aliases:") {
+                aliasHeaderIdx = k;
+                break;
+              }
+            }
+
+            if (aliasHeaderIdx !== -1) {
+              remainingLines.splice(aliasHeaderIdx + 1, 0, `${itemAliasIndentStr}- ${scopedAlias}`);
+            } else {
+              remainingLines.splice(
+                existingPegasNetworkIdx + 1,
+                0,
+                `${aliasIndentStr}aliases:`,
+                `${itemAliasIndentStr}- ${scopedAlias}`
+              );
+            }
+          }
+        } else {
+          remainingLines.splice(netIdx + 1, 0, ...aliasSnippet);
         }
       }
+    }
 
-      // 2. Ensure networks: pegas-network with unique alias: [projectName-name]
-      const scopedAlias = `${projectName}-${name}`;
-      const netIndentStr = " ".repeat(propIndent + 2);
-      const aliasIndentStr = " ".repeat(propIndent + 4);
-      const itemAliasIndentStr = " ".repeat(propIndent + 6);
-
-      const aliasSnippet = [
-        `${netIndentStr}pegas-network:`,
-        `${aliasIndentStr}aliases:`,
-        `${itemAliasIndentStr}- ${scopedAlias}`,
+    // 3. Ensure logging rotation exists
+    const hasLogging = sLines.some((l) => /^\s*logging:\s*$/.test(l));
+    if (!hasLogging) {
+      const logIndentStr = propIndentStr;
+      const logSubIndentStr = " ".repeat(propIndent + 2);
+      const logOptIndentStr = " ".repeat(propIndent + 4);
+      const loggingSnippet = [
+        `${logIndentStr}logging:`,
+        `${logSubIndentStr}driver: "json-file"`,
+        `${logSubIndentStr}options:`,
+        `${logOptIndentStr}max-size: "50m"`,
+        `${logOptIndentStr}max-file: "3"`,
       ];
 
-      if (!hasNetworks) {
-        remainingLines.push(`${propIndentStr}networks:`);
-        remainingLines.push(...aliasSnippet);
+      const netIdx = remainingLines.findIndex((l) => {
+        const ind = l.search(/\S/);
+        return ind === propIndent && /^\s*networks:\s*$/.test(l);
+      });
+      if (netIdx !== -1) {
+        remainingLines.splice(netIdx, 0, ...loggingSnippet);
       } else {
-        const netIdx = remainingLines.findIndex((l) => {
-          const ind = l.search(/\S/);
-          return ind === propIndent && /^\s*networks:\s*$/.test(l);
-        });
-
-        if (netIdx !== -1) {
-          let existingPegasNetworkIdx = -1;
-          let hasScopedAlias = false;
-          let listPegasNetworkIdx = -1;
-
-          for (let k = netIdx + 1; k < remainingLines.length; k++) {
-            const nl = remainingLines[k];
-            const nind = nl.search(/\S/);
-            if (nind <= propIndent && nl.trim() !== "" && !nl.trim().startsWith("#")) {
-              break;
-            }
-            if (nl.trim() === "- pegas-network") {
-              listPegasNetworkIdx = k;
-            } else if (nl.trim() === "pegas-network:") {
-              existingPegasNetworkIdx = k;
-            }
-            if (nl.trim() === `- ${scopedAlias}`) {
-              hasScopedAlias = true;
-            }
-          }
-
-          if (listPegasNetworkIdx !== -1) {
-            remainingLines.splice(listPegasNetworkIdx, 1, ...aliasSnippet);
-          } else if (existingPegasNetworkIdx !== -1) {
-            if (!hasScopedAlias) {
-              // Replace any un-scoped alias or add the scoped alias
-              let aliasHeaderIdx = -1;
-              for (let k = existingPegasNetworkIdx + 1; k < remainingLines.length; k++) {
-                const nl = remainingLines[k];
-                const nind = nl.search(/\S/);
-                if (nind <= propIndent + 2 && nl.trim() !== "" && !nl.trim().startsWith("#")) {
-                  break;
-                }
-                if (nl.trim() === "aliases:") {
-                  aliasHeaderIdx = k;
-                  break;
-                }
-              }
-
-              if (aliasHeaderIdx !== -1) {
-                // Update or append the scoped alias
-                remainingLines.splice(aliasHeaderIdx + 1, 0, `${itemAliasIndentStr}- ${scopedAlias}`);
-              } else {
-                remainingLines.splice(
-                  existingPegasNetworkIdx + 1,
-                  0,
-                  `${aliasIndentStr}aliases:`,
-                  `${itemAliasIndentStr}- ${scopedAlias}`
-                );
-              }
-            }
-          } else {
-            remainingLines.splice(netIdx + 1, 0, ...aliasSnippet);
-          }
-        }
-      }
-
-      // 3. Ensure logging rotation exists to protect disk space from log exhaustion
-      const hasLogging = sLines.some((l) => /^\s*logging:\s*$/.test(l));
-      if (!hasLogging) {
-        const logIndentStr = propIndentStr;
-        const logSubIndentStr = " ".repeat(propIndent + 2);
-        const logOptIndentStr = " ".repeat(propIndent + 4);
-        const loggingSnippet = [
-          `${logIndentStr}logging:`,
-          `${logSubIndentStr}driver: "json-file"`,
-          `${logSubIndentStr}options:`,
-          `${logOptIndentStr}max-size: "50m"`,
-          `${logOptIndentStr}max-file: "3"`,
-        ];
-
-        const netIdx = remainingLines.findIndex((l) => {
-          const ind = l.search(/\S/);
-          return ind === propIndent && /^\s*networks:\s*$/.test(l);
-        });
-        if (netIdx !== -1) {
-          remainingLines.splice(netIdx, 0, ...loggingSnippet);
-        } else {
-          remainingLines.push(...loggingSnippet);
-        }
+        remainingLines.push(...loggingSnippet);
       }
     }
 
-    return [header, ...remainingLines];
+    return [entry.header, ...remainingLines];
   }
 
-  for (let idx = 0; idx < lines.length; idx++) {
-    const line = lines[idx];
-    const trimmed = line.trim();
-    const lineIndent = line.search(/\S/);
+  // Step 4: Assemble output lines
+  const outputLines: string[] = [...otherLinesBeforeServices];
+  outputLines.push("services:");
 
-    // Top-level key check (indent 0)
-    if (lineIndent === 0 && /^[a-zA-Z0-9_-]+:\s*$/.test(line)) {
-      if (currentServiceName && currentServiceHeader) {
-        const processed = processService(currentServiceName, currentServiceHeader, currentServiceLines);
-        outputLines.push(...processed);
-        currentServiceName = null;
-        currentServiceHeader = null;
-        currentServiceLines = [];
-      }
-      if (/^services:\s*$/.test(line)) {
-        inServices = true;
-        serviceNameIndent = null;
-        inNetworksSection = false;
-      } else {
-        inServices = false;
-        inNetworksSection = /^networks:\s*$/.test(line);
-      }
-      outputLines.push(line);
-      continue;
+  for (const s of services) {
+    if (omittedServices.has(s.name)) {
+      continue; // Proxy service omitted
     }
-
-    if (inServices) {
-      if (serviceNameIndent === null && lineIndent > 0 && /^[a-zA-Z0-9._-]+:\s*$/.test(trimmed)) {
-        serviceNameIndent = lineIndent;
-      }
-
-      if (serviceNameIndent !== null && lineIndent === serviceNameIndent && /^[a-zA-Z0-9._-]+:\s*$/.test(trimmed)) {
-        if (currentServiceName && currentServiceHeader) {
-          const processed = processService(currentServiceName, currentServiceHeader, currentServiceLines);
-          outputLines.push(...processed);
-          currentServiceLines = [];
-        }
-        currentServiceName = trimmed.replace(/:\s*$/, "");
-        currentServiceHeader = line;
-        continue;
-      }
-
-      if (currentServiceName) {
-        currentServiceLines.push(line);
-        continue;
-      }
-    }
-
-    outputLines.push(line);
+    outputLines.push(...processService(s));
   }
 
-  if (currentServiceName && currentServiceHeader) {
-    const processed = processService(currentServiceName, currentServiceHeader, currentServiceLines);
-    outputLines.push(...processed);
-  }
+  outputLines.push(...otherLinesAfterServices);
 
   // Ensure root pegas-network network declaration
   let finalContent = outputLines.join("\n");
@@ -566,6 +736,24 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
   }
 
   return finalContent;
+}
+
+export async function findPegasCompose(dir: string): Promise<string | null> {
+  const candidates = [
+    path.join(".pegas", "docker-compose.yml"),
+    path.join(".pegas", "docker-compose.yaml"),
+    path.join(".pegas", "compose.yml"),
+    path.join(".pegas", "compose.yaml"),
+  ];
+
+  for (const file of candidates) {
+    try {
+      await fs.access(path.join(dir, file));
+      return file;
+    } catch {}
+  }
+
+  return findRootCompose(dir);
 }
 
 export async function findRootCompose(dir: string): Promise<string | null> {
@@ -594,28 +782,44 @@ export async function setupProjectCompose(
   const slug = projectName || (await detectProjectSlug(projectDir));
   const existingFile = await findRootCompose(projectDir);
 
+  const pegasDir = path.join(projectDir, ".pegas");
+  const targetRelativePath = path.join(".pegas", "docker-compose.yml");
+  const targetFullPath = path.join(projectDir, targetRelativePath);
+
   if (!existingFile) {
-    const targetFile = "docker-compose.yml";
     if (!dryRun) {
+      await fs.mkdir(pegasDir, { recursive: true });
       await fs.writeFile(
-        path.join(projectDir, targetFile),
+        targetFullPath,
         createDefaultCompose(slug),
         "utf-8"
       );
     }
-    return { created: true, updated: false, file: targetFile };
+    return { created: true, updated: false, file: targetRelativePath };
   }
 
-  const fullPath = path.join(projectDir, existingFile);
-  const original = await fs.readFile(fullPath, "utf-8");
+  const rootFullPath = path.join(projectDir, existingFile);
+  const original = await fs.readFile(rootFullPath, "utf-8");
   const patched = patchExistingCompose(original, slug);
 
-  if (patched !== original) {
+  let existingPegasCompose = "";
+  try {
+    existingPegasCompose = await fs.readFile(targetFullPath, "utf-8");
+  } catch {}
+
+  const isDifferent = patched !== existingPegasCompose;
+
+  if (isDifferent) {
     if (!dryRun) {
-      await fs.writeFile(fullPath, patched, "utf-8");
+      await fs.mkdir(pegasDir, { recursive: true });
+      await fs.writeFile(targetFullPath, patched, "utf-8");
     }
-    return { created: false, updated: true, file: existingFile };
+    return {
+      created: !existingPegasCompose,
+      updated: Boolean(existingPegasCompose),
+      file: targetRelativePath,
+    };
   }
 
-  return { created: false, updated: false, file: existingFile };
+  return { created: false, updated: false, file: targetRelativePath };
 }

@@ -52,7 +52,7 @@ describe("pegas init (unit)", () => {
     // Verify created files
     expect(await fs.access(path.join(tmpProj, "pegas.json")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, "docs", "pegas.md")).then(() => true).catch(() => false)).toBe(true);
-    expect(await fs.access(path.join(tmpProj, "docker-compose.yml")).then(() => true).catch(() => false)).toBe(true);
+    expect(await fs.access(path.join(tmpProj, ".pegas", "docker-compose.yml")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, ".gitignore")).then(() => true).catch(() => false)).toBe(true);
 
     const contract = JSON.parse(await fs.readFile(path.join(tmpProj, "pegas.json"), "utf-8"));
