@@ -138,7 +138,7 @@ describe("contract & package.json integration", () => {
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
     expect(updated.scripts.dev).toBe("pegas up --env development -- next dev");
     expect(updated.scripts.deploy).toBe("pegas up --env production");
-    expect(updated.devDependencies["@netrunner714/pegas"]).toBe("^1.1.0");
+    expect(updated.devDependencies["@netrunner714/pegas"]).toBe("^1.1.1");
 
     // Test idempotence
     const secondActions = await updatePackageJson(tmpDir);

@@ -347,7 +347,7 @@ export async function updatePackageJson(
       pkg.devDependencies = {};
     }
     if (!pkg.devDependencies["@netrunner714/pegas"] && !pkg.devDependencies.pegas) {
-      pkg.devDependencies["@netrunner714/pegas"] = "^1.1.0";
+      pkg.devDependencies["@netrunner714/pegas"] = "^1.1.1";
       actions.push("Добавлен '@netrunner714/pegas' в devDependencies в package.json");
     }
 
