@@ -2,9 +2,47 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { setupGitignore, handleProjectInit, handleInit } from "./init.js";
+import { setupGitignore, setupAgentsMd, PEGAS_AGENT_RULES, handleProjectInit, handleInit } from "./init.js";
 
 describe("pegas init (unit)", () => {
+  it("setupAgentsMd creates, appends, and updates AGENTS.md idempotently", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-agents-"));
+
+    // 1. Missing file: creates AGENTS.md with rules
+    const res1 = await setupAgentsMd(tmpProj);
+    expect(res1).toBe("Создан AGENTS.md с правилами Pegas");
+    const content1 = await fs.readFile(path.join(tmpProj, "AGENTS.md"), "utf-8");
+    expect(content1).toBe(`${PEGAS_AGENT_RULES}\n`);
+
+    // 2. Existing file with exact rules: returns null (no-op)
+    const res2 = await setupAgentsMd(tmpProj);
+    expect(res2).toBeNull();
+
+    // 3. Existing file with other rules (e.g. Next.js): appends Pegas block
+    const nextRules = `<!-- BEGIN:nextjs-agent-rules -->\n# Next.js\n<!-- END:nextjs-agent-rules -->`;
+    await fs.writeFile(path.join(tmpProj, "AGENTS.md"), nextRules, "utf-8");
+    const res3 = await setupAgentsMd(tmpProj);
+    expect(res3).toBe("Добавлен блок правил Pegas в AGENTS.md");
+    const content3 = await fs.readFile(path.join(tmpProj, "AGENTS.md"), "utf-8");
+    expect(content3).toBe(`${nextRules}\n\n${PEGAS_AGENT_RULES}\n`);
+
+    // 4. Existing file with outdated pegas block: updates block in place
+    const oldPegas = `${nextRules}\n\n<!-- BEGIN:pegas-rules -->\nстарые правила\n<!-- END:pegas-rules -->`;
+    await fs.writeFile(path.join(tmpProj, "AGENTS.md"), oldPegas, "utf-8");
+    const res4 = await setupAgentsMd(tmpProj);
+    expect(res4).toBe("Обновлен блок правил Pegas в AGENTS.md");
+    const content4 = await fs.readFile(path.join(tmpProj, "AGENTS.md"), "utf-8");
+    expect(content4).toBe(`${nextRules}\n\n${PEGAS_AGENT_RULES}\n`);
+
+    // 5. Dry run: does not write to disk
+    await fs.rm(path.join(tmpProj, "AGENTS.md"));
+    const res5 = await setupAgentsMd(tmpProj, true);
+    expect(res5).toBe("Создан AGENTS.md с правилами Pegas");
+    expect(await fs.access(path.join(tmpProj, "AGENTS.md")).then(() => true).catch(() => false)).toBe(false);
+
+    await fs.rm(tmpProj, { recursive: true, force: true });
+  });
+
   it("setupGitignore adds .pegas if missing and is idempotent", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-git-"));
 
@@ -52,6 +90,7 @@ describe("pegas init (unit)", () => {
     // Verify created files
     expect(await fs.access(path.join(tmpProj, "pegas.json")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, "docs", "pegas.md")).then(() => true).catch(() => false)).toBe(true);
+    expect(await fs.access(path.join(tmpProj, "AGENTS.md")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, ".pegas", "docker-compose.yml")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, ".gitignore")).then(() => true).catch(() => false)).toBe(true);
 
@@ -120,6 +159,7 @@ describe("pegas init (unit)", () => {
     // Verify disk was completely untouched
     expect(await fs.access(path.join(tmpProj, "pegas.json")).then(() => true).catch(() => false)).toBe(false);
     expect(await fs.access(path.join(tmpProj, "docs", "pegas.md")).then(() => true).catch(() => false)).toBe(false);
+    expect(await fs.access(path.join(tmpProj, "AGENTS.md")).then(() => true).catch(() => false)).toBe(false);
     expect(await fs.access(path.join(tmpProj, "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
     expect(await fs.access(path.join(tmpProj, ".gitignore")).then(() => true).catch(() => false)).toBe(false);
   });

@@ -46,6 +46,46 @@ export async function setupGitignore(projectDir: string, dryRun = false): Promis
   }
 }
 
+export const PEGAS_AGENT_RULES = `<!-- BEGIN:pegas-rules -->
+## Pegas
+- Перед работой с роутингом или окружениями изучить \`docs/pegas.md\` и \`pegas.json\`.
+- Все публичные домены и порты сервисов объявляются в \`pegas.json\`.
+<!-- END:pegas-rules -->`;
+
+export async function setupAgentsMd(projectDir: string, dryRun = false): Promise<string | null> {
+  const agentsPath = path.join(projectDir, "AGENTS.md");
+  const regex = /<!-- BEGIN:pegas-rules -->[\s\S]*?<!-- END:pegas-rules -->/;
+
+  try {
+    const content = await fs.readFile(agentsPath, "utf-8");
+    if (regex.test(content)) {
+      let updated = content.replace(regex, PEGAS_AGENT_RULES);
+      if (!updated.endsWith("\n")) {
+        updated += "\n";
+      }
+      if (updated === content) {
+        return null;
+      }
+      if (!dryRun) {
+        await fs.writeFile(agentsPath, updated, "utf-8");
+      }
+      return "Обновлен блок правил Pegas в AGENTS.md";
+    }
+
+    const trimmed = content.trimEnd();
+    const updated = trimmed.length > 0 ? `${trimmed}\n\n${PEGAS_AGENT_RULES}\n` : `${PEGAS_AGENT_RULES}\n`;
+    if (!dryRun) {
+      await fs.writeFile(agentsPath, updated, "utf-8");
+    }
+    return "Добавлен блок правил Pegas в AGENTS.md";
+  } catch {
+    if (!dryRun) {
+      await fs.writeFile(agentsPath, `${PEGAS_AGENT_RULES}\n`, "utf-8");
+    }
+    return "Создан AGENTS.md с правилами Pegas";
+  }
+}
+
 export async function handleProjectInit(
   cwd = process.cwd(),
   isJson = false,
@@ -84,7 +124,13 @@ export async function handleProjectInit(
   }
   actions.push("Сгенерирован docs/pegas.md");
 
-  // 5. Surgery on docker-compose.yml
+  // 5. Setup AGENTS.md (Pegas agent rules)
+  const agentsAction = await setupAgentsMd(cwd, dryRun);
+  if (agentsAction) {
+    actions.push(agentsAction);
+  }
+
+  // 6. Surgery on docker-compose.yml
   const composeRes = await setupProjectCompose(cwd, contractRes.slug, dryRun);
   if (composeRes.created) {
     actions.push(`Создан ${composeRes.file} с expose и сетью pegas-network`);
