@@ -262,6 +262,7 @@ describe("main CLI command routing", () => {
         "test@pegas.io",
         "--network",
         "custom-net",
+        "--dry-run",
         "--json",
       ],
       { dispatchers }
@@ -273,6 +274,7 @@ describe("main CLI command routing", () => {
       project: true,
       email: "test@pegas.io",
       networkName: "custom-net",
+      dryRun: true,
       json: true,
     });
   });

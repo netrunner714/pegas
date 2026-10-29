@@ -158,6 +158,31 @@ networks:
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it("supports dryRun in setupProjectCompose without modifying files or creating new ones", async () => {
+    // 1. Dry run when no compose exists
+    const tmpEmpty = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-compose-empty-"));
+    const emptyRes = await setupProjectCompose(tmpEmpty, "empty-proj", true);
+    expect(emptyRes.created).toBe(true);
+    expect(emptyRes.updated).toBe(false);
+    expect(emptyRes.file).toBe("docker-compose.yml");
+    expect(await fs.access(path.join(tmpEmpty, "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
+    await fs.rm(tmpEmpty, { recursive: true, force: true });
+
+    // 2. Dry run when compose exists
+    const tmpExisting = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-compose-patch-"));
+    const originalContent = 'services:\n  web:\n    image: nginx\n    ports:\n      - "80:80"\n';
+    await fs.writeFile(path.join(tmpExisting, "docker-compose.yml"), originalContent, "utf-8");
+
+    const patchRes = await setupProjectCompose(tmpExisting, "patch-proj", true);
+    expect(patchRes.created).toBe(false);
+    expect(patchRes.updated).toBe(true);
+    expect(patchRes.file).toBe("docker-compose.yml");
+
+    const untouchedContent = await fs.readFile(path.join(tmpExisting, "docker-compose.yml"), "utf-8");
+    expect(untouchedContent).toBe(originalContent);
+    await fs.rm(tmpExisting, { recursive: true, force: true });
+  });
+
   it("injects Docker logging rotation for web services and preserves custom logging", () => {
     const input = `services:
   web:

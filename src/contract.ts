@@ -149,8 +149,9 @@ export function createDefaultContract(
 export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", "3000");
 
 export async function setupProjectContract(
-  projectDir: string
-): Promise<{ created: boolean; file: string; slug: string }> {
+  projectDir: string,
+  dryRun = false
+): Promise<{ created: boolean; file: string; slug: string; contract?: PegasContract }> {
   const contractPath = path.join(projectDir, CONTRACT_FILENAME);
   const slug = await detectProjectSlug(projectDir);
 
@@ -163,17 +164,20 @@ export async function setupProjectContract(
     const port = detected?.port || "3000";
 
     const defaultContract = createDefaultContract(slug, serviceName, port);
-    await fs.writeFile(
-      contractPath,
-      JSON.stringify(defaultContract, null, 2) + "\n",
-      "utf-8"
-    );
-    return { created: true, file: CONTRACT_FILENAME, slug };
+    if (!dryRun) {
+      await fs.writeFile(
+        contractPath,
+        JSON.stringify(defaultContract, null, 2) + "\n",
+        "utf-8"
+      );
+    }
+    return { created: true, file: CONTRACT_FILENAME, slug, contract: defaultContract };
   }
 }
 
 export async function updatePackageJson(
-  projectDir: string
+  projectDir: string,
+  dryRun = false
 ): Promise<string[]> {
   const actions: string[] = [];
   const pkgPath = path.join(projectDir, "package.json");
@@ -212,7 +216,9 @@ export async function updatePackageJson(
       actions.push("Добавлен '@netrunner714/pegas' в devDependencies в package.json");
     }
 
-    await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+    if (!dryRun) {
+      await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+    }
   } catch {}
 
   return actions;

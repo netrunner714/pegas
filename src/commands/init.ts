@@ -31,7 +31,7 @@ const DOCS_PEGAS_MD = `# Pegas
 Документация: https://netrunner714.ru/pegas
 `;
 
-export async function setupGitignore(projectDir: string): Promise<string | null> {
+export async function setupGitignore(projectDir: string, dryRun = false): Promise<string | null> {
   const gitignorePath = path.join(projectDir, ".gitignore");
   try {
     const content = await fs.readFile(gitignorePath, "utf-8");
@@ -40,15 +40,23 @@ export async function setupGitignore(projectDir: string): Promise<string | null>
       return null;
     }
     const updated = content.endsWith("\n") ? `${content}.pegas\n` : `${content}\n.pegas\n`;
-    await fs.writeFile(gitignorePath, updated, "utf-8");
+    if (!dryRun) {
+      await fs.writeFile(gitignorePath, updated, "utf-8");
+    }
     return "Добавлена запись .pegas в .gitignore";
   } catch {
-    await fs.writeFile(gitignorePath, ".pegas\n", "utf-8");
+    if (!dryRun) {
+      await fs.writeFile(gitignorePath, ".pegas\n", "utf-8");
+    }
     return "Создан .gitignore с записью .pegas";
   }
 }
 
-export async function handleProjectInit(cwd = process.cwd(), isJson = false): Promise<void> {
+export async function handleProjectInit(
+  cwd = process.cwd(),
+  isJson = false,
+  dryRun = false
+): Promise<void> {
   const actions: string[] = [];
 
   if (cwd !== process.cwd()) {
@@ -56,7 +64,7 @@ export async function handleProjectInit(cwd = process.cwd(), isJson = false): Pr
   }
 
   // 1. Contract generation (pegas.json) with smart slug detection
-  const contractRes = await setupProjectContract(cwd);
+  const contractRes = await setupProjectContract(cwd, dryRun);
   if (contractRes.created) {
     actions.push(`Создан контракт ${contractRes.file} для проекта '${contractRes.slug}'`);
   } else {
@@ -64,24 +72,26 @@ export async function handleProjectInit(cwd = process.cwd(), isJson = false): Pr
   }
 
   // 2. Update package.json scripts and devDependencies
-  const pkgActions = await updatePackageJson(cwd);
+  const pkgActions = await updatePackageJson(cwd, dryRun);
   actions.push(...pkgActions);
 
   // 3. Setup .gitignore (.pegas)
-  const gitignoreAction = await setupGitignore(cwd);
+  const gitignoreAction = await setupGitignore(cwd, dryRun);
   if (gitignoreAction) {
     actions.push(gitignoreAction);
   }
 
   // 4. Create docs/pegas.md
   const docsDir = path.join(cwd, "docs");
-  await fs.mkdir(docsDir, { recursive: true });
   const docsPath = path.join(docsDir, "pegas.md");
-  await fs.writeFile(docsPath, DOCS_PEGAS_MD, "utf-8");
+  if (!dryRun) {
+    await fs.mkdir(docsDir, { recursive: true });
+    await fs.writeFile(docsPath, DOCS_PEGAS_MD, "utf-8");
+  }
   actions.push("Сгенерирован docs/pegas.md");
 
   // 5. Surgery on docker-compose.yml
-  const composeRes = await setupProjectCompose(cwd, contractRes.slug);
+  const composeRes = await setupProjectCompose(cwd, contractRes.slug, dryRun);
   if (composeRes.created) {
     actions.push(`Создан ${composeRes.file} с expose и сетью pegas-network`);
   } else if (composeRes.updated) {
@@ -91,7 +101,25 @@ export async function handleProjectInit(cwd = process.cwd(), isJson = false): Pr
   }
 
   if (isJson) {
-    console.log(JSON.stringify({ status: "success", actions, docs: docsPath }));
+    console.log(
+      JSON.stringify({
+        status: dryRun ? "dry-run" : "success",
+        dryRun,
+        project: contractRes.slug,
+        contract: contractRes.contract,
+        actions,
+        docs: docsPath,
+      })
+    );
+    return;
+  }
+
+  if (dryRun) {
+    console.log("\n📋 [dry-run] Pegas project initialization preview:\n");
+    for (const act of actions) {
+      console.log(`  • ${act}`);
+    }
+    console.log("\nNo changes were written to disk. Run 'pegas init' to apply.\n");
     return;
   }
 
@@ -232,6 +260,7 @@ volumes:
 export async function handleInit(options: InitOptions): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
+  const dryRun = options.dryRun ?? false;
 
   // If explicitly requested server
   if (options.server) {
@@ -241,7 +270,7 @@ export async function handleInit(options: InitOptions): Promise<void> {
 
   // If explicitly requested project
   if (options.project) {
-    await handleProjectInit(cwd, isJson);
+    await handleProjectInit(cwd, isJson, dryRun);
     return;
   }
 
@@ -250,7 +279,7 @@ export async function handleInit(options: InitOptions): Promise<void> {
   const projectRoot = await findProjectRoot(cwd);
 
   if (projectRoot) {
-    await handleProjectInit(projectRoot, isJson);
+    await handleProjectInit(projectRoot, isJson, dryRun);
   } else {
     await handleServerInit(options);
   }

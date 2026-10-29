@@ -25,6 +25,7 @@ export interface InitOptions {
   networkName?: string;
   server?: boolean;
   project?: boolean;
+  dryRun?: boolean;
   json?: boolean;
   noExit?: boolean;
 }

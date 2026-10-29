@@ -49,6 +49,10 @@ COMMANDS:
   status                   Check Docker and gateway health
   llms                     Print machine-readable LLM context
 
+OPTIONS FOR 'init':
+      --server             Initialize host gateway instead of project
+      --dry-run            Print planned project files without writing to disk
+
 OPTIONS FOR 'add':
   -u, --upstream <target>  Upstream container:port (e.g. web:3000)
       --spa                SPA mode (separate frontend and API proxying)
@@ -204,6 +208,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         project: values.project as boolean | undefined,
         email: values.email as string | undefined,
         networkName: values.network as string | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
       });
       break;

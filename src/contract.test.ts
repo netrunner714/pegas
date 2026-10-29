@@ -143,6 +143,37 @@ describe("contract & package.json integration", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it("supports dryRun in setupProjectContract and updatePackageJson without writing to disk", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dry-contract-"));
+    const initialPkg = {
+      name: "dry-app",
+      scripts: {
+        dev: "vite",
+      },
+    };
+    await fs.writeFile(path.join(tmpDir, "package.json"), JSON.stringify(initialPkg, null, 2), "utf-8");
+
+    // Test dry-run contract generation
+    const contractRes = await setupProjectContract(tmpDir, true);
+    expect(contractRes.created).toBe(true);
+    expect(contractRes.slug).toBe("dry-app");
+    expect(contractRes.contract).toBeDefined();
+    expect(contractRes.contract?.services?.web?.domains?.dev).toEqual(["dry-app.localhost"]);
+    expect(await fs.access(path.join(tmpDir, CONTRACT_FILENAME)).then(() => true).catch(() => false)).toBe(false);
+
+    // Test dry-run package.json update
+    const actions = await updatePackageJson(tmpDir, true);
+    expect(actions.length).toBeGreaterThan(0);
+    expect(actions.some((a) => a.includes("devDependencies"))).toBe(true);
+
+    const untouched = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
+    expect(untouched.scripts.dev).toBe("vite");
+    expect(untouched.scripts.deploy).toBeUndefined();
+    expect(untouched.devDependencies).toBeUndefined();
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
   it("adds .pegas to .gitignore and creates file if missing", async () => {
     const { setupGitignore } = await import("../src/commands/init.js");
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gi-"));

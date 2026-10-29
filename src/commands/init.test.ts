@@ -104,6 +104,45 @@ describe("pegas init (unit)", () => {
     expect(logs.some((l) => l.includes("уже существует"))).toBe(true);
   });
 
+  it("handleProjectInit supports dry-run mode in json and terminal text modes without touching disk", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-dry-"));
+    await fs.writeFile(
+      path.join(tmpProj, "package.json"),
+      JSON.stringify({ name: "dry-run-project", scripts: { dev: "next dev" } }, null, 2)
+    );
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+
+    try {
+      // 1. JSON dry-run mode
+      await handleProjectInit(tmpProj, true, true);
+
+      // 2. Terminal text dry-run mode
+      await handleProjectInit(tmpProj, false, true);
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
+
+    const jsonLog = logs.find((l) => l.includes('"status":"dry-run"'));
+    expect(jsonLog).toBeDefined();
+    const parsed = JSON.parse(jsonLog!);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.project).toBe("dry-run-project");
+    expect(parsed.actions.length).toBeGreaterThan(0);
+
+    expect(logs.some((l) => l.includes("[dry-run] Pegas project initialization preview:"))).toBe(true);
+    expect(logs.some((l) => l.includes("No changes were written to disk"))).toBe(true);
+
+    // Verify disk was completely untouched
+    expect(await fs.access(path.join(tmpProj, "pegas.json")).then(() => true).catch(() => false)).toBe(false);
+    expect(await fs.access(path.join(tmpProj, "docs", "pegas.md")).then(() => true).catch(() => false)).toBe(false);
+    expect(await fs.access(path.join(tmpProj, "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
+    expect(await fs.access(path.join(tmpProj, ".gitignore")).then(() => true).catch(() => false)).toBe(false);
+  });
+
   it("handleServerInit validates Docker and Docker Compose availability", async () => {
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-srv-"));
     const logs: string[] = [];

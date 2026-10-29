@@ -588,18 +588,21 @@ export async function findRootCompose(dir: string): Promise<string | null> {
 
 export async function setupProjectCompose(
   projectDir: string,
-  projectName?: string
+  projectName?: string,
+  dryRun = false
 ): Promise<{ created: boolean; updated: boolean; file: string }> {
   const slug = projectName || (await detectProjectSlug(projectDir));
   const existingFile = await findRootCompose(projectDir);
 
   if (!existingFile) {
     const targetFile = "docker-compose.yml";
-    await fs.writeFile(
-      path.join(projectDir, targetFile),
-      createDefaultCompose(slug),
-      "utf-8"
-    );
+    if (!dryRun) {
+      await fs.writeFile(
+        path.join(projectDir, targetFile),
+        createDefaultCompose(slug),
+        "utf-8"
+      );
+    }
     return { created: true, updated: false, file: targetFile };
   }
 
@@ -608,7 +611,9 @@ export async function setupProjectCompose(
   const patched = patchExistingCompose(original, slug);
 
   if (patched !== original) {
-    await fs.writeFile(fullPath, patched, "utf-8");
+    if (!dryRun) {
+      await fs.writeFile(fullPath, patched, "utf-8");
+    }
     return { created: false, updated: true, file: existingFile };
   }
 
