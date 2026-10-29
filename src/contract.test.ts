@@ -150,6 +150,29 @@ describe("contract & package.json integration", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it("upgrades older pegas version in devDependencies to current CLI version", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-pkg-upgrade-"));
+    const initialPkg = {
+      name: "my-app",
+      scripts: {
+        dev: "pegas up --env development -- next dev",
+        deploy: "pegas up --env production",
+      },
+      devDependencies: {
+        "@netrunner714/pegas": "^1.0.0",
+      },
+    };
+    await fs.writeFile(path.join(tmpDir, "package.json"), JSON.stringify(initialPkg, null, 2), "utf-8");
+
+    const actions = await updatePackageJson(tmpDir);
+    expect(actions.some((a) => a.includes("Обновлен '@netrunner714/pegas'") && a.includes(`^${VERSION}`))).toBe(true);
+
+    const updated = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
+    expect(updated.devDependencies["@netrunner714/pegas"]).toBe(`^${VERSION}`);
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
   it("supports dryRun in setupProjectContract and updatePackageJson without writing to disk", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dry-contract-"));
     const initialPkg = {

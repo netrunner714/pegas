@@ -92,8 +92,15 @@ EXAMPLES:
   $ pegas list
 `;
 
-export function tryLocalDelegation(): void {
+export function tryLocalDelegation(args = process.argv.slice(2)): void {
   if (process.env.PEGAS_DELEGATED) {
+    return;
+  }
+
+  // Never delegate `init` to local node_modules.
+  // Running `pegas init` is intended to initialize or update the project
+  // using the currently invoked CLI, avoiding entrapment in outdated node_modules.
+  if (args[0] === "init" || args.includes("init")) {
     return;
   }
 
@@ -149,7 +156,7 @@ export interface MainOptions {
 
 export async function main(argv = process.argv.slice(2), options: MainOptions = {}) {
   ensureNodeVersion();
-  tryLocalDelegation();
+  tryLocalDelegation(argv);
 
   const dispatch = {
     handleInit: options.dispatchers?.handleInit || handleInit,

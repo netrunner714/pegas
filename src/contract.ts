@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
-import { VERSION } from "./version.js";
+import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
@@ -343,13 +343,22 @@ export async function updatePackageJson(
       actions.push("Добавлен скрипт 'deploy': 'pegas up --env production' в package.json");
     }
 
-    // 3. Add pegas to devDependencies
+    // 3. Add or upgrade pegas in devDependencies
     if (!pkg.devDependencies) {
       pkg.devDependencies = {};
     }
-    if (!pkg.devDependencies["@netrunner714/pegas"] && !pkg.devDependencies.pegas) {
-      pkg.devDependencies["@netrunner714/pegas"] = `^${VERSION}`;
-      actions.push("Добавлен '@netrunner714/pegas' в devDependencies в package.json");
+    const currentDep = pkg.devDependencies["@netrunner714/pegas"] || pkg.devDependencies.pegas;
+    const targetDep = `^${VERSION}`;
+
+    if (!currentDep) {
+      pkg.devDependencies["@netrunner714/pegas"] = targetDep;
+      actions.push(`Добавлен '@netrunner714/pegas' (${targetDep}) в devDependencies в package.json`);
+    } else if (compareSemver(VERSION, currentDep) > 0) {
+      pkg.devDependencies["@netrunner714/pegas"] = targetDep;
+      if (pkg.devDependencies.pegas && pkg.devDependencies["@netrunner714/pegas"]) {
+        delete pkg.devDependencies.pegas;
+      }
+      actions.push(`Обновлен '@netrunner714/pegas' в devDependencies: ${currentDep} -> ${targetDep}`);
     }
 
     if (!dryRun) {

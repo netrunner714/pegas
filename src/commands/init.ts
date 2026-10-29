@@ -5,6 +5,7 @@ import { findProjectRoot } from "../gateway.js";
 import { setupProjectCompose } from "../compose.js";
 import { setupProjectContract, updatePackageJson } from "../contract.js";
 import { findOrDownloadCaddy } from "../binary.js";
+import { VERSION, compareSemver } from "../version.js";
 
 const DOCS_PEGAS_MD = `# Pegas
 
@@ -100,10 +101,44 @@ export async function setupDevBinary(dryRun = false): Promise<string> {
   }
 }
 
+export async function checkInstalledVersion(projectDir: string): Promise<string | null> {
+  const localPkgPath = path.join(projectDir, "node_modules", "@netrunner714", "pegas", "package.json");
+  const fallbackPkgPath = path.join(projectDir, "node_modules", "pegas", "package.json");
+  for (const p of [localPkgPath, fallbackPkgPath]) {
+    try {
+      const raw = await fs.readFile(p, "utf-8");
+      const data = JSON.parse(raw);
+      if (data.version) return data.version;
+    } catch {}
+  }
+  return null;
+}
+
+export async function checkNpmLatestVersion(timeoutMs = 1200): Promise<string | null> {
+  if (process.env.PEGAS_SKIP_NPM_CHECK || process.env.NODE_ENV === "test") {
+    return null;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch("https://registry.npmjs.org/@netrunner714/pegas/latest", {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { version?: string };
+    return data.version || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleProjectInit(
   cwd = process.cwd(),
   isJson = false,
-  dryRun = false
+  dryRun = false,
+  options: { skipNpmCheck?: boolean } = {}
 ): Promise<void> {
   const actions: string[] = [];
 
@@ -122,6 +157,23 @@ export async function handleProjectInit(
   // 2. Update package.json scripts and devDependencies
   const pkgActions = await updatePackageJson(cwd, dryRun);
   actions.push(...pkgActions);
+
+  // 2b. Check installed node_modules version vs CLI VERSION
+  const installedVer = await checkInstalledVersion(cwd);
+  if (installedVer && compareSemver(VERSION, installedVer) > 0) {
+    actions.push(
+      `В node_modules установлена версия v${installedVer} (актуальная: v${VERSION}). Выполните 'npm install' или 'bun install' для обновления`
+    );
+  }
+
+  // 2c. Check latest version from npm registry (non-blocking)
+  const skipNpm = options.skipNpmCheck ?? Boolean(process.env.PEGAS_SKIP_NPM_CHECK || process.env.NODE_ENV === "test");
+  const npmVer = skipNpm ? null : await checkNpmLatestVersion();
+  if (npmVer && compareSemver(npmVer, VERSION) > 0) {
+    actions.push(
+      `Доступна более новая версия в npm: v${npmVer} (текущая: v${VERSION}). Для обновления: npm i -D @netrunner714/pegas@latest`
+    );
+  }
 
   // 3. Setup .gitignore (.pegas)
   const gitignoreAction = await setupGitignore(cwd, dryRun);

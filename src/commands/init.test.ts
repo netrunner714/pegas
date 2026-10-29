@@ -6,6 +6,8 @@ import {
   setupGitignore,
   setupAgentsMd,
   setupDevBinary,
+  checkInstalledVersion,
+  checkNpmLatestVersion,
   PEGAS_AGENT_RULES,
   handleProjectInit,
   handleInit,
@@ -209,5 +211,42 @@ describe("pegas init (unit)", () => {
 
     expect(logs.some((l) => l.includes('"status":"success"'))).toBe(true);
     expect(logs.some((l) => l.includes('"status":"dry-run"'))).toBe(true);
+  });
+
+  it("checkInstalledVersion detects local version in node_modules", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-installed-check-"));
+    const pkgDir = path.join(tmpProj, "node_modules", "@netrunner714", "pegas");
+    await fs.mkdir(pkgDir, { recursive: true });
+    await fs.writeFile(path.join(pkgDir, "package.json"), JSON.stringify({ version: "1.0.0" }), "utf-8");
+
+    const ver = await checkInstalledVersion(tmpProj);
+    expect(ver).toBe("1.0.0");
+
+    await fs.rm(tmpProj, { recursive: true, force: true });
+  });
+
+  it("handleProjectInit warns when node_modules has older pegas version", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-outdated-"));
+    await fs.writeFile(
+      path.join(tmpProj, "package.json"),
+      JSON.stringify({ name: "outdated-app", devDependencies: { "@netrunner714/pegas": "^1.0.0" } }, null, 2)
+    );
+    const pkgDir = path.join(tmpProj, "node_modules", "@netrunner714", "pegas");
+    await fs.mkdir(pkgDir, { recursive: true });
+    await fs.writeFile(path.join(pkgDir, "package.json"), JSON.stringify({ version: "1.0.0" }), "utf-8");
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+
+    try {
+      await handleProjectInit(tmpProj, true, false, { skipNpmCheck: true });
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    }
+
+    const json = JSON.parse(logs[0]);
+    expect(json.actions.some((a: string) => a.includes("node_modules установлена версия v1.0.0"))).toBe(true);
   });
 });

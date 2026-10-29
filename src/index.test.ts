@@ -164,6 +164,31 @@ describe("tryLocalDelegation", () => {
       syncFs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("bypasses delegation when running 'init' command", () => {
+    const origDelegated = process.env.PEGAS_DELEGATED;
+    const origCwd = process.cwd();
+
+    const tmpDir = syncFs.mkdtempSync(path.join(os.tmpdir(), "pegas-init-delegation-"));
+    const localPegasDir = path.join(tmpDir, "node_modules", "pegas", "dist");
+    syncFs.mkdirSync(localPegasDir, { recursive: true });
+    const localScript = path.join(localPegasDir, "index.js");
+    syncFs.writeFileSync(localScript, "#!/usr/bin/env node\n", "utf-8");
+
+    try {
+      delete process.env.PEGAS_DELEGATED;
+      process.chdir(tmpDir);
+
+      // Even though local pegas exists, passing ["init"] prevents delegation
+      expect(() => tryLocalDelegation(["init"])).not.toThrow();
+    } finally {
+      process.chdir(origCwd);
+      if (origDelegated !== undefined) {
+        process.env.PEGAS_DELEGATED = origDelegated;
+      }
+      syncFs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("findProjectRoot", () => {
