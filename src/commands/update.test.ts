@@ -112,5 +112,38 @@ describe("pegas update", () => {
         await fs.rm(tmpEmpty, { recursive: true, force: true });
       }
     });
+
+    it("rolls back package.json when package manager update command fails", async () => {
+      const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-upd-fail-"));
+      const initialPkg = {
+        name: "my-app",
+        devDependencies: { "@netrunner714/pegas": "^1.0.0" },
+      };
+      await fs.writeFile(path.join(tmpProj, "package.json"), JSON.stringify(initialPkg, null, 2), "utf-8");
+
+      const origSpawnSync = child_process.spawnSync;
+      child_process.spawnSync = (() => ({
+        status: 1,
+        error: new Error("No version matching found on npm"),
+      })) as any;
+
+      const errors: string[] = [];
+      const origError = console.error;
+      console.error = (...args) => errors.push(args.join(" "));
+
+      try {
+        await handleUpdate({ cwd: tmpProj, noExit: true });
+      } finally {
+        child_process.spawnSync = origSpawnSync;
+        console.error = origError;
+      }
+
+      // Verify package.json was rolled back to ^1.0.0
+      const content = JSON.parse(await fs.readFile(path.join(tmpProj, "package.json"), "utf-8"));
+      expect(content.devDependencies["@netrunner714/pegas"]).toBe("^1.0.0");
+      expect(errors.some((e) => e.includes("завершилась с ошибкой"))).toBe(true);
+
+      await fs.rm(tmpProj, { recursive: true, force: true });
+    });
   });
 });

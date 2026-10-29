@@ -35,9 +35,12 @@ export async function resolveTargetVersion(
   npmVerOverride?: string | null
 ): Promise<{ targetVer: string; hasNewerMajor: boolean; availableMajor?: string }> {
   const remoteVer = npmVerOverride !== undefined ? npmVerOverride : await checkNpmLatestVersion();
-  const availableCandidates = [VERSION];
+  const availableCandidates: string[] = [];
   if (remoteVer) {
     availableCandidates.push(remoteVer);
+  }
+  if (availableCandidates.length === 0 || (remoteVer && compareSemver(VERSION, remoteVer) <= 0)) {
+    availableCandidates.push(VERSION);
   }
 
   // Find overall highest version
@@ -149,6 +152,26 @@ export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
     stdio: isJson ? "ignore" : "inherit",
     env: process.env,
   });
+
+  if (child.status !== 0) {
+    // Rollback package.json to original content
+    await fs.writeFile(pkgPath, rawPkg, "utf-8");
+
+    if (isJson) {
+      console.log(
+        JSON.stringify({
+          error: `Update command '${updateCmd}' failed with exit code ${child.status ?? 1}`,
+          oldVersion: currentVer,
+          targetVersion: targetVer,
+        })
+      );
+    } else {
+      console.error(`\n❌ Ошибка: команда '${updateCmd}' завершилась с ошибкой (код ${child.status ?? 1}).`);
+      console.error(`   Изменения в package.json отменены.\n`);
+    }
+    if (!options.noExit) process.exit(1);
+    return;
+  }
 
   // 3. Update docs/pegas.md and AGENTS.md to current standard
   const docsDir = path.join(projectRoot, "docs");
