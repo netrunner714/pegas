@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import { VERSION } from "./version.js";
 import {
   setupProjectContract,
+  reconcileContract,
   updatePackageJson,
   upgradePackageJson,
   slugify,
@@ -109,16 +110,47 @@ describe("contract & package.json integration", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("does not overwrite existing pegas.json", async () => {
+  it("reconcileContract fills in missing blocks like devGateway while preserving custom fields and services", () => {
+    const existing = {
+      projectName: "custom-app",
+      customField: "preserved",
+      services: {
+        api: {
+          port: 8000,
+          domains: { development: ["api.localhost"] },
+        },
+      },
+    };
+    const defaultContract = createDefaultContract("slug", "web", 3000);
+    const { contract, addedFields } = reconcileContract(existing, defaultContract);
+
+    expect(addedFields).toContain("devGateway");
+    expect(contract.projectName).toBe("custom-app");
+    expect(contract.services.api.port).toBe(8000);
+    expect(contract.services.api.domains.development).toEqual(["api.localhost"]);
+    expect((contract as any).customField).toBe("preserved");
+    expect(contract.devGateway).toEqual(defaultContract.devGateway);
+  });
+
+  it("reconciles existing pegas.json on init, and completely resets on force: true", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-contract-"));
-    const custom = { custom: "preserved" };
+    const custom = {
+      projectName: "custom-app",
+      custom: "preserved",
+      services: { web: { port: 3000, domains: { development: ["custom.localhost"] } } },
+    };
     await fs.writeFile(path.join(tmpDir, CONTRACT_FILENAME), JSON.stringify(custom), "utf-8");
 
+    // Soft reconciliation: fills devGateway, preserves custom fields
     const res = await setupProjectContract(tmpDir);
     expect(res.created).toBe(false);
+    expect(res.updated).toBe(true);
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
-    expect(content).toEqual(custom);
+    expect(content.custom).toBe("preserved");
+    expect(content.projectName).toBe("custom-app");
+    expect(content.services.web.domains.development).toEqual(["custom.localhost"]);
+    expect(content.devGateway).toBeDefined();
 
     // Overwrites when force: true and creates backup
     const forceRes = await setupProjectContract(tmpDir, false, true);
@@ -127,10 +159,11 @@ describe("contract & package.json integration", () => {
     expect(forceRes.backupFile).toBe("pegas.json.bak");
 
     const backupContent = JSON.parse(await fs.readFile(path.join(tmpDir, "pegas.json.bak"), "utf-8"));
-    expect(backupContent).toEqual(custom);
+    expect(backupContent.custom).toBe("preserved");
 
     const overwrittenContent = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(overwrittenContent.devGateway).toBeDefined();
+    expect(overwrittenContent.custom).toBeUndefined();
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });

@@ -23,6 +23,7 @@ export interface InitOptions {
   gatewayDir?: string;
   dryRun?: boolean;
   force?: boolean;
+  reset?: boolean;
   json?: boolean;
   noExit?: boolean;
 }

@@ -174,8 +174,11 @@ export async function handleProjectInit(
     actions.push(`Создан контракт ${contractRes.file} для проекта '${contractRes.slug}'`);
   } else if (contractRes.overwritten) {
     actions.push(`Сброшен на дефолт контракт ${contractRes.file} (бэкап сохранен в ${contractRes.backupFile})`);
+  } else if (contractRes.updated) {
+    const fields = contractRes.addedFields?.join(", ") || "devGateway";
+    actions.push(`Дополнен контракт ${contractRes.file}: добавлены недостающие блоки (${fields})`);
   } else {
-    actions.push(`Контракт ${contractRes.file} уже существует`);
+    actions.push(`Контракт ${contractRes.file} актуален`);
   }
 
   // 2. Update package.json scripts and devDependencies
@@ -269,7 +272,7 @@ export async function handleInit(options: InitOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const dryRun = options.dryRun ?? false;
-  const force = options.force ?? false;
+  const force = Boolean(options.force || options.reset);
 
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
   await handleProjectInit(projectRoot, isJson, dryRun, { force });

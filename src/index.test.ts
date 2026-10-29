@@ -292,9 +292,24 @@ describe("main CLI command routing", () => {
     expect(calls.init).toEqual({
       gatewayDir: "/etc/pegas",
       force: true,
+      reset: false,
       dryRun: true,
       json: true,
     });
+  });
+
+  it("dispatches 'init' command with --reset alias", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleInit: async (opts) => {
+        calls.init = opts;
+      },
+    };
+
+    await main(["init", "--reset"], { dispatchers });
+
+    expect(calls.init.force).toBe(true);
+    expect(calls.init.reset).toBe(true);
   });
 
   it("dispatches 'update' command with parsed options", async () => {

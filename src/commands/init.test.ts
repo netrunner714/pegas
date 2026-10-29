@@ -144,7 +144,7 @@ describe("pegas init (unit)", () => {
     }
 
     expect(logs.some((l) => l.includes("Project initialized with Pegas"))).toBe(true);
-    expect(logs.some((l) => l.includes("уже существует"))).toBe(true);
+    expect(logs.some((l) => l.includes("контракт pegas.json") || l.includes("Контракт pegas.json"))).toBe(true);
   });
 
   it("handleProjectInit supports dry-run mode in json and terminal text modes without touching disk", async () => {

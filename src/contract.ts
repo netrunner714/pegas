@@ -282,6 +282,47 @@ export function createDefaultContract(
   };
 }
 
+/**
+ * Safely reconciles an existing contract with default contract schema,
+ * filling in missing standard blocks (e.g. devGateway) without overwriting
+ * or modifying user-configured domains, ports, services, or custom fields.
+ */
+export function reconcileContract(
+  existing: any,
+  defaultContract: PegasContract
+): { contract: PegasContract; addedFields: string[] } {
+  const addedFields: string[] = [];
+  const result: any = { ...existing };
+
+  if (!result.projectName && defaultContract.projectName) {
+    result.projectName = defaultContract.projectName;
+    addedFields.push("projectName");
+  }
+
+  if (!result.devGateway && defaultContract.devGateway) {
+    result.devGateway = { ...defaultContract.devGateway };
+    addedFields.push("devGateway");
+  } else if (result.devGateway && defaultContract.devGateway) {
+    let subAdded = false;
+    for (const [key, val] of Object.entries(defaultContract.devGateway)) {
+      if (result.devGateway[key] === undefined) {
+        result.devGateway[key] = val;
+        subAdded = true;
+      }
+    }
+    if (subAdded) {
+      addedFields.push("devGateway");
+    }
+  }
+
+  if (!result.services || Object.keys(result.services).length === 0) {
+    result.services = { ...defaultContract.services };
+    addedFields.push("services");
+  }
+
+  return { contract: result as PegasContract, addedFields };
+}
+
 export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", 3000);
 
 export async function setupProjectContract(
@@ -291,6 +332,8 @@ export async function setupProjectContract(
 ): Promise<{
   created: boolean;
   overwritten?: boolean;
+  updated?: boolean;
+  addedFields?: string[];
   backupFile?: string;
   file: string;
   slug: string;
@@ -300,20 +343,17 @@ export async function setupProjectContract(
   const backupPath = path.join(projectDir, `${CONTRACT_FILENAME}.bak`);
   const slug = await detectProjectSlug(projectDir);
 
-  let exists = false;
-  try {
-    await fs.access(contractPath);
-    exists = true;
-  } catch {}
-
-  if (exists && !force) {
-    return { created: false, file: CONTRACT_FILENAME, slug };
-  }
-
   const detected = await detectComposeWebService(projectDir);
   const serviceName = detected?.name || "web";
   const port = detected?.port || "3000";
   const defaultContract = createDefaultContract(slug, serviceName, port);
+
+  let existingContent: string | null = null;
+  try {
+    existingContent = await fs.readFile(contractPath, "utf-8");
+  } catch {}
+
+  const exists = existingContent !== null;
 
   if (exists && force) {
     if (!dryRun) {
@@ -332,6 +372,41 @@ export async function setupProjectContract(
       slug,
       contract: defaultContract,
     };
+  }
+
+  if (exists && !force) {
+    try {
+      const existingJson = JSON.parse(existingContent!);
+      const { contract: reconciled, addedFields } = reconcileContract(existingJson, defaultContract);
+
+      if (addedFields.length > 0) {
+        if (!dryRun) {
+          await fs.writeFile(
+            contractPath,
+            JSON.stringify(reconciled, null, 2) + "\n",
+            "utf-8"
+          );
+        }
+        return {
+          created: false,
+          updated: true,
+          addedFields,
+          file: CONTRACT_FILENAME,
+          slug,
+          contract: reconciled,
+        };
+      }
+
+      return {
+        created: false,
+        updated: false,
+        file: CONTRACT_FILENAME,
+        slug,
+        contract: existingJson,
+      };
+    } catch {
+      return { created: false, updated: false, file: CONTRACT_FILENAME, slug };
+    }
   }
 
   if (!dryRun) {
