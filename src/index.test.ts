@@ -242,6 +242,26 @@ describe("main CLI command routing", () => {
     expect(logs.every((l) => l.includes("USAGE:") && l.includes(`pegas v${VERSION}`))).toBe(true);
   });
 
+  it("prints command-specific help on <cmd> --help or help <cmd>", async () => {
+    const logs: string[] = [];
+    console.log = (...args) => logs.push(args.join(" "));
+
+    try {
+      await main(["add", "--help"]);
+      await main(["help", "init"]);
+      await main(["update", "-h"]);
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(logs[0]).toContain("pegas add");
+    expect(logs[0]).toContain("--upstream");
+    expect(logs[1]).toContain("pegas init");
+    expect(logs[1]).toContain("--force");
+    expect(logs[2]).toContain("pegas update");
+    expect(logs[2]).toContain("--latest");
+  });
+
   it("prints version on --version or -v", async () => {
     const logs: string[] = [];
     console.log = (...args) => logs.push(args.join(" "));

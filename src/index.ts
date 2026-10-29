@@ -17,7 +17,8 @@ import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
 
 import { VERSION } from "./version.js";
-export { VERSION };
+import { generateHelpText, getParseArgsOptions } from "./help.js";
+export { VERSION, generateHelpText, getParseArgsOptions };
 
 export function validateNodeVersion(current = process.versions.node): boolean {
   if (!current) return true;
@@ -34,69 +35,6 @@ export function ensureNodeVersion(): void {
     process.exit(1);
   }
 }
-
-const HELP_TEXT = `pegas v${VERSION} — Agent-native Caddy gateway for multi-app VPS
-
-USAGE:
-  $ pegas <command> [options]
-
-COMMANDS:
-  init                     Init Pegas in current project
-  update                   Update @netrunner714/pegas to latest version
-  up --env <name>          Bring up environment (development, stage, production)
-  dev [-- <command>]       Alias for 'pegas up --env development'
-  deploy                   Alias for 'pegas up --env production'
-  down                     Tear down project containers and remove Caddy routes
-  add <domain> [options]   Route a domain to an internal container upstream
-  list, ls                 List all active domain routes
-  remove, rm <domain>      Delete route and reload Caddy
-  reload                   Validate and hot-reload Caddy configuration
-  status                   Check Docker and gateway health
-  llms                     Print machine-readable LLM context
-
-OPTIONS FOR 'update':
-      --latest             Upgrade across major versions (e.g. 1.x -> 2.x)
-      --dry-run            Print planned updates without writing to disk
-
-OPTIONS FOR 'up':
-  -e, --env <name>         Target environment contour (development, stage, production, etc.)
-      --strict-dns         Abort deployment if DNS records do not match server IP
-      --skip-dns-check     Bypass DNS pre-flight verification
-      --dry-run            Simulate execution without starting containers or updating Caddy
-
-OPTIONS FOR 'init':
-      --force              Reset contract pegas.json to defaults (creates pegas.json.bak)
-      --dry-run            Print planned project files without writing to disk
-
-OPTIONS FOR 'add':
-  -u, --upstream <target>  Upstream container:port (e.g. web:3000)
-      --spa                SPA mode (separate frontend and API proxying)
-      --api-upstream <tgt> Upstream for API backend (e.g. api:8000)
-      --api-prefix <pfx>   API path prefix (default: /api/*)
-      --no-www             Do not auto-generate www redirect
-      --force              Overwrite existing route file
-      --dry-run            Print generated config without applying
-
-OPTIONS FOR 'dev':
-      --infra              Boot infrastructure services defined in docker-compose.yml
-      --no-infra           Do not boot infrastructure services even if enabled in pegas.json
-
-OPTIONS FOR 'deploy':
-      --strict-dns         Abort deployment if DNS records do not match server IP
-      --skip-dns-check     Bypass DNS pre-flight verification
-
-GLOBAL OPTIONS:
-      --gateway-dir <path> Override path to gateway directory
-      --json               Output machine-readable JSON (ideal for AI agents)
-  -h, --help               Show this help message
-  -v, --version            Show version
-
-EXAMPLES:
-  $ pegas init
-  $ pegas add myapp.ru --upstream web:3000
-  $ pegas add api.myapp.ru --upstream api:8000
-  $ pegas list
-`;
 
 export function tryLocalDelegation(args = process.argv.slice(2)): void {
   if (process.env.PEGAS_DELEGATED) {
@@ -184,8 +122,8 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
   const doubleDashIdx = rawArgs.indexOf("--");
   const pegasArgs = doubleDashIdx !== -1 ? rawArgs.slice(0, doubleDashIdx) : rawArgs;
 
-  if (pegasArgs.length === 0 || pegasArgs.includes("-h") || pegasArgs.includes("--help")) {
-    console.log(HELP_TEXT);
+  if (pegasArgs.length === 0) {
+    console.log(generateHelpText());
     return;
   }
 
@@ -196,36 +134,18 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
   const { values, positionals } = parseArgs({
     args: pegasArgs,
-    options: {
-      env: { type: "string", short: "e" },
-      upstream: { type: "string", short: "u" },
-      spa: { type: "boolean", default: false },
-      "api-upstream": { type: "string" },
-      "api-prefix": { type: "string", default: "/api/*" },
-      "no-www": { type: "boolean", default: false },
-      force: { type: "boolean", default: false },
-      "dry-run": { type: "boolean", default: false },
-      "skip-up": { type: "boolean", default: false },
-      "skip-readiness": { type: "boolean", default: false },
-      "strict-dns": { type: "boolean", default: false },
-      "skip-dns-check": { type: "boolean", default: false },
-      infra: { type: "boolean" },
-      "no-infra": { type: "boolean" },
-      "system-caddy": { type: "boolean" },
-      "caddy-path": { type: "string" },
-      "gateway-dir": { type: "string" },
-      cwd: { type: "string" },
-      write: { type: "boolean", default: false },
-      latest: { type: "boolean", default: false },
-      json: { type: "boolean", default: false },
-      help: { type: "boolean", short: "h" },
-      version: { type: "boolean", short: "v" },
-    },
+    options: getParseArgsOptions(),
     allowPositionals: true,
     strict: false,
   });
 
   const command = positionals[0]?.toLowerCase();
+
+  if (command === "help" || values.help || pegasArgs.includes("-h") || pegasArgs.includes("--help")) {
+    const targetCommand = command === "help" ? positionals[1]?.toLowerCase() : command;
+    console.log(generateHelpText(targetCommand));
+    return;
+  }
 
   switch (command) {
     case "init": {
