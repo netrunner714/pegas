@@ -7,8 +7,10 @@
 | `pegas init` | Инициализирует проект (`pegas.json`, `package.json`, `docs/pegas.md`) | `dev / local` |
 | `pegas init --force` | Сбрасывает `pegas.json` на значения по умолчанию (создаёт бэкап) | `dev / local` |
 | `pegas init --dry-run` | Симулирует инициализацию без записи файлов | `dev / local` |
-| `pegas dev` | Поднимает локальный Caddy с HTTPS на `*.localhost` и проксирует трафик на порт сервиса | `dev` |
+| `pegas dev` | Поднимает локальный Caddy с HTTPS на `[service].[project].localhost` (порт 443, fallback 8443) | `dev` |
 | `pegas dev -- <команда>` | Поднимает Caddy и запускает приложение разработчика в одном окне (напр. `pegas dev -- next dev`) | `dev` |
+| `pegas ca install` | Генерирует локальный Root CA, добавляет его в доверенные ОС и выдаёт Caddy порт 443 (setcap) | `dev / local` |
+| `pegas ca remove` | Удаляет локальный Root CA из системного хранилища доверия | `dev / local` |
 | `pegas deploy <контур>` | Деплоит контейнеры и настраивает Caddy для контура (`production`, `stage`) | `prod / stage` |
 | `pegas down` | Останавливает контейнеры проекта и удаляет его маршруты из Caddy | `prod / stage` |
 | `pegas status` | Единый дашборд: здоровье шлюза Caddy, статус контейнеров и роутов проекта | `любое` |

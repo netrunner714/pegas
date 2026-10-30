@@ -286,9 +286,10 @@ server.listen(${devMockPort}, '127.0.0.1', () => {
     for (let attempt = 0; attempt < 30; attempt++) {
       await new Promise((r) => setTimeout(r, 300));
       if (devStdout.includes("Pegas proxy active at:")) {
-        const match = devStdout.match(/https:\/\/[^:]+:(\d+)/);
+        const match = devStdout.match(/https:\/\/\S+/);
         if (match) {
-          activeHttpsPort = parseInt(match[1], 10);
+          const parsedUrl = new URL(match[0]);
+          activeHttpsPort = parseInt(parsedUrl.port || "443", 10);
         }
         proxyReady = true;
         break;

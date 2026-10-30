@@ -83,12 +83,17 @@ Initializes a project and embeds the Pegas orchestration contract.
 
 ### `pegas dev [-- <command>]`
 Rootless local HTTPS development proxy.
-- Finds available unprivileged ports (8443+ for HTTPS, 8080+ for HTTP).
-- Generates `.pegas/Caddyfile.dev` with `skip_install_trust`.
+- Uses standard ports 443/80 for clean URLs (`https://web.my-app.localhost`) with graceful fallback to 8443/8080.
+- Generates `.pegas/Caddyfile.dev` and boots a local Caddy (optionally with `skip_install_trust` if explicitly enabled).
 - Boots local Caddy in background and launches the developer's command (e.g., `pegas dev -- next dev`).
 - Options:
   - `--infra`: Boot infrastructure containers from `docker-compose.yml`.
   - `--no-infra`: Prevent booting infrastructure containers even if `bootInfra: true`.
+
+### `pegas ca <install|remove>`
+Manage the local Root CA for trusted dev HTTPS (green browser lock, no `NET::ERR_CERT_AUTHORITY_INVALID`).
+- `pegas ca install` — generates the Pegas Root CA (`~/.pegas/ca/root.crt`), installs it into the OS trust store (Linux, macOS, Windows/WSL), and on Linux grants Caddy `cap_net_bind_service` for port 443.
+- `pegas ca remove` — removes the Root CA from the OS trust store and cleans up the exported certificate.
 
 ### `pegas deploy`
 Declarative production deployment.

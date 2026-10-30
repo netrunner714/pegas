@@ -58,6 +58,13 @@ export interface ServiceContract {
   };
 }
 
+export interface CaOptions {
+  action?: string;
+  json?: boolean;
+  dryRun?: boolean;
+  noExit?: boolean;
+}
+
 export interface UpOptions {
   env?: string;
   cwd?: string;

@@ -254,6 +254,10 @@ export async function detectComposeWebService(
 
 /**
  * Generates the standard default Pegas contract for a given project slug.
+ *
+ * Dev-домены следуют стандарту `[service].[project].localhost` с алиасом
+ * `[project].localhost` для основного сервиса. Порты dev-шлюза по умолчанию —
+ * стандартные 443/80 (чистые URL без `:порт` в браузере).
  */
 export function createDefaultContract(
   slug: string,
@@ -264,16 +268,16 @@ export function createDefaultContract(
   return {
     projectName: slug,
     devGateway: {
-      httpPort: 8080,
-      httpsPort: 8443,
-      skipInstallTrust: true,
+      httpPort: 80,
+      httpsPort: 443,
+      skipInstallTrust: false,
       admin: false,
     },
     services: {
       [serviceName]: {
         port: portNum,
         domains: {
-          development: [`${slug}.localhost`],
+          development: [`${serviceName}.${slug}.localhost`, `${slug}.localhost`],
           stage: [`stage.${slug}.com`],
           production: [`${slug}.com`],
         },

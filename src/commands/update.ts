@@ -15,8 +15,8 @@ const DOCS_PEGAS_MD = `# Pegas
 ## Контракт сервисов
 Конфигурация роутинга объявлена в файле \`pegas.json\`:
 - \`port\`: порт приложения внутри контейнера (по умолчанию 3000)
-- \`devGateway\`: параметры локального шлюза дева (\`httpPort: 8080\`, \`httpsPort: 8443\`, \`skipInstallTrust: true\`, \`admin: false\`)
-- \`domains.development\`: локальные домены разработки (например: \`app.localhost\`)
+- \`devGateway\`: параметры локального шлюза дева (по умолчанию \`httpsPort: 443\`, \`httpPort: 80\` — чистые URL без порта)
+- \`domains.development\`: локальные домены разработки (\`[service].[project].localhost\`, например: \`web.my-app.localhost\`)
 - \`domains.stage\`: домены стейджинга (например: \`stage.app.com\`)
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
@@ -25,6 +25,7 @@ const DOCS_PEGAS_MD = `# Pegas
 * Деплой на продакшен: \`npm run deploy\` (запускает \`pegas deploy production\`)
 * Деплой на стейджинг: \`pegas deploy stage\`
 * Остановка проекта: \`pegas down\`
+* Доверенный локальный HTTPS: \`pegas ca install\` (один раз на машину)
 
 Документация: https://netrunner714.ru/pegas
 `;

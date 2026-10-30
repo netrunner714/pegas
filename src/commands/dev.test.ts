@@ -29,7 +29,7 @@ describe("pegas dev", () => {
     expect(caddyfile).toContain("admin off");
     expect(caddyfile).toContain("https_port 8444");
     expect(caddyfile).toContain("http_port 8081");
-    expect(caddyfile).toContain("skip_install_trust");
+    expect(caddyfile).not.toContain("skip_install_trust");
     expect(caddyfile).toContain("app.localhost {");
     expect(caddyfile).toContain("reverse_proxy localhost:3000");
   });

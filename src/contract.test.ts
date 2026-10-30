@@ -62,13 +62,16 @@ describe("contract & package.json integration", () => {
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe("my-awesome-site");
     expect(content.devGateway).toEqual({
-      httpPort: 8080,
-      httpsPort: 8443,
-      skipInstallTrust: true,
+      httpPort: 80,
+      httpsPort: 443,
+      skipInstallTrust: false,
       admin: false,
     });
     expect(content.services.web.port).toBe(3000);
-    expect(content.services.web.domains.development).toEqual(["my-awesome-site.localhost"]);
+    expect(content.services.web.domains.development).toEqual([
+      "web.my-awesome-site.localhost",
+      "my-awesome-site.localhost",
+    ]);
     expect(content.services.web.domains.production).toEqual(["my-awesome-site.com"]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
@@ -104,7 +107,7 @@ describe("contract & package.json integration", () => {
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe(slug);
-    expect(content.services.web.domains.development).toEqual([`${slug}.localhost`]);
+    expect(content.services.web.domains.development).toEqual([`web.${slug}.localhost`, `${slug}.localhost`]);
     expect(content.services.web.domains.production).toEqual([`${slug}.com`]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
@@ -255,7 +258,7 @@ describe("contract & package.json integration", () => {
     expect(contractRes.created).toBe(true);
     expect(contractRes.slug).toBe("dry-app");
     expect(contractRes.contract).toBeDefined();
-    expect(contractRes.contract?.services?.web?.domains?.development).toEqual(["dry-app.localhost"]);
+    expect(contractRes.contract?.services?.web?.domains?.development).toEqual(["web.dry-app.localhost", "dry-app.localhost"]);
     expect(await fs.access(path.join(tmpDir, CONTRACT_FILENAME)).then(() => true).catch(() => false)).toBe(false);
 
     // Test dry-run package.json update

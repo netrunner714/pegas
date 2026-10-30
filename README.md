@@ -90,7 +90,8 @@ npm run dev
 # or: npx pegas dev -- next dev
 ```
 
-* **Zero-Config Local HTTPS**: Starts local native Caddy on unprivileged ports (`https://<project>.localhost:8443`).
+* **Zero-Config Local HTTPS**: Starts local native Caddy on standard ports (`https://<project>.localhost` — чистый URL без порта) с graceful fallback на 8443+.
+* **Trusted Local CA (`pegas ca install`)**: One command installs a local Root CA into the OS trust store — green browser lock, no `NET::ERR_CERT_AUTHORITY_INVALID`, no third-party mkcert.
 * **Smart Infra Boot (Optional)**: Automatically starts databases (Postgres, Redis, MongoDB, MySQL) via `docker compose up -d <services>` when enabled:
   ```bash
   npx pegas dev --infra -- npm run dev
@@ -216,6 +217,8 @@ pegas <command> [options]
 COMMANDS:
   init                     Init Pegas in current project
   dev [-- <command>]       Run local dev HTTPS proxy and start dev command (e.g. pegas dev -- next dev)
+  ca install               Install local Root CA into OS trust store (trusted green-lock HTTPS)
+  ca remove                Remove local Root CA from OS trust store
   deploy                   Declarative deploy: configure Caddy routes & start containers
   down                     Tear down project containers and remove Caddy routes
   add <domain> [options]   Imperatively route a domain to an internal container upstream
@@ -261,7 +264,7 @@ Pegas is designed from the ground up for **Agent-Driven Development**:
 
 * **No Docker Socket in Gateway**: Unlike Traefik, Pegas does not mount `/var/run/docker.sock` into the web-facing proxy container, eliminating privilege escalation vulnerabilities.
 * **Default Security Headers**: Automatically applies `Strict-Transport-Security` (HSTS), `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin`.
-* **Rootless Local Dev**: `pegas dev` uses `skip_install_trust` and unprivileged ports, requiring zero root/sudo permissions.
+* **Rootless Local Dev**: `pegas dev` runs in user space; `pegas ca install` grants Caddy `cap_net_bind_service` on Linux (one-time `sudo`) and unprivileged fallback ports (8443+) otherwise.
 * **Automatic Rollback**: If syntax validation fails during reload, the previous configuration is immediately restored.
 
 ---

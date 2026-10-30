@@ -10,6 +10,7 @@ import { handleDev } from "./commands/dev.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
+import { handleCa } from "./commands/ca.js";
 
 import { VERSION } from "./version.js";
 import { generateHelpText, getParseArgsOptions } from "./help.js";
@@ -82,6 +83,7 @@ export interface MainDispatchers {
   handleStatus?: typeof handleStatus;
   handleLlms?: typeof handleLlms;
   handleUpdate?: typeof handleUpdate;
+  handleCa?: typeof handleCa;
 }
 
 export interface MainOptions {
@@ -101,6 +103,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleStatus: options.dispatchers?.handleStatus || handleStatus,
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
+    handleCa: options.dispatchers?.handleCa || handleCa,
   };
 
   const rawArgs = argv;
@@ -193,6 +196,16 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "llms": {
       dispatch.handleLlms({
         json: values.json as boolean | undefined,
+      });
+      break;
+    }
+
+    case "ca": {
+      const action = (positionals[1] as string | undefined)?.toLowerCase();
+      await dispatch.handleCa({
+        action,
+        json: values.json as boolean | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
       });
       break;
     }

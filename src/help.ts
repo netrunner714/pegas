@@ -148,6 +148,20 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas down"],
   },
   {
+    name: "ca",
+    summary: "Manage local Root CA for trusted dev HTTPS (install/remove)",
+    usage: "ca <install|remove> [options]",
+    options: [
+      {
+        name: "dry-run",
+        type: "boolean",
+        default: false,
+        description: "Print planned actions without applying changes",
+      },
+    ],
+    examples: ["$ pegas ca install", "$ pegas ca remove"],
+  },
+  {
     name: "status",
     summary: "Check gateway health and active project routes",
     usage: "status [options]",

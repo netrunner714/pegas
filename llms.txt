@@ -12,14 +12,13 @@
 
 ## CLI Usage for AI Agents
 - `npx @netrunner714/pegas init` — Initialize gateway and Docker network on a clean VPS, or init project contract `pegas.json`.
-- `npx pegas dev -- <command>` — Local HTTPS development proxy with auto-assigned unprivileged ports.
+- `npx pegas dev -- <command>` — Local HTTPS development proxy (clean URLs on standard port 443, fallback 8443+).
 - `npx pegas deploy` — Declaratively orchestrate Caddy routes from `pegas.json` and start containers.
 - `npx pegas down` — Cleanly teardown containers and remove project routes.
-- `npx pegas add <domain> --upstream <service:port>` — Route a new domain to a container service.
-- `npx pegas add <domain> --spa --upstream <client:80> --api-upstream <api:8000>` — Route SPA + API.
-- `npx pegas list --json` — List all active routes in machine-readable JSON.
-- `npx pegas remove <domain>` — Remove route and hot-reload Caddy.
-- `npx pegas status --json` — Check Docker, network, and Caddy health.
+- `npx pegas update [--latest]` — Update Pegas CLI in package.json.
+- `npx pegas ca install` — Install local Root CA for trusted dev HTTPS (clean URLs on port 443).
+- `npx pegas ca remove` — Remove local Root CA from OS trust store.
+- `npx pegas llms` — Print machine-readable LLM context.
 
 ## Example Docker Compose Patch for Any App
 ```yaml

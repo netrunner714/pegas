@@ -5,10 +5,13 @@ import { runCoverageCheck } from "./check-coverage.js";
 async function main() {
   const forwardedArgs = process.argv.slice(2);
 
-  // Run bun test (which picks up coverage from bunfig.toml)
+  // Run bun test (which picks up coverage from bunfig.toml).
+  // NO_COLOR убираем: вместе с FORCE_COLOR он заставляет Node в дочерних процессах
+  // писать warning в stderr и ломает тесты, ожидающие пустой stderr.
+  const { NO_COLOR: _ignored, ...baseEnv } = process.env;
   const bunTest = spawn("bun", ["test", ...forwardedArgs], {
     stdio: "inherit",
-    env: { ...process.env, FORCE_COLOR: "1" },
+    env: { ...baseEnv, FORCE_COLOR: "1" },
   });
 
   const exitCode = await new Promise<number>((resolve) => {

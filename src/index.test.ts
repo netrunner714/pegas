@@ -424,6 +424,25 @@ describe("main CLI command routing", () => {
     });
   });
 
+  it("dispatches 'ca' command", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleCa: async (opts) => {
+        calls.ca = opts;
+      },
+    };
+
+    await main(["ca", "install", "--json"], { dispatchers });
+    expect(calls.ca).toEqual({
+      action: "install",
+      json: true,
+      dryRun: false,
+    });
+
+    await main(["ca", "remove", "--json"], { dispatchers });
+    expect(calls.ca.action).toBe("remove");
+  });
+
   it("dispatches 'llms' command", async () => {
     const calls: Record<string, any> = {};
     const dispatchers: MainDispatchers = {

@@ -18,6 +18,8 @@ export const LLMS_TXT_CONTENT = `# pegas
 - \`npx pegas down\` — Tear down project containers and unbind Caddy routes.
 - \`npx pegas status [--json]\` — Unified dashboard for Caddy health, container states, and active project routes.
 - \`npx pegas update [--latest]\` — Update Pegas CLI in package.json.
+- \`npx pegas ca install\` — Install local Root CA for trusted dev HTTPS (clean URLs on port 443).
+- \`npx pegas ca remove\` — Remove local Root CA from OS trust store.
 - \`npx pegas llms\` — Print machine-readable LLM context.
 
 ## Example Docker Compose Patch for Any App

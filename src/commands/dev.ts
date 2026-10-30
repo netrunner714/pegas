@@ -6,8 +6,9 @@ import { findProjectRoot } from "../gateway.js";
 import { CONTRACT_FILENAME, getEnvironmentDomains, getServicePort } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { findOrDownloadCaddy } from "../binary.js";
-import { findAvailablePort } from "../ports.js";
+import { findAvailablePort, isPortAvailable } from "../ports.js";
 import { findRootCompose, detectInfraServices } from "../compose.js";
+import { getCaddyHomeEnv, canBindLowPorts, isCaTrusted } from "../ca.js";
 
 export interface DevOptions {
   cwd?: string;
@@ -25,12 +26,20 @@ export interface DevPorts {
   httpPort: number;
 }
 
+/** Порт по умолчанию для чистых URL (без `:порт` в адресной строке). */
+export const DEFAULT_HTTPS_PORT = 443;
+export const DEFAULT_HTTP_PORT = 80;
+/** Непривилегированный откат, если 443/80 заняты или требуют прав. */
+export const FALLBACK_HTTPS_PORT = 8443;
+export const FALLBACK_HTTP_PORT = 8080;
+
 export function generateDevCaddyfile(
   contract: PegasContract,
-  ports: DevPorts = { httpsPort: 8443, httpPort: 8080 }
+  ports: DevPorts = { httpsPort: DEFAULT_HTTPS_PORT, httpPort: DEFAULT_HTTP_PORT }
 ): string {
   const adminLine = contract.devGateway?.admin ? "" : "    admin off\n";
-  const trustLine = contract.devGateway?.skipInstallTrust !== false ? "    skip_install_trust\n" : "";
+  // skip_install_trust — только явный опт-ин (установка CA в ОС идёт через `pegas ca install`)
+  const trustLine = contract.devGateway?.skipInstallTrust === true ? "    skip_install_trust\n" : "";
   const globalBlock = `{\n${adminLine}    http_port ${ports.httpPort}\n    https_port ${ports.httpsPort}\n${trustLine}}`;
   const blocks: string[] = [globalBlock];
 
@@ -133,22 +142,47 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     } catch {}
   }
 
-  // 3. Find free unprivileged ports for local Caddy (resolves port collisions)
-  const preferredHttps = contract.devGateway?.httpsPort ?? 8443;
-  const preferredHttp = contract.devGateway?.httpPort ?? 8080;
+  // 3. Выбор портов: чистые URL на 443/80 при возможности, иначе откат на 8443/8080
+  const preferredHttps = contract.devGateway?.httpsPort ?? DEFAULT_HTTPS_PORT;
+  const preferredHttp = contract.devGateway?.httpPort ?? DEFAULT_HTTP_PORT;
 
-  const httpsPort = await findAvailablePort(preferredHttps);
-  const httpPort = await findAvailablePort(preferredHttp, [httpsPort]);
-
-  if (httpsPort !== preferredHttps) {
-    console.warn(`⚠️  Preferred dev HTTPS port ${preferredHttps} is in use. Using available port ${httpsPort} instead.`);
-  }
-
-  // 4. Find or download native Caddy binary
   const caddyPath = await findOrDownloadCaddy({
     customPath: options.caddyPath || contract.devGateway?.caddyPath,
     useSystemCaddy: options.systemCaddy ?? contract.devGateway?.systemCaddy,
   });
+
+  const lowPortsAllowed = canBindLowPorts(process.platform, null, caddyPath);
+
+  let httpsPort: number;
+  if (preferredHttps >= 1024 || (preferredHttps === DEFAULT_HTTPS_PORT && lowPortsAllowed)) {
+    httpsPort = (await isPortAvailable(preferredHttps))
+      ? preferredHttps
+      : await findAvailablePort(FALLBACK_HTTPS_PORT);
+  } else {
+    httpsPort = await findAvailablePort(FALLBACK_HTTPS_PORT);
+  }
+
+  let httpPort: number;
+  if (preferredHttp >= 1024 || (preferredHttp === DEFAULT_HTTP_PORT && lowPortsAllowed)) {
+    httpPort = (await isPortAvailable(preferredHttp))
+      ? preferredHttp
+      : await findAvailablePort(FALLBACK_HTTP_PORT, [httpsPort]);
+  } else {
+    httpPort = await findAvailablePort(FALLBACK_HTTP_PORT, [httpsPort]);
+  }
+
+  const fellBack = httpsPort !== preferredHttps || httpPort !== preferredHttp;
+
+  if (fellBack) {
+    console.warn(
+      `⚠️  Notice: Ports ${preferredHttps}/${preferredHttp} are unavailable (busy or require permissions).` +
+        ` Falling back to ports ${httpsPort}/${httpPort}.`
+    );
+    const caTrusted = await isCaTrusted();
+    if (!caTrusted) {
+      console.warn(`💡 Tip: Run 'pegas ca install' to allow clean URLs on standard HTTPS port.`);
+    }
+  }
 
   // 5. Clean up any stale legacy Caddyfile.dev
   const devCaddyfilePath = path.join(projectRoot, ".pegas", "Caddyfile.dev");
@@ -165,6 +199,7 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: projectRoot,
+      env: { ...process.env, ...getCaddyHomeEnv() },
     }
   );
 
@@ -194,15 +229,17 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     return;
   }
 
-  // Collect configured dev domains for display
+  // Collect configured dev domains for display (standard port -> clean URL)
+  const isStandardHttps = httpsPort === 443;
+  const isStandardHttp = httpPort === 80;
   const devUrls: string[] = [];
   for (const s of Object.values(contract.services || {})) {
     for (const d of getEnvironmentDomains(s, "development")) {
-      devUrls.push(`https://${d}:${httpsPort}`);
+      devUrls.push(isStandardHttps ? `https://${d}` : `https://${d}:${httpsPort}`);
     }
   }
   if (devUrls.length === 0) {
-    devUrls.push(`https://app.localhost:${httpsPort}`);
+    devUrls.push(isStandardHttps ? "https://app.localhost" : `https://app.localhost:${httpsPort}`);
   }
 
   for (const u of devUrls) {
