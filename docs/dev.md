@@ -41,6 +41,18 @@ npx pegas ca install
 * **Node.js / Bun** имеют встроенный CA-лист. `pegas dev -- <команда>` автоматически прокидывает `NODE_EXTRA_CA_CERTS=~/.pegas/ca/root.crt` в дочерний процесс — `fetch()` из dev-сервера доверяет локальному HTTPS. Для standalone-запусков экспортируйте переменную вручную;
 * **Python (requests)** использует certifi — задайте `REQUESTS_CA_BUNDLE=~/.pegas/ca/root.crt`.
 
+### Диагностика: красный замок в браузере при успешном `pegas ca install` (WSL)
+
+Редкий, но живой сценарий на WSL: `certutil.exe -addstore` из interop возвращает exit 0, **молча не записав** сертификат в Windows-хранилище. Симптом — браузер в Windows показывает предупреждение сертификата, хотя `pegas ca install` отчитался успехом. `isCaTrusted` это ловит (проверяет фактический fingerprint в сторе, а не вывод certutil), поэтому повторный `pegas ca install` или `pegas init` честно скажет «сертификат не установлен».
+
+Ручное лечение — PowerShell-импорт (обходит interop-путь certutil):
+
+```bash
+powershell.exe -NoProfile -Command "Import-Certificate -FilePath '\\\\wsl.localhost\\<дистро>\\home\\<user>\\.pegas\\ca\\root.crt' -CertStoreLocation Cert:\CurrentUser\Root"
+```
+
+Если сценарий повторяется регулярно на вашей машине, стоит перевести установку Windows-стороны WSL на `Import-Certificate` как основной путь (текущая реализация использует certutil).
+
 ---
 
 ## 2. Архитектура работы `dev`
