@@ -281,7 +281,8 @@ export async function installCaTrust(options: {
           .trim();
         args = ["-user", "-addstore", "Root", winPath];
       }
-      child_process.execFileSync("certutil.exe", args, { stdio: "inherit", timeout: 30_000 });
+      // Тихий режим: сырой вывод certutil на смеси языков захламляет итоговый отчёт
+      child_process.execFileSync("certutil.exe", args, { stdio: ["ignore", "ignore", "pipe"], timeout: 30_000 });
       continue;
     }
 
@@ -303,7 +304,14 @@ export async function removeCaTrust(options: {
   const commands = buildRemoveTrustCommands(platform, { wsl });
 
   for (const command of commands) {
-    child_process.execFileSync(command.cmd, command.args, { stdio: "inherit", timeout: 120_000 });
+    if (command.cmd === "certutil.exe") {
+      child_process.execFileSync(command.cmd, command.args, {
+        stdio: ["ignore", "ignore", "pipe"],
+        timeout: 120_000,
+      });
+    } else {
+      child_process.execFileSync(command.cmd, command.args, { stdio: "inherit", timeout: 120_000 });
+    }
   }
 
   await fs.rm(paths.caDir, { recursive: true, force: true }).catch(() => {});
@@ -384,22 +392,22 @@ export async function installCa(options: CaInstallOptions = {}): Promise<boolean
   const messages: string[] = [];
   messages.push(
     provisioned.created
-      ? `✓ Локальный Root CA Pegas создан: ${paths.caCertPath}`
-      : `✓ Локальный Root CA Pegas уже существует: ${paths.caCertPath}`
+      ? `Создан локальный Root CA Pegas: ${paths.caCertPath}`
+      : `Локальный Root CA Pegas уже существует: ${paths.caCertPath}`
   );
 
   if (!options.skipTrust) {
     await installCaTrust({ certPath: paths.caCertPath, caddyPath, wsl: detectWsl() });
-    messages.push("✓ Root CA добавлен в системное хранилище доверия");
+    messages.push("Root CA добавлен в системное хранилище доверия ОС");
   }
 
-  messages.push("Теперь локальные dev-домены открываются по HTTPS с доверенным замком.");
+  messages.push("Готово: локальные dev-домены открываются по HTTPS с доверенным замком (без красных экранов браузера).");
 
   if (isJson) {
     console.log(JSON.stringify({ status: "success", actions: messages, certPath: paths.caCertPath }));
   } else {
-    console.log(`\n🔐 Pegas Local Root CA:\n`);
-    for (const m of messages) console.log(`  ${m}`);
+    console.log(`\n🔐 Root CA Pegas успешно установлен\n`);
+    for (const m of messages) console.log(`  ✓ ${m}`);
     console.log("");
   }
   return true;
@@ -438,13 +446,16 @@ export async function removeCa(options: CaRemoveOptions = {}): Promise<boolean> 
 
   await removeCaTrust({ paths, wsl: detectWsl() });
 
-  const messages = ["✓ Root CA удалён из системного хранилища доверия", "✓ Экспортированный сертификат зачищен"];
+  const messages = [
+    "Root CA удалён из системного хранилища доверия ОС",
+    "Экспортированный сертификат зачищен",
+  ];
 
   if (isJson) {
     console.log(JSON.stringify({ status: "success", actions: messages }));
   } else {
-    console.log(`\n🔐 Pegas Local Root CA:\n`);
-    for (const m of messages) console.log(`  ${m}`);
+    console.log(`\n🔐 Root CA Pegas удалён\n`);
+    for (const m of messages) console.log(`  ✓ ${m}`);
     console.log("");
   }
   return true;

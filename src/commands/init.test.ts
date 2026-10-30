@@ -143,7 +143,7 @@ describe("pegas init (unit)", () => {
       await fs.rm(tmpProj, { recursive: true, force: true });
     }
 
-    expect(logs.some((l) => l.includes("Project initialized with Pegas"))).toBe(true);
+    expect(logs.some((l) => l.includes("Проект инициализирован с Pegas"))).toBe(true);
     expect(logs.some((l) => l.includes("контракт pegas.json") || l.includes("Контракт pegas.json"))).toBe(true);
   });
 
@@ -176,8 +176,8 @@ describe("pegas init (unit)", () => {
     expect(parsed.project).toBe("dry-run-project");
     expect(parsed.actions.length).toBeGreaterThan(0);
 
-    expect(logs.some((l) => l.includes("[dry-run] Pegas project initialization preview:"))).toBe(true);
-    expect(logs.some((l) => l.includes("No changes were written to disk"))).toBe(true);
+    expect(logs.some((l) => l.includes("[dry-run] Предпросмотр инициализации проекта Pegas:"))).toBe(true);
+    expect(logs.some((l) => l.includes("Изменения не записаны на диск"))).toBe(true);
 
     // Verify disk was completely untouched
     expect(await fs.access(path.join(tmpProj, "pegas.json")).then(() => true).catch(() => false)).toBe(false);

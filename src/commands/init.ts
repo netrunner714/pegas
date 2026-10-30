@@ -114,9 +114,9 @@ export async function checkCaStatusHint(): Promise<string | null> {
   try {
     const { isCaTrusted } = await import("../ca.js");
     if (await isCaTrusted()) {
-      return "✓ Local Root CA is active (trusted)";
+      return "Локальный Root CA активен (HTTPS в браузере доверенный)";
     }
-    return "💡 Tip: Run 'pegas ca install' once to enable trusted green-lock HTTPS in your browser.";
+    return null;
   } catch {
     return null;
   }
@@ -183,6 +183,10 @@ export async function handleProjectInit(
       : Boolean(process.env.PEGAS_SKIP_NPM_CHECK || process.env.NODE_ENV === "test");
 
   const actions: string[] = [];
+
+  // Отдельные (не «выполнено»-) заметки: выводятся после списка действий,
+  // отдельным блоком, чтобы ключевая информация не терялась в списке.
+  const notices: string[] = [];
 
   if (cwd !== process.cwd()) {
     actions.push(`Корень репозитория: ${cwd}`);
@@ -261,6 +265,9 @@ export async function handleProjectInit(
     const caHint = await checkCaStatusHint();
     if (caHint) {
       actions.push(caHint);
+    } else {
+      notices.push("Сертификат не установлен: HTTPS в браузере будет с предупреждением.");
+      notices.push("Решение: выполните 'pegas ca install' (один раз на машину).");
     }
   }
 
@@ -272,6 +279,7 @@ export async function handleProjectInit(
         project: contractRes.slug,
         contract: contractRes.contract,
         actions,
+        notices,
         docs: docsPath,
       })
     );
@@ -279,21 +287,32 @@ export async function handleProjectInit(
   }
 
   if (dryRun) {
-    console.log("\n📋 [dry-run] Pegas project initialization preview:\n");
+    console.log("\n📋 [dry-run] Предпросмотр инициализации проекта Pegas:\n");
     for (const act of actions) {
       console.log(`  • ${act}`);
     }
-    console.log("\nNo changes were written to disk. Run 'pegas init' to apply.\n");
+    for (const notice of notices) {
+      console.log(`  ! ${notice}`);
+    }
+    console.log("\nИзменения не записаны на диск. Выполните 'pegas init' для применения.\n");
     return;
   }
 
-  console.log("\n✨ Project initialized with Pegas!\n");
+  console.log("\n✨ Проект инициализирован с Pegas!\n");
   for (const act of actions) {
     console.log(`  ✓ ${act}`);
   }
-  console.log("\nNext steps:");
-  console.log("  1. Check pegas.json and set your domains.");
-  console.log("  2. Start local dev with: npm run dev\n");
+
+  if (notices.length > 0) {
+    console.log("");
+    for (const notice of notices) {
+      console.log(`  ⚠️  ${notice}`);
+    }
+  }
+
+  console.log("\nЧто дальше:");
+  console.log("  1. Проверьте pegas.json и укажите свои домены.");
+  console.log("  2. Запустите локальную разработку: npm run dev\n");
 }
 
 export async function handleInit(options: InitOptions = {}): Promise<void> {
