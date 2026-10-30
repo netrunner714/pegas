@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import child_process from "node:child_process";
-import { findOrDownloadCaddy } from "./binary.js";
+import { findOrDownloadCaddy, PEGAS_CADDY_VERSION } from "./binary.js";
 
 /**
  * Локальный Root CA Pegas для доверенного dev-HTTPS.
@@ -112,6 +112,11 @@ function readProcVersion(): string | null {
 /**
  * Провижинит локальный CA (если его ещё нет) и экспортирует root.crt
  * в ~/.pegas/ca/root.crt.
+ *
+ * Экспорт сверяется с живым PKI Caddy по SHA-1 fingerprint: при расхождении
+ * (stale-экспорт после частичного `rm -rf ~/.pegas` или перегенерации CA)
+ * экспорт перезаписывается актуальным сертификатом — иначе в trust store ОС
+ * уедет протухший сертификат, а leaf'ы будет подписывать уже другой CA.
  */
 export async function provisionCa(
   caddyPath: string,
@@ -121,13 +126,29 @@ export async function provisionCa(
 
   await fs.mkdir(paths.caDir, { recursive: true });
 
-  // Уже provision'ен ранее — просто гарантируем экспорт
+  // Уже provision'ен ранее и экспорт совпадает с живым PKI — ничего не делаем.
+  // Расхождение (stale-экспорт после частичного `rm -rf ~/.pegas`, перегенерация
+  // CA) -> пересоздаём/реэкспортируем. Побайтовое сравнение: реальные файлы
+  // root.crt в PKI и экспорте идентичны (Caddy не меняет root при повторной
+  // материализации), а для сравнения fingerprint оба файла обязаны быть PEM.
   const existingExported = await fs
     .access(paths.caCertPath)
     .then(() => true)
     .catch(() => false);
   if (existingExported) {
-    return { certPath: paths.caCertPath, created: false };
+    let pkiBytes: Buffer | null = null;
+    try {
+      pkiBytes = await fs.readFile(paths.caddyRootCert);
+    } catch {}
+    let exportedBytes: Buffer | null = null;
+    try {
+      exportedBytes = await fs.readFile(paths.caCertPath);
+    } catch {}
+    if (pkiBytes !== null && exportedBytes !== null && pkiBytes.equals(exportedBytes)) {
+      return { certPath: paths.caCertPath, created: false };
+    }
+    // Иначе: PKI не существует или файлы разошлись (stale-экспорт,
+    // перегенерация CA) — PKI будет (пере)создан ниже, экспорт перезапишется.
   }
 
   if (options.dryRun) {
@@ -204,17 +225,15 @@ export function buildInstallTrustCommands(
   }
   if (opts.wsl) {
     // Windows-утилита вызывается из WSL; путь конвертируется wslpath'ом на этапе исполнения.
-    // CA ставится в Windows (браузер), но права на порт 443 — это Linux-сторона WSL:
-    // выдаём setcap бинарнику Caddy, как и на нативном Linux.
+    // В WSL две системы и два класса потребителей доверия:
+    //  1) браузеры в Windows — Windows user Root store (certutil.exe);
+    //  2) curl/node/git, запущенные внутри WSL, — системный бандл Linux-стороны.
+    // Поэтому CA ставится в ОБОА хранилища, а право на порт 443 — setcap
+    // на Linux-стороне (бинарник Caddy живёт там).
     const commands: TrustCommand[] = [
       { cmd: "certutil.exe", args: ["-user", "-addstore", "Root", "__WSLPATH__"] },
     ];
-    if (opts.caddyPath) {
-      commands.push({
-        cmd: "sudo",
-        args: ["setcap", "cap_net_bind_service=+ep", opts.caddyPath],
-      });
-    }
+    commands.push(...buildLinuxInstallTrustCommands({ certPath: opts.certPath, caddyPath: opts.caddyPath }));
     return commands;
   }
   if (platform === "darwin") {
@@ -234,13 +253,29 @@ export function buildInstallTrustCommands(
       },
     ];
   }
-  // linux
+  // linux (нативный)
+  return buildLinuxInstallTrustCommands(opts);
+}
+
+/**
+ * Команды установки Root CA в системное хранилище доверия Linux.
+ *
+ * Чистая функция (для тестов): детект семейства по доступности каталога
+ * или утилиты update-ca-trust. Debian-семейство — /usr/local/share/ca-certificates
+ * + update-ca-certificates; RHEL-семейство — /etc/pki/ca-trust/source/anchors
+ * + update-ca-trust.
+ */
+export function buildLinuxInstallTrustCommands(opts: {
+  certPath: string;
+  caddyPath: string;
+  rhelFamily?: boolean;
+}): TrustCommand[] {
+  const rhel = opts.rhelFamily ?? isRhelFamily();
+  const storeDir = rhel ? "/etc/pki/ca-trust/source/anchors" : "/usr/local/share/ca-certificates";
+  const refreshCmd = rhel ? "update-ca-trust" : "update-ca-certificates";
   const commands: TrustCommand[] = [
-    {
-      cmd: "sudo",
-      args: ["cp", opts.certPath, "/usr/local/share/ca-certificates/pegas-root-ca.crt"],
-    },
-    { cmd: "sudo", args: ["update-ca-certificates"] },
+    { cmd: "sudo", args: ["cp", opts.certPath, path.join(storeDir, LINUX_TRUST_CERT_NAME)] },
+    { cmd: "sudo", args: [refreshCmd] },
   ];
   // Golden Path из addon-задачи: разрешаем Caddy слушать 443 без sudo при dev
   if (opts.caddyPath) {
@@ -252,19 +287,65 @@ export function buildInstallTrustCommands(
   return commands;
 }
 
+/** Детект RHEL-семейства по доступности update-ca-trust / каталога pki. */
+export function isRhelFamily(): boolean {
+  if (process.platform !== "linux") return false;
+  const fsSync = require("node:fs");
+  try {
+    fsSync.accessSync("/etc/pki/ca-trust", fsSync.constants.F_OK);
+    return true;
+  } catch {}
+  try {
+    fsSync.accessSync("/usr/bin/update-ca-trust", fsSync.constants.X_OK);
+    return true;
+  } catch {}
+  return false;
+}
+
 /**
- * Команды удаления Root CA из системного хранилища доверия.
- * Windows/WSL: удаление по SHA-1 hash (имена ненадёжны — см. getCertSha1).
+ * Команды удаления Root CA из системного хранилища доверия Linux.
+ * Дополнительно отзывает setcap с бинарника Caddy (симметрично install).
+ * rhelFamily задаётся явно или детектится через isRhelFamily().
  */
+export function buildLinuxRemoveTrustCommands(opts: {
+  caddyPath?: string;
+  rhelFamily?: boolean;
+}): TrustCommand[] {
+  const rhel = opts.rhelFamily ?? isRhelFamily();
+  const storeDir = rhel ? "/etc/pki/ca-trust/source/anchors" : "/usr/local/share/ca-certificates";
+  const commands: TrustCommand[] = [
+    { cmd: "sudo", args: ["rm", "-f", path.join(storeDir, LINUX_TRUST_CERT_NAME)] },
+  ];
+  if (rhel) {
+    commands.push({ cmd: "sudo", args: ["update-ca-trust"] });
+  } else {
+    // Debian-семейство: без --fresh update-ca-certificates оставляет сироту
+    // pegas-root-ca.pem в /etc/ssl/certs (бандл не чистит отсутствующие).
+    // --fresh пересобирает бандл с нуля — медленнее (~секунда), но чисто.
+    commands.push({ cmd: "sudo", args: ["update-ca-certificates", "--fresh"] });
+  }
+  if (opts.caddyPath) {
+    // Синтаксис setcap -r <file> (libcap >= 2.71): пары «действие-файл»;
+    // «-r cap_net_bind_service file» трактует cap как имя файла и падает.
+    commands.push({ cmd: "sudo", args: ["setcap", "-r", opts.caddyPath] });
+  }
+  return commands;
+}
 export function buildRemoveTrustCommands(
   platform: string,
-  opts: { wsl?: boolean; sha1?: string }
+  opts: { wsl?: boolean; sha1?: string; caddyPath?: string }
 ): TrustCommand[] {
   if (platform === "win32" || opts.wsl) {
-    // certutil -delstore принимает hex-hash без разделителей
-    return [
+    // certutil -delstore принимает hex-hash без разделителей.
+    // WSL: симметрично install чистим обе стороны — Windows user store
+    // и системный бандл Linux-стороны (+ отзыв setcap).
+    const commands: TrustCommand[] = [
       { cmd: "certutil.exe", args: ["-user", "-delstore", "Root", opts.sha1 || PEGAS_CA_NAME] },
     ];
+    if (opts.wsl) {
+      commands.push(...buildLinuxRemoveTrustCommands({ caddyPath: opts.caddyPath }));
+    }
+    return commands;
   }
   if (platform === "darwin") {
     return [
@@ -280,10 +361,7 @@ export function buildRemoveTrustCommands(
       },
     ];
   }
-  return [
-    { cmd: "sudo", args: ["rm", "-f", "/usr/local/share/ca-certificates/pegas-root-ca.crt"] },
-    { cmd: "sudo", args: ["update-ca-certificates"] },
-  ];
+  return buildLinuxRemoveTrustCommands({ caddyPath: opts.caddyPath });
 }
 
 /**
@@ -336,13 +414,24 @@ export async function removeCaTrust(options: {
   platform?: string;
   wsl?: boolean;
   paths?: CaPaths;
+  caddyPath?: string;
 }): Promise<void> {
   const platform = options.platform || process.platform;
   const wsl = options.wsl ?? detectWsl();
   const paths = options.paths || getCaPaths();
   const sha1 = getCertSha1(paths.caCertPath) || undefined;
-  const commands = buildRemoveTrustCommands(platform, { wsl, sha1 });
+  const caddyPath = options.caddyPath || (await resolveCaddyPathForSetcap());
+  const commands = buildRemoveTrustCommands(platform, { wsl, sha1, caddyPath });
   assertOsMutationAllowed();
+
+  // Зачистка «чужих» установок того же CA: файл в trust-каталоге Linux,
+  // поставленный не Pegas (например, самим Caddy по своей конвенции имён).
+  if (sha1 && platform === "linux") {
+    const foreignFile = await findLinuxTrustFile(sha1);
+    if (foreignFile && !foreignFile.endsWith(LINUX_TRUST_CERT_NAME)) {
+      commands.splice(0, 0, { cmd: "sudo", args: ["rm", "-f", foreignFile] });
+    }
+  }
 
   for (const command of commands) {
     if (command.cmd === "certutil.exe") {
@@ -359,12 +448,85 @@ export async function removeCaTrust(options: {
 }
 
 /**
+ * Путь к бинарнику Caddy для отзыва setcap при `pegas ca remove`.
+ * Приоритет: versioned-бинарник в ~/.pegas/bin (как при install), затем plain.
+ */
+async function resolveCaddyPathForSetcap(): Promise<string | undefined> {
+  try {
+    const homeBin = path.join(os.homedir(), ".pegas", "bin");
+    const candidates = [
+      path.join(homeBin, `caddy-v${PEGAS_CADDY_VERSION}`),
+      path.join(homeBin, process.platform === "win32" ? "caddy.exe" : "caddy"),
+    ];
+    for (const candidate of candidates) {
+      if (await fs.access(candidate).then(() => true).catch(() => false)) {
+        return candidate;
+      }
+    }
+  } catch {}
+  return undefined;
+}
+
+/**
+ * Каталоги системного trust store Linux (Debian- и RHEL-семейства) и имя
+ * файла, под которым Pegas копирует свой CA. Используются install/remove и
+ * поиском доверия по fingerprint.
+ */
+export const LINUX_TRUST_STORE_DIRS = [
+  "/usr/local/share/ca-certificates", // Debian/Ubuntu/Alpine (update-ca-certificates)
+  "/etc/pki/ca-trust/source/anchors", // RHEL/Fedora/CentOS (update-ca-trust)
+  "/usr/share/pki/ca-trust-source/anchors", // SUSE / системный уровень
+];
+export const LINUX_TRUST_CERT_NAME = "pegas-root-ca.crt";
+
+/**
+ * Ищет сертификат с SHA-1 fingerprint `sha1` в trust-каталогах Linux.
+ * Сравнивает фактическое содержимое всех *.crt/*.pem-файлов, а не имена:
+ * CA мог быть установлен как Pegas (`pegas-root-ca.crt`), так и самим Caddy
+ * (конвенция `Pegas_Local_Root_CA_-_2026_ECC_Root_<serial>.crt`).
+ * Возвращает путь к найденному файлу или null.
+ */
+export async function findLinuxTrustFile(sha1: string): Promise<string | null> {
+  const fsSync = require("node:fs");
+  for (const dir of LINUX_TRUST_STORE_DIRS) {
+    let entries: string[] = [];
+    try {
+      entries = fsSync.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".crt") && !entry.endsWith(".pem")) continue;
+      const filePath = path.join(dir, entry);
+      try {
+        const pem = fsSync.readFileSync(filePath);
+        const candidate = new crypto.X509Certificate(pem).fingerprint.replace(/:/g, "").toLowerCase();
+        if (candidate === sha1) return filePath;
+      } catch {}
+    }
+  }
+  return null;
+}
+
+/**
+ * Вспомогательный: ищет подстроку-hex в выводе security/certutil.
+ * Strip-хекс с последующим includes: сепараторы (двоеточия, пробелы)
+ * вырезаются, поэтому формат отпечатка (DD:68:... или dd68...) роли не играет.
+ */
+function hexIncludes(output: string, sha1: string): boolean {
+  return output.replace(/[^0-9a-fA-F]/g, "").toLowerCase().includes(sha1);
+}
+/**
  * Проверяет, установлен ли Root CA в системное хранилище доверия.
  *
  * Идентификация — по SHA-1 fingerprint экспортированного root.crt, а не по
  * имени: Caddy дописывает к subject'у свой суффикс ("- 2026 ECC Root"),
  * поэтому поиск по имени ненадёжен по построению (certutil требует точного
  * совпадения CN и возвращает NTE_NOT_FOUND на частичном имени).
+ *
+ * На Linux ищет сертификат по fingerprint во всех trust-каталогах
+ * (Debian и RHEL-семейства) — независимо от того, кто его установил
+ * (Pegas под именем pegas-root-ca.crt или сам Caddy по своей конвенции).
  */
 export async function isCaTrusted(
   platform: string = process.platform,
@@ -380,38 +542,40 @@ export async function isCaTrusted(
   const sha1 = getCertSha1(paths.caCertPath);
   if (!sha1) return false;
 
-  const linuxStoreCertPath = options.linuxStoreCertPath || "/usr/local/share/ca-certificates/pegas-root-ca.crt";
   const wsl = options.wsl ?? detectWsl();
 
   try {
     if (platform === "linux" && !wsl) {
-      // На Linux мы сами копируем root.crt в системный каталог — сравниваем содержимое
-      try {
-        const storePem = require("node:fs").readFileSync(linuxStoreCertPath);
-        const storeSha1 = new crypto.X509Certificate(storePem).fingerprint.replace(/:/g, "").toLowerCase();
-        return storeSha1 === sha1;
-      } catch {
-        return false;
+      // Приоритет — точный путь (для тестов и legacy-установок), затем
+      // системный поиск по fingerprint во всех trust-каталогах.
+      if (options.linuxStoreCertPath) {
+        try {
+          const storePem = require("node:fs").readFileSync(options.linuxStoreCertPath);
+          const storeSha1 = new crypto.X509Certificate(storePem).fingerprint.replace(/:/g, "").toLowerCase();
+          return storeSha1 === sha1;
+        } catch {}
       }
+      return (await findLinuxTrustFile(sha1)) !== null;
     }
     if (platform === "darwin") {
       // macOS security не умеет искать по хэшу напрямую — верифицируем через
-      // экспорт ключей и поиск отпечатка в выводе.
+      // экспорт ключей и поиск отпечатка в выводе. -Z обязателен: без него
+      // security find-certificate не печатает SHA-1 hash вовсе.
       const out = child_process.execFileSync(
         "security",
-        ["find-certificate", "-c", PEGAS_CA_NAME, "-a", "/Library/Keychains/System.keychain"],
+        ["find-certificate", "-c", PEGAS_CA_NAME, "-a", "-Z", "/Library/Keychains/System.keychain"],
         { stdio: ["ignore", "pipe", "ignore"], timeout: 5000, encoding: "utf-8" }
       );
-      return out.replace(/[^0-9a-fA-F]/g, "").toLowerCase().includes(sha1);
+      return hexIncludes(out, sha1);
     }
     if (platform === "win32" || wsl) {
       const out = child_process.execFileSync("certutil.exe", ["-user", "-store", "Root"], {
         stdio: ["ignore", "pipe", "ignore"],
-        timeout: 15_000,
+        timeout: 30_000,
         encoding: "utf-8",
       });
       // certutil выводит отпечатки как "(sha1): dd688ea2e845e3..." — ищем без разделителей
-      return out.replace(/[^0-9a-fA-F]/g, "").toLowerCase().includes(sha1);
+      return hexIncludes(out, sha1);
     }
   } catch {
     return false;
@@ -492,6 +656,7 @@ export interface CaRemoveOptions {
   dryRun?: boolean;
   noExit?: boolean;
   paths?: CaPaths;
+  caddyPath?: string;
 }
 
 /**
@@ -518,7 +683,7 @@ export async function removeCa(options: CaRemoveOptions = {}): Promise<boolean> 
     return true;
   }
 
-  await removeCaTrust({ paths, wsl: detectWsl() });
+  await removeCaTrust({ paths, wsl: detectWsl(), caddyPath: options.caddyPath });
 
   const messages = [
     "Root CA удалён из системного хранилища доверия ОС",

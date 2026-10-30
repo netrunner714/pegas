@@ -8,7 +8,7 @@ import { PegasContract } from "../types.js";
 import { findOrDownloadCaddy } from "../binary.js";
 import { findAvailablePort, isPortAvailable } from "../ports.js";
 import { findRootCompose, detectInfraServices } from "../compose.js";
-import { getCaddyHomeEnv, canBindLowPorts, isCaTrusted } from "../ca.js";
+import { getCaddyHomeEnv, canBindLowPorts, isCaTrusted, getCaPaths } from "../ca.js";
 
 export interface DevOptions {
   cwd?: string;
@@ -209,6 +209,12 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   // молчать про trust (sudo-промпт посреди dev недопустим).
   const caTrusted = await isCaTrusted();
 
+  // Подсказка для рантаймов, которые не читают trust store ОС (Node/Bun/Python):
+  // встроенный CA-лист вместо системного хранилища. NODE_EXTRA_CA_CERTS в env
+  // дочернего процесса — чтобы fetch() из dev-сервера доверял локальному HTTPS.
+  const nodeCaEnv: Record<string, string> =
+    caTrusted ? { NODE_EXTRA_CA_CERTS: getCaPaths().caCertPath } : {};
+
   if (fellBack) {
     // Классифицируем причину fallback. EACCES из Node-зонда для низкого порта
     // без cap — это ожидаемое поведение Linux (не «порт занят»); настоящий
@@ -373,6 +379,7 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
       PATH: `${localBinPath}:${process.env.PATH || ""}`,
       NODE_ENV: "development",
       PEGAS_ENV: "development",
+      ...nodeCaEnv,
       ...(primaryDevDomain ? { APP_DOMAIN: primaryDevDomain } : {}),
     };
 

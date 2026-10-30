@@ -91,7 +91,7 @@ npm run dev
 ```
 
 * **Zero-Config Local HTTPS**: Starts local native Caddy on standard ports (`https://<project>.localhost` — чистый URL без порта) с graceful fallback на 8443+.
-* **Trusted Local CA (`pegas ca install`)**: One command installs a local Root CA into the OS trust store — green browser lock, no `NET::ERR_CERT_AUTHORITY_INVALID`, no third-party mkcert.
+* **Trusted Local CA (`pegas ca install`)**: One command installs a local Root CA into the OS trust store — green browser lock, no `NET::ERR_CERT_AUTHORITY_INVALID`, no third-party mkcert. Linux (Debian & RHEL families), macOS, Windows and WSL are supported; on WSL the CA is installed into **both** sides (Windows browser store + Linux-side system bundle). `pegas dev` also propagates `NODE_EXTRA_CA_CERTS` to your dev server so Node/Bun `fetch()` trusts local HTTPS.
 * **Smart Infra Boot (Optional)**: Automatically starts databases (Postgres, Redis, MongoDB, MySQL) via `docker compose up -d <services>` when enabled:
   ```bash
   npx pegas dev --infra -- npm run dev

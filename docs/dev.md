@@ -22,6 +22,25 @@ npx pegas ca install
 
 Команда генерирует локальный Root CA Pegas, регистрирует его в системном хранилище доверия и (на Linux) выдаёт бинарнику Caddy `cap_net_bind_service`, чтобы локальный шлюз мог использовать стандартный порт **443** без `sudo` при каждом запуске. Удалить CA можно командой `npx pegas ca remove`.
 
+### Куда устанавливается сертификат (по платформам)
+
+| Платформа | Хранилище | Что получает доверие |
+|---|---|---|
+| Linux (Debian/Ubuntu/Alpine) | `/usr/local/share/ca-certificates/pegas-root-ca.crt` + `update-ca-certificates` | curl, git, openssl, системные утилиты, Chrome/Chromium (через системный бандл) |
+| Linux (RHEL/Fedora/CentOS) | `/etc/pki/ca-trust/source/anchors/pegas-root-ca.crt` + `update-ca-trust` | то же |
+| macOS | System.keychain (`security add-trusted-cert`) | Safari, Chrome, системные фреймворки |
+| Windows | user Root store (`certutil -user`, без UAC) | Edge, Chrome, системные API |
+| WSL | **обе системы**: Windows user store (`certutil.exe` из interop) **и** Linux-side бандл (Debian/RHEL-путь) | браузеры в Windows + curl/node/git внутри WSL; плюс `setcap` на Linux-стороне для порта 443 |
+
+`pegas ca remove` симметрично чистит все места установки, включая отзыв `cap_net_bind_service` (Linux/WSL) и «чужие» копии сертификата, установленные самим Caddy в trust-каталоги.
+
+### Ограничения доверия (важно знать)
+
+Не все рантаймы читают системное хранилище:
+* **Firefox на Linux** использует собственный NSS-профиль — сертификат нужно добавить вручную (Настройки → Приватность → Сертификаты → Импорт) или через `certutil -A -t "C,," -n pegas -i ~/.pegas/ca/root.crt -d ~/.pki/nssdb`;
+* **Node.js / Bun** имеют встроенный CA-лист. `pegas dev -- <команда>` автоматически прокидывает `NODE_EXTRA_CA_CERTS=~/.pegas/ca/root.crt` в дочерний процесс — `fetch()` из dev-сервера доверяет локальному HTTPS. Для standalone-запусков экспортируйте переменную вручную;
+* **Python (requests)** использует certifi — задайте `REQUESTS_CA_BUNDLE=~/.pegas/ca/root.crt`.
+
 ---
 
 ## 2. Архитектура работы `dev`
