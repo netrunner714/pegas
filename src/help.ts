@@ -149,7 +149,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "uninstall",
-    summary: "Remove Pegas artifacts from the project (mirror of init)",
+    summary: "Remove Pegas from the project and clean the package (mirror of init)",
     usage: "uninstall [options]",
     options: [
       {

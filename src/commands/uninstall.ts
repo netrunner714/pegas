@@ -1,19 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import child_process from "node:child_process";
 import { UninstallOptions } from "../types.js";
 import { findProjectRoot } from "../gateway.js";
 import { CONTRACT_FILENAME } from "../contract.js";
 import { PEGAS_AGENT_RULES_MARKER_REGEX } from "./init.js";
-import { detectPackageManager, getUpdateCommand, getRemoveCommand } from "../pm.js";
+import { detectPackageManager, getRemoveCommand } from "../pm.js";
 
 /**
  * `pegas uninstall` — зеркальный откат `pegas init`.
  *
  * Принцип: удаляем только то, что создали сами (фиксированный список
  * артефактов init), ничего сверх. Контракт бэкапится в pegas.json.bak
- * перед удалением. Пакет из node_modules не трогаем — для этого в конце
- * печатается команда пакетного менеджера (симметрия с init, который
- * тоже не запускает install).
+ * перед удалением. В конце запускается команда пакетного менеджера
+ * (например, 'bun remove @netrunner714/pegas') — чтобы вычистить пакет
+ * и обновить lockfile одной командой, без ручных next steps.
  */
 
 /** Вырезает блок Pegas из AGENTS.md, возвращает новый контент или null. */
@@ -207,18 +208,32 @@ export async function handleUninstall(options: UninstallOptions = {}): Promise<v
 
   const pm = await detectPackageManager(projectRoot);
   const removeCmd = getRemoveCommand(pm);
-  const updateCmd = getUpdateCommand(pm);
+
+  // Запускаем пакетный менеджер одной командой: вычищает node_modules и lockfile
+  let removeExitCode: number | null = null;
+  let removeFailed = false;
+  if (!dryRun) {
+    const [bin, ...binArgs] = removeCmd.split(" ");
+    const res = child_process.spawnSync(bin, binArgs, {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: process.env,
+    });
+    removeExitCode = res.status ?? 1;
+    removeFailed = removeExitCode !== 0;
+  }
 
   if (isJson) {
     console.log(
       JSON.stringify({
-        status: dryRun ? "dry-run" : "success",
+        status: dryRun ? "dry-run" : removeFailed ? "partial" : "success",
         dryRun,
         project: path.basename(projectRoot),
         removed: [...fileActions.removed, ...pkgActions.removed],
         backupFile: fileActions.backupFile,
         packageManager: pm,
         removeCommand: removeCmd,
+        removeCommandExitCode: removeExitCode,
       })
     );
     return;
@@ -242,12 +257,15 @@ export async function handleUninstall(options: UninstallOptions = {}): Promise<v
     console.log("  (нечего удалять)");
   }
 
-  console.log("\nNext steps:");
-  if (!dryRun) {
-    console.log(`  1. Удалить пакет:        ${removeCmd}`);
-    console.log(`  2. Обновить lockfile:    ${updateCmd} (или пересобрать зависимости)`);
+  if (dryRun) {
+    console.log(`\n(запустите 'pegas uninstall' для применения; пакет удаляется командой '${removeCmd}')\n`);
+  } else if (removeFailed) {
+    console.error(`\n⚠️  Артефакты удалены, но команда '${removeCmd}' завершилась с кодом ${removeExitCode}.`);
+    console.error(`   Пакет и lockfile нужно вычистить вручную.\n`);
+    if (!options.noExit) {
+      process.exit(1);
+    }
   } else {
-    console.log(`  (запустите 'pegas uninstall' для применения; пакет удаляется командой '${removeCmd}')`);
+    console.log(`\n  ✓ Пакет вычищен и lockfile обновлён: ${removeCmd}\n`);
   }
-  console.log("");
 }

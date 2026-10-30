@@ -1,7 +1,8 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
+import child_process from "node:child_process";
 import {
   handleUninstall,
   removePegasFiles,
@@ -10,6 +11,18 @@ import {
   unwrapDevScript,
 } from "./uninstall.js";
 import { CONTRACT_FILENAME } from "../contract.js";
+
+/**
+ * handleUninstall запускает пакетный менеджер (bun remove ...) — в тестах этот
+ * вызов мокается: spawnSync не должен реально трогать node_modules/lockfile.
+ */
+function mockPmRemove(exitCode = 0): ReturnType<typeof spyOn> {
+  return spyOn(child_process, "spawnSync").mockImplementation((() => ({
+    status: exitCode,
+    stdout: "",
+    stderr: "",
+  })) as any);
+}
 
 async function makeProject(files: Record<string, string> = {}): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-uninstall-"));
@@ -218,7 +231,7 @@ describe("pegas uninstall (unit)", () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
 
-  it("handleUninstall full flow in json mode removes everything and prints pm command", async () => {
+  it("handleUninstall full flow in json mode removes everything and runs pm remove", async () => {
     const dir = await makeProject({
       [CONTRACT_FILENAME]: JSON.stringify({ projectName: "x", services: {} }),
       "package.json": JSON.stringify(
@@ -239,23 +252,73 @@ describe("pegas uninstall (unit)", () => {
     const origLog = console.log;
     console.log = (...args) => logs.push(args.join(" "));
 
+    let removeCalled = false;
+    const pmSpy = spyOn(child_process, "spawnSync").mockImplementation(((cmd: string, args: string[]) => {
+      if (cmd === "bun" && args.includes("remove")) {
+        removeCalled = true;
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    }) as any);
+
     try {
       await handleUninstall({ cwd: dir, json: true });
     } finally {
+      pmSpy.mockRestore();
       console.log = origLog;
     }
 
     const res = JSON.parse(logs[0]);
     expect(res.status).toBe("success");
     expect(res.removeCommand).toBe("bun remove @netrunner714/pegas");
+    expect(res.removeCommandExitCode).toBe(0);
     expect(res.backupFile).toBe("pegas.json.bak");
     expect(res.removed.length).toBeGreaterThan(3);
+
+    // Пакетный менеджер реально запущен одной командой
+    expect(removeCalled).toBe(true);
 
     // Всё реально удалено
     await expect(fs.access(path.join(dir, CONTRACT_FILENAME))).rejects.toThrow();
     await expect(fs.access(path.join(dir, "docs", "pegas.md"))).rejects.toThrow();
     const pkg = JSON.parse(await fs.readFile(path.join(dir, "package.json"), "utf-8"));
     expect(pkg.scripts.dev).toBe("next dev");
+
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("handleUninstall reports partial status when pm remove fails", async () => {
+    const dir = await makeProject({
+      [CONTRACT_FILENAME]: JSON.stringify({ projectName: "x", services: {} }),
+      "package.json": JSON.stringify(
+        { name: "app", scripts: { dev: "pegas dev -- next dev" } },
+        null,
+        2
+      ),
+      "bun.lock": "",
+    });
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = (...args) => logs.push(args.join(" "));
+    console.error = (...args) => logs.push(args.join(" "));
+
+    const pmSpy = mockPmRemove(1); // remove падает
+
+    try {
+      await handleUninstall({ cwd: dir, json: true });
+    } finally {
+      pmSpy.mockRestore();
+      console.log = origLog;
+      console.error = origErr;
+    }
+
+    const res = JSON.parse(logs[0]);
+    expect(res.status).toBe("partial");
+    expect(res.removeCommandExitCode).toBe(1);
+
+    // Артефакты при этом удалены
+    await expect(fs.access(path.join(dir, CONTRACT_FILENAME))).rejects.toThrow();
 
     await fs.rm(dir, { recursive: true, force: true });
   });
