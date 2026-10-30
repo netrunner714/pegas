@@ -56,3 +56,20 @@ export function getUpdateCommand(pm: PackageManager, pkgName = "@netrunner714/pe
       return `npm update ${pkgName}`;
   }
 }
+
+/**
+ * Returns the exact CLI remove command for a package based on the package manager.
+ */
+export function getRemoveCommand(pm: PackageManager, pkgName = "@netrunner714/pegas"): string {
+  switch (pm) {
+    case "bun":
+      return `bun remove ${pkgName}`;
+    case "pnpm":
+      return `pnpm remove ${pkgName}`;
+    case "yarn":
+      return `yarn remove ${pkgName}`;
+    case "npm":
+    default:
+      return `npm uninstall ${pkgName}`;
+  }
+}

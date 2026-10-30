@@ -148,6 +148,26 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas down"],
   },
   {
+    name: "uninstall",
+    summary: "Remove Pegas artifacts from the project (mirror of init)",
+    usage: "uninstall [options]",
+    options: [
+      {
+        name: "dry-run",
+        type: "boolean",
+        default: false,
+        description: "Print planned removals without writing to disk",
+      },
+      {
+        name: "cwd",
+        type: "string",
+        placeholder: "<path>",
+        description: "Target project directory",
+      },
+    ],
+    examples: ["$ pegas uninstall", "$ pegas uninstall --dry-run"],
+  },
+  {
     name: "ca",
     summary: "Manage local Root CA for trusted dev HTTPS (install/remove)",
     usage: "ca <install|remove> [options]",

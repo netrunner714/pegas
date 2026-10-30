@@ -443,6 +443,22 @@ describe("main CLI command routing", () => {
     expect(calls.ca.action).toBe("remove");
   });
 
+  it("dispatches 'uninstall' command", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleUninstall: async (opts) => {
+        calls.uninstall = opts;
+      },
+    };
+
+    await main(["uninstall", "--dry-run", "--json", "--cwd", "/tmp/x"], { dispatchers });
+    expect(calls.uninstall).toEqual({
+      cwd: "/tmp/x",
+      dryRun: true,
+      json: true,
+    });
+  });
+
   it("dispatches 'llms' command", async () => {
     const calls: Record<string, any> = {};
     const dispatchers: MainDispatchers = {

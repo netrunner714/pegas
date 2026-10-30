@@ -11,6 +11,7 @@ import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
 import { handleCa } from "./commands/ca.js";
+import { handleUninstall } from "./commands/uninstall.js";
 
 import { VERSION } from "./version.js";
 import { generateHelpText, getParseArgsOptions } from "./help.js";
@@ -84,6 +85,7 @@ export interface MainDispatchers {
   handleLlms?: typeof handleLlms;
   handleUpdate?: typeof handleUpdate;
   handleCa?: typeof handleCa;
+  handleUninstall?: typeof handleUninstall;
 }
 
 export interface MainOptions {
@@ -104,6 +106,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
     handleCa: options.dispatchers?.handleCa || handleCa,
+    handleUninstall: options.dispatchers?.handleUninstall || handleUninstall,
   };
 
   const rawArgs = argv;
@@ -206,6 +209,15 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         action,
         json: values.json as boolean | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
+      });
+      break;
+    }
+
+    case "uninstall": {
+      await dispatch.handleUninstall({
+        cwd: values.cwd as string | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
+        json: values.json as boolean | undefined,
       });
       break;
     }

@@ -57,9 +57,12 @@ export const PEGAS_AGENT_RULES = `<!-- BEGIN:pegas-rules -->
 - Все публичные домены и порты сервисов объявляются в \`pegas.json\`.
 <!-- END:pegas-rules -->`;
 
+/** Маркер блока правил Pegas в AGENTS.md (используется init и uninstall). */
+export const PEGAS_AGENT_RULES_MARKER_REGEX = /<!-- BEGIN:pegas-rules -->[\s\S]*?<!-- END:pegas-rules -->/;
+
 export async function setupAgentsMd(projectDir: string, dryRun = false): Promise<string | null> {
   const agentsPath = path.join(projectDir, "AGENTS.md");
-  const regex = /<!-- BEGIN:pegas-rules -->[\s\S]*?<!-- END:pegas-rules -->/;
+  const regex = PEGAS_AGENT_RULES_MARKER_REGEX;
 
   try {
     const content = await fs.readFile(agentsPath, "utf-8");

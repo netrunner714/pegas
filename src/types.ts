@@ -58,6 +58,13 @@ export interface ServiceContract {
   };
 }
 
+export interface UninstallOptions {
+  cwd?: string;
+  json?: boolean;
+  dryRun?: boolean;
+  noExit?: boolean;
+}
+
 export interface CaOptions {
   action?: string;
   json?: boolean;

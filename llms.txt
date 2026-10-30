@@ -18,6 +18,7 @@
 - `npx pegas dev` (--cwd) — Start local HTTPS proxy and development environment.
 - `npx pegas deploy <env> [options]` (-e, --cwd) — Deploy project containers and configure Caddy routes.
 - `npx pegas down [options]` (--cwd) — Tear down project containers and remove Caddy routes.
+- `npx pegas uninstall [options]` (--dry-run, --cwd) — Remove Pegas artifacts from the project (mirror of init).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas status [options]` — Check gateway health and active project routes.
