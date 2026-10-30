@@ -6,7 +6,7 @@ import { findProjectRoot } from "../gateway.js";
 import { CONTRACT_FILENAME, getEnvironmentDomains, getServicePort } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { findOrDownloadCaddy } from "../binary.js";
-import { findAvailablePort, isPortAvailable } from "../ports.js";
+import { findAvailablePort, isPortAvailable, probePort } from "../ports.js";
 import { findRootCompose, detectInfraServices } from "../compose.js";
 import { getCaddyHomeEnv, canBindLowPorts, isCaTrusted } from "../ca.js";
 
@@ -192,10 +192,22 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   const caTrusted = await isCaTrusted();
 
   if (fellBack) {
-    console.warn(
-      `⚠️  Notice: Ports ${preferredHttps}/${preferredHttp} are unavailable (busy or require permissions).` +
-        ` Falling back to ports ${httpsPort}/${httpPort}.`
-    );
+    // Классифицируем причину fallback: EACCES (порт запрещён политикой ОС) —
+    // не «порт занят», и подсказка должна быть другой. Типичный кейс — WSL
+    // в mirrored-режиме: Windows исключает 443 из bind-диапазона WSL.
+    const httpsProbe = await probePort(preferredHttps);
+    if (httpsProbe.errorCode === "EACCES") {
+      console.warn(
+        `⚠️  Port ${preferredHttps} is blocked by the OS (EACCES), not busy.` +
+          ` On WSL (mirrored networking) Windows excludes low ports for WSL: check\n` +
+          `   'netsh interface ipv4 show excludedportrange protocol=tcp' in Windows PowerShell.`
+      );
+    } else {
+      console.warn(
+        `⚠️  Notice: Ports ${preferredHttps}/${preferredHttp} are unavailable (busy or require permissions).` +
+          ` Falling back to ports ${httpsPort}/${httpPort}.`
+      );
+    }
     if (!caTrusted) {
       console.warn(`💡 Tip: Run 'pegas ca install' to allow clean URLs on standard HTTPS port.`);
     }

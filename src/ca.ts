@@ -203,8 +203,19 @@ export function buildInstallTrustCommands(
     return [{ cmd: "certutil.exe", args: ["-user", "-addstore", "Root", opts.certPath] }];
   }
   if (opts.wsl) {
-    // Windows-утилита вызывается из WSL; путь конвертируется wslpath'ом на этапе исполнения
-    return [{ cmd: "certutil.exe", args: ["-user", "-addstore", "Root", "__WSLPATH__"] }];
+    // Windows-утилита вызывается из WSL; путь конвертируется wslpath'ом на этапе исполнения.
+    // CA ставится в Windows (браузер), но права на порт 443 — это Linux-сторона WSL:
+    // выдаём setcap бинарнику Caddy, как и на нативном Linux.
+    const commands: TrustCommand[] = [
+      { cmd: "certutil.exe", args: ["-user", "-addstore", "Root", "__WSLPATH__"] },
+    ];
+    if (opts.caddyPath) {
+      commands.push({
+        cmd: "sudo",
+        args: ["setcap", "cap_net_bind_service=+ep", opts.caddyPath],
+      });
+    }
+    return commands;
   }
   if (platform === "darwin") {
     return [
@@ -296,15 +307,20 @@ export async function installCaTrust(options: {
   for (const command of commands) {
     let args = [...command.args];
 
-    if (platform === "win32" || wsl) {
+    // certutil-команды (Windows-сторона WSL) и Linux-команды (setcap) идут вперемешку
+    if (command.cmd === "certutil.exe") {
+      let certutilArgs = args;
       if (wsl) {
         const winPath = child_process
           .execFileSync("wslpath", ["-w", options.certPath], { encoding: "utf-8", timeout: 5000 })
           .trim();
-        args = ["-user", "-addstore", "Root", winPath];
+        certutilArgs = ["-user", "-addstore", "Root", winPath];
       }
       // Тихий режим: сырой вывод certutil на смеси языков захламляет итоговый отчёт
-      child_process.execFileSync("certutil.exe", args, { stdio: ["ignore", "ignore", "pipe"], timeout: 30_000 });
+      child_process.execFileSync("certutil.exe", certutilArgs, {
+        stdio: ["ignore", "ignore", "pipe"],
+        timeout: 30_000,
+      });
       continue;
     }
 

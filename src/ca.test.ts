@@ -155,6 +155,10 @@ describe("pegas ca (unit)", () => {
     const wsl = buildInstallTrustCommands("linux", { ...opts, wsl: true });
     expect(wsl[0].cmd).toBe("certutil.exe");
     expect(wsl[0].args).toContain("__WSLPATH__");
+    // WSL: CA ставится в Windows, но право на 443 — Linux-сторона: setcap обязателен
+    expect(wsl.some((c) => c.cmd === "sudo" && c.args.join(" ").includes("setcap") && c.args.includes(opts.caddyPath))).toBe(
+      true
+    );
   });
 
   it("buildRemoveTrustCommands covers linux, darwin, windows and WSL", () => {
