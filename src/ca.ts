@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import child_process from "node:child_process";
 import { findOrDownloadCaddy } from "./binary.js";
 
@@ -16,6 +17,22 @@ import { findOrDownloadCaddy } from "./binary.js";
 
 export const PEGAS_CA_DIRNAME = ".pegas";
 export const PEGAS_CA_NAME = "Pegas Local Root CA";
+
+/**
+ * SHA-1 fingerprint сертификата (hex, без разделителей) — единственный
+ * надёжный идентификатор CA в trust store. Caddy всегда дописывает к
+ * subject'у свой суффикс ("- 2026 ECC Root"), поэтому поиск по имени
+ * ненадёжен по построению; отпечаток же стабилен всегда.
+ */
+export function getCertSha1(certPath: string): string | null {
+  try {
+    const pem = require("node:fs").readFileSync(certPath);
+    const x509 = new crypto.X509Certificate(pem);
+    return x509.fingerprint.replace(/:/g, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 export interface CaPaths {
   /** ~/.pegas */
@@ -226,13 +243,17 @@ export function buildInstallTrustCommands(
 
 /**
  * Команды удаления Root CA из системного хранилища доверия.
+ * Windows/WSL: удаление по SHA-1 hash (имена ненадёжны — см. getCertSha1).
  */
 export function buildRemoveTrustCommands(
   platform: string,
-  opts: { wsl?: boolean }
+  opts: { wsl?: boolean; sha1?: string }
 ): TrustCommand[] {
   if (platform === "win32" || opts.wsl) {
-    return [{ cmd: "certutil.exe", args: ["-user", "-delstore", "Root", PEGAS_CA_NAME] }];
+    // certutil -delstore принимает hex-hash без разделителей
+    return [
+      { cmd: "certutil.exe", args: ["-user", "-delstore", "Root", opts.sha1 || PEGAS_CA_NAME] },
+    ];
   }
   if (platform === "darwin") {
     return [
@@ -241,8 +262,8 @@ export function buildRemoveTrustCommands(
         args: [
           "security",
           "delete-certificate",
-          "-c",
-          PEGAS_CA_NAME,
+          "-Z",
+          opts.sha1 || PEGAS_CA_NAME,
           "/Library/Keychains/System.keychain",
         ],
       },
@@ -270,6 +291,7 @@ export async function installCaTrust(options: {
     caddyPath: options.caddyPath,
     wsl,
   });
+  assertOsMutationAllowed();
 
   for (const command of commands) {
     let args = [...command.args];
@@ -292,6 +314,7 @@ export async function installCaTrust(options: {
 
 /**
  * Удаляет Root CA из доверенных ОС и зачищает экспортированный сертификат.
+ * Windows/WSL/macOS: удаление по SHA-1 fingerprint экспортированного root.crt.
  */
 export async function removeCaTrust(options: {
   platform?: string;
@@ -301,7 +324,9 @@ export async function removeCaTrust(options: {
   const platform = options.platform || process.platform;
   const wsl = options.wsl ?? detectWsl();
   const paths = options.paths || getCaPaths();
-  const commands = buildRemoveTrustCommands(platform, { wsl });
+  const sha1 = getCertSha1(paths.caCertPath) || undefined;
+  const commands = buildRemoveTrustCommands(platform, { wsl, sha1 });
+  assertOsMutationAllowed();
 
   for (const command of commands) {
     if (command.cmd === "certutil.exe") {
@@ -319,7 +344,11 @@ export async function removeCaTrust(options: {
 
 /**
  * Проверяет, установлен ли Root CA в системное хранилище доверия.
- * Best-effort: при отсутствии системных утилит опирается на файл-маркер.
+ *
+ * Идентификация — по SHA-1 fingerprint экспортированного root.crt, а не по
+ * имени: Caddy дописывает к subject'у свой суффикс ("- 2026 ECC Root"),
+ * поэтому поиск по имени ненадёжен по построению (certutil требует точного
+ * совпадения CN и возвращает NTE_NOT_FOUND на частичном имени).
  */
 export async function isCaTrusted(
   platform: string = process.platform,
@@ -332,28 +361,41 @@ export async function isCaTrusted(
     .catch(() => false);
   if (!exported) return false;
 
+  const sha1 = getCertSha1(paths.caCertPath);
+  if (!sha1) return false;
+
   const linuxStoreCertPath = options.linuxStoreCertPath || "/usr/local/share/ca-certificates/pegas-root-ca.crt";
   const wsl = options.wsl ?? detectWsl();
 
   try {
     if (platform === "linux" && !wsl) {
-      await fs.access(linuxStoreCertPath);
-      return true;
+      // На Linux мы сами копируем root.crt в системный каталог — сравниваем содержимое
+      try {
+        const storePem = require("node:fs").readFileSync(linuxStoreCertPath);
+        const storeSha1 = new crypto.X509Certificate(storePem).fingerprint.replace(/:/g, "").toLowerCase();
+        return storeSha1 === sha1;
+      } catch {
+        return false;
+      }
     }
     if (platform === "darwin") {
-      child_process.execFileSync(
+      // macOS security не умеет искать по хэшу напрямую — верифицируем через
+      // экспорт ключей и поиск отпечатка в выводе.
+      const out = child_process.execFileSync(
         "security",
-        ["find-certificate", "-c", PEGAS_CA_NAME, "/Library/Keychains/System.keychain"],
-        { stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }
+        ["find-certificate", "-c", PEGAS_CA_NAME, "-a", "/Library/Keychains/System.keychain"],
+        { stdio: ["ignore", "pipe", "ignore"], timeout: 5000, encoding: "utf-8" }
       );
-      return true;
+      return out.replace(/[^0-9a-fA-F]/g, "").toLowerCase().includes(sha1);
     }
     if (platform === "win32" || wsl) {
-      child_process.execFileSync("certutil.exe", ["-user", "-store", "Root", PEGAS_CA_NAME], {
+      const out = child_process.execFileSync("certutil.exe", ["-user", "-store", "Root"], {
         stdio: ["ignore", "pipe", "ignore"],
-        timeout: 10_000,
+        timeout: 15_000,
+        encoding: "utf-8",
       });
-      return true;
+      // certutil выводит отпечатки как "(sha1): dd688ea2e845e3..." — ищем без разделителей
+      return out.replace(/[^0-9a-fA-F]/g, "").toLowerCase().includes(sha1);
     }
   } catch {
     return false;
@@ -373,8 +415,24 @@ export interface CaInstallOptions {
 }
 
 /**
- * Полный цикл `pegas ca install`:
- * провижининг CA -> экспорт -> установка в доверенные ОС (+setcap на Linux).
+ * Guard: мутация системного trust store из тестового окружения запрещена.
+ * Юнит-тесты обязаны быть герметичными (исторический баг: тест remove
+ * реально выкорчёвывал сертификат из Windows-хранилища пользователя).
+ * Явный opt-in — PEGAS_ALLOW_OS_MUTATION=1 для e2e-прогонов.
+ * Внутри мутаторов (removeCaTrust/installCaTrust), а не в обёртках —
+ * чтобы spyOn-моки тестов перехватывали вызов раньше guard'а.
+ */
+export function assertOsMutationAllowed(): void {
+  if (process.env.NODE_ENV === "test" && process.env.PEGAS_ALLOW_OS_MUTATION !== "1") {
+    throw new Error(
+      "Попытка мутировать системное хранилище доверия в тестовом окружении (NODE_ENV=test). " +
+        "Замокайте removeCaTrust/installCaTrust или выставьте PEGAS_ALLOW_OS_MUTATION=1 для e2e."
+    );
+  }
+}
+
+/**
+ * Устанавливает Root CA в доверенные ОС (исполняет команды из buildInstallTrustCommands).
  */
 export async function installCa(options: CaInstallOptions = {}): Promise<boolean> {
   const isJson = options.json ?? false;

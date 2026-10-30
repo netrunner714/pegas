@@ -180,15 +180,27 @@ describe("pegas ca (unit)", () => {
     // 1. Нет экспортированного сертификата — не доверен
     expect(await isCaTrusted("linux", paths)).toBe(false);
 
-    // 2. Экспортирован, но в системном хранилище Linux файла нет
+    // 2. Экспортирован невалидный PEM — fingerprint не извлечь, не доверен
     await fs.mkdir(paths.caDir, { recursive: true });
-    await fs.writeFile(paths.caCertPath, "CERT");
+    await fs.writeFile(paths.caCertPath, "NOT_A_CERT");
     expect(await isCaTrusted("linux", paths)).toBe(false);
 
-    // 3. В системном хранилище есть — доверен (передаём кастомный store-путь для теста)
+    // 3. В системном хранилище лежит ТОТ ЖЕ сертификат (fingerprint совпадает) — доверен
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const testCa = path.join(home, "test-ca.pem");
+    execFileSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+      "-keyout", path.join(home, "k.pem"), "-out", testCa, "-days", "1", "-nodes", "-subj", "/CN=pegas-test"]);
+    await fs.copyFile(testCa, paths.caCertPath);
     const storeCert = path.join(home, "pegas-root-ca.crt");
-    await fs.writeFile(storeCert, "STORE_CERT");
+    await fs.copyFile(testCa, storeCert);
     expect(await isCaTrusted("linux", paths, { linuxStoreCertPath: storeCert, wsl: false })).toBe(true);
+
+    // 4. В хранилище ДРУГОЙ сертификат (fingerprint не совпадает) — не доверен
+    const otherCa = path.join(home, "other-ca.pem");
+    execFileSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+      "-keyout", path.join(home, "k2.pem"), "-out", otherCa, "-days", "1", "-nodes", "-subj", "/CN=other"]);
+    await fs.copyFile(otherCa, storeCert);
+    expect(await isCaTrusted("linux", paths, { linuxStoreCertPath: storeCert, wsl: false })).toBe(false);
 
     await fs.rm(home, { recursive: true, force: true });
   });

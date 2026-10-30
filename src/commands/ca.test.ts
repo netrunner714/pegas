@@ -1,5 +1,18 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import { handleCa } from "./ca.js";
+import * as caModule from "../ca.js";
+import { getCaPaths } from "../ca.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+/**
+ * Тесты команды `ca` обязаны быть герметичными: никаких реальных вызовов
+ * certutil/security/sudo. Системное хранилище доверия — состояние машины,
+ * трогать его из юнит-тестов недопустимо (исторический баг: тест
+ * "remove on machine without CA" реально выкорчёвывал сертификат из
+ * Windows-хранилища пользователя).
+ */
 
 describe("pegas ca command dispatch", () => {
   it("prints error and exits when action is missing or unknown", async () => {
@@ -59,22 +72,54 @@ describe("pegas ca command dispatch", () => {
     expect(logs.some((l) => l.includes("pegas ca remove") && l.includes("dry-run"))).toBe(true);
   });
 
-  it("remove on machine without CA reports not-installed", async () => {
+  it("remove reports not-installed when no CA exists (hermetic: mocked trust removal)", async () => {
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-ca-cmd-"));
+
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args) => logs.push(args.join(" "));
 
+    // Мокаем реальное удаление из ОС: тест не должен трогать trust store
+    const removeTrustSpy = spyOn(caModule, "removeCaTrust").mockImplementation(async () => {});
+
     try {
-      const ok = await handleCa({ action: "remove", noExit: true });
+      const ok = await handleCa({ action: "remove", noExit: true, paths: getCaPaths(tmpHome) });
       expect(ok).toBe(true);
     } finally {
+      removeTrustSpy.mockRestore();
       console.log = origLog;
+      await fs.rm(tmpHome, { recursive: true, force: true });
     }
 
-    // Либо not-installed (чистая машина), либо success (CA уже стоит в этой среде) — оба валидны,
-    // но сообщение должно быть машиночитаемым или человекочитаемым.
-    expect(
-      logs.some((l) => l.includes("не установлен") || l.includes("удалён") || l.includes("success"))
-    ).toBe(true);
+    expect(logs.some((l) => l.includes("не установлен") || l.includes("not-installed"))).toBe(true);
+  });
+
+  it("remove succeeds when CA is trusted (hermetic: mocked trust removal, tmp export)", async () => {
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-ca-cmd-"));
+    const paths = getCaPaths(tmpHome);
+
+    // Локальный экспорт «существует» — заставляем isCaTrusted пройти только
+    // за счёт мока доверия, без реального системного хранилища
+    await fs.mkdir(paths.caDir, { recursive: true });
+    await fs.writeFile(paths.caCertPath, "stub");
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args) => logs.push(args.join(" "));
+
+    const trustedSpy = spyOn(caModule, "isCaTrusted").mockImplementation(async () => true);
+    const removeTrustSpy = spyOn(caModule, "removeCaTrust").mockImplementation(async () => {});
+
+    try {
+      const ok = await handleCa({ action: "remove", noExit: true, paths });
+      expect(ok).toBe(true);
+    } finally {
+      trustedSpy.mockRestore();
+      removeTrustSpy.mockRestore();
+      console.log = origLog;
+      await fs.rm(tmpHome, { recursive: true, force: true });
+    }
+
+    expect(logs.some((l) => l.includes("удалён") || l.includes("success"))).toBe(true);
   });
 });
