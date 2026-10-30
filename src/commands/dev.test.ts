@@ -12,7 +12,7 @@ import { PegasContract } from "../types.js";
 import { CONTRACT_FILENAME } from "../contract.js";
 
 describe("pegas dev", () => {
-  it("generates local dev Caddyfile from pegas.json contract with custom ports", () => {
+  it("generates local dev Caddyfile with skip_install_trust by default (no sudo prompts)", () => {
     const contract: PegasContract = {
       services: {
         web: {
@@ -29,13 +29,14 @@ describe("pegas dev", () => {
     expect(caddyfile).toContain("admin off");
     expect(caddyfile).toContain("https_port 8444");
     expect(caddyfile).toContain("http_port 8081");
-    expect(caddyfile).not.toContain("skip_install_trust");
+    // Без установленного CA Caddy обязан молчать про trust (sudo-промпт посреди dev недопустим)
+    expect(caddyfile).toContain("skip_install_trust");
     expect(caddyfile).toContain("app.localhost {");
     expect(caddyfile).toContain("reverse_proxy localhost:3000");
   });
 
   it("respects devGateway admin and skipInstallTrust options in generateDevCaddyfile", () => {
-    // 1. admin: true, skipInstallTrust: false
+    // 1. admin: true, skipInstallTrust: false, CA установлен — Caddy может сам обновлять trust
     const contractWithOverrides: PegasContract = {
       devGateway: {
         httpPort: 8080,
@@ -51,11 +52,15 @@ describe("pegas dev", () => {
       },
     };
 
-    const caddyfile = generateDevCaddyfile(contractWithOverrides);
+    const caddyfile = generateDevCaddyfile(contractWithOverrides, undefined, { caTrusted: true });
     expect(caddyfile).not.toContain("admin off");
     expect(caddyfile).not.toContain("skip_install_trust");
 
-    // 2. admin: false, skipInstallTrust: true
+    // 2. skipInstallTrust: false, но CA НЕ установлен — всё равно skip (sudo недопустим)
+    const caddyfileNoCa = generateDevCaddyfile(contractWithOverrides, undefined, { caTrusted: false });
+    expect(caddyfileNoCa).toContain("skip_install_trust");
+
+    // 3. admin: false, skipInstallTrust: true — явный opt-in skip
     const contractDefault: PegasContract = {
       devGateway: {
         httpPort: 8080,

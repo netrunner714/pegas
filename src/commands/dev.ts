@@ -33,13 +33,27 @@ export const DEFAULT_HTTP_PORT = 80;
 export const FALLBACK_HTTPS_PORT = 8443;
 export const FALLBACK_HTTP_PORT = 8080;
 
+export interface DevCaddyfileOptions {
+  /**
+   * Установлен ли локальный Root CA в доверенные ОС (`pegas ca install`).
+   * false (по умолчанию) -> генерируем skip_install_trust: Caddy не должен
+   * сам пытаться ставить сертификат через sudo посреди dev-сессии — на WSL
+   * это ещё и бесполезно (браузер живёт в Windows, а Caddy лезет в Linux NSS).
+   */
+  caTrusted?: boolean;
+}
+
 export function generateDevCaddyfile(
   contract: PegasContract,
-  ports: DevPorts = { httpsPort: DEFAULT_HTTPS_PORT, httpPort: DEFAULT_HTTP_PORT }
+  ports: DevPorts = { httpsPort: DEFAULT_HTTPS_PORT, httpPort: DEFAULT_HTTP_PORT },
+  options: DevCaddyfileOptions = {}
 ): string {
   const adminLine = contract.devGateway?.admin ? "" : "    admin off\n";
-  // skip_install_trust — только явный опт-ин (установка CA в ОС идёт через `pegas ca install`)
-  const trustLine = contract.devGateway?.skipInstallTrust === true ? "    skip_install_trust\n" : "";
+  // Безопасное умолчание: НЕ позволяем Caddy лезть в системный trust store
+  // (sudo-промпт посреди dev). skip_install_trust убирается только при явном
+  // отказе в контракте (skipInstallTrust: false) И установленном CA.
+  const skipTrust = !(contract.devGateway?.skipInstallTrust === false && options.caTrusted === true);
+  const trustLine = skipTrust ? "    skip_install_trust\n" : "";
   const globalBlock = `{\n${adminLine}    http_port ${ports.httpPort}\n    https_port ${ports.httpsPort}\n${trustLine}}`;
   const blocks: string[] = [globalBlock];
 
@@ -173,12 +187,15 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
 
   const fellBack = httpsPort !== preferredHttps || httpPort !== preferredHttp;
 
+  // Статус CA нужен всегда (для Caddyfile): если не доверен — Caddy обязан
+  // молчать про trust (sudo-промпт посреди dev недопустим).
+  const caTrusted = await isCaTrusted();
+
   if (fellBack) {
     console.warn(
       `⚠️  Notice: Ports ${preferredHttps}/${preferredHttp} are unavailable (busy or require permissions).` +
         ` Falling back to ports ${httpsPort}/${httpPort}.`
     );
-    const caTrusted = await isCaTrusted();
     if (!caTrusted) {
       console.warn(`💡 Tip: Run 'pegas ca install' to allow clean URLs on standard HTTPS port.`);
     }
@@ -189,7 +206,7 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   await fs.unlink(devCaddyfilePath).catch(() => {});
 
   // 6. Generate dev Caddyfile configuration in-memory
-  const caddyfileContent = generateDevCaddyfile(contract, { httpsPort, httpPort });
+  const caddyfileContent = generateDevCaddyfile(contract, { httpsPort, httpPort }, { caTrusted });
 
   // 7. Start Caddy in background child process piping config via stdin
   console.log("🔒 Starting local Caddy HTTPS proxy...");
