@@ -6,7 +6,7 @@ import { findProjectRoot } from "../gateway.js";
 import { CONTRACT_FILENAME, getEnvironmentDomains, getServicePort } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { findOrDownloadCaddy } from "../binary.js";
-import { findAvailablePort, isPortAvailable, probePort } from "../ports.js";
+import { findAvailablePort, isPortAvailable } from "../ports.js";
 import { findRootCompose, detectInfraServices } from "../compose.js";
 import { getCaddyHomeEnv, canBindLowPorts, isCaTrusted } from "../ca.js";
 
@@ -167,8 +167,22 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
 
   const lowPortsAllowed = canBindLowPorts(process.platform, null, caddyPath);
 
+  /**
+   * Зонд низких портов из Node-процесса ЛОЖНО возвращает EACCES, когда
+   * Caddy имеет cap_net_bind_service (зондирует процесс без cap, а слушать
+   * будет Caddy). Поэтому:
+   * - низкий порт + cap на Caddy -> НЕ зондируем из Node вовсе: занятость
+   *   порта поймает сам Caddy ошибкой bind, которую dev перехватывает ниже;
+   * - низкий порт без cap -> честный fallback;
+   * - высокий порт (>= 1024) -> обычный зонд, cap не нужен.
+   */
+  const caddyCanBindPreferredHttps = preferredHttps >= 1024 || (preferredHttps === DEFAULT_HTTPS_PORT && lowPortsAllowed);
+  const caddyCanBindPreferredHttp = preferredHttp >= 1024 || (preferredHttp === DEFAULT_HTTP_PORT && lowPortsAllowed);
+
   let httpsPort: number;
-  if (preferredHttps >= 1024 || (preferredHttps === DEFAULT_HTTPS_PORT && lowPortsAllowed)) {
+  if (caddyCanBindPreferredHttps) {
+    httpsPort = preferredHttps; // занятость порта проверит сам Caddy (у него права)
+  } else if (preferredHttps >= 1024) {
     httpsPort = (await isPortAvailable(preferredHttps))
       ? preferredHttps
       : await findAvailablePort(FALLBACK_HTTPS_PORT);
@@ -177,7 +191,9 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   }
 
   let httpPort: number;
-  if (preferredHttp >= 1024 || (preferredHttp === DEFAULT_HTTP_PORT && lowPortsAllowed)) {
+  if (caddyCanBindPreferredHttp) {
+    httpPort = preferredHttp;
+  } else if (preferredHttp >= 1024) {
     httpPort = (await isPortAvailable(preferredHttp))
       ? preferredHttp
       : await findAvailablePort(FALLBACK_HTTP_PORT, [httpsPort]);
@@ -185,6 +201,8 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     httpPort = await findAvailablePort(FALLBACK_HTTP_PORT, [httpsPort]);
   }
 
+  // Низкие порты с cap считаются доступными до старта Caddy — fallback
+  // определится только по факту ошибки bind (см. обработку caddyStderr).
   const fellBack = httpsPort !== preferredHttps || httpPort !== preferredHttp;
 
   // Статус CA нужен всегда (для Caddyfile): если не доверен — Caddy обязан
@@ -192,15 +210,14 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   const caTrusted = await isCaTrusted();
 
   if (fellBack) {
-    // Классифицируем причину fallback: EACCES (порт запрещён политикой ОС) —
-    // не «порт занят», и подсказка должна быть другой. Типичный кейс — WSL
-    // в mirrored-режиме: Windows исключает 443 из bind-диапазона WSL.
-    const httpsProbe = await probePort(preferredHttps);
-    if (httpsProbe.errorCode === "EACCES") {
+    // Классифицируем причину fallback. EACCES из Node-зонда для низкого порта
+    // без cap — это ожидаемое поведение Linux (не «порт занят»); настоящий
+    // сценарий Windows-политики ловится только тогда, когда даже Caddy
+    // с cap не смог забиндить порт (см. обработку caddyStderr ниже).
+    if (!lowPortsAllowed && (preferredHttps < 1024 || preferredHttp < 1024)) {
       console.warn(
-        `⚠️  Port ${preferredHttps} is blocked by the OS (EACCES), not busy.` +
-          ` On WSL (mirrored networking) Windows excludes low ports for WSL: check\n` +
-          `   'netsh interface ipv4 show excludedportrange protocol=tcp' in Windows PowerShell.`
+        `⚠️  Notice: Caddy lacks 'cap_net_bind_service', so ports ${preferredHttps}/${preferredHttp} are not bindable.\n` +
+          `   Run 'pegas ca install' once to grant Caddy the capability (Linux) or use high ports.`
       );
     } else {
       console.warn(
@@ -244,6 +261,14 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     caddyStderr += text;
     if (text.includes("bind: address already in use") || text.includes("permission denied")) {
       console.error(`\n❌ Caddy error: ${text.trim()}`);
+      // Диагностика Windows-политики: даже cap не помогла — порт исключён ОС
+      // (типично для WSL в mirrored-режиме).
+      if (text.includes("permission denied") && process.platform === "linux") {
+        console.error(
+          `   Port is blocked by the OS policy. On WSL (mirrored networking) check excluded ranges:\n` +
+            `   'netsh interface ipv4 show excludedportrange protocol=tcp' in Windows PowerShell.`
+        );
+      }
     }
   });
 
