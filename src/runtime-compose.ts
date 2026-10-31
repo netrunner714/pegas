@@ -143,7 +143,6 @@ function readText(file: string): string {
 /** Resolve an existing project directory without allowing symlink escapes. */
 function resolveProjectDirectory(projectRoot: string, relativePath: string, field: string): string {
   const resolved = path.resolve(projectRoot, relativePath);
-  const lexicalRelative = path.relative(path.resolve(projectRoot), resolved);
   if (isPathOutside(path.resolve(projectRoot), resolved)) {
     throw new Error(`${field} must resolve to a directory inside the project root.`);
   }
@@ -153,7 +152,6 @@ function resolveProjectDirectory(projectRoot: string, relativePath: string, fiel
   } catch {
     throw new Error(`${field} directory does not exist: ${relativePath}`);
   }
-  const realRelative = path.relative(fs.realpathSync(projectRoot), realPath);
   if (isPathOutside(fs.realpathSync(projectRoot), realPath) || !fs.statSync(realPath).isDirectory()) {
     throw new Error(`${field} must resolve to a directory inside the project root.`);
   }
