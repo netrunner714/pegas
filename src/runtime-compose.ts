@@ -146,8 +146,8 @@ function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error(`envFile "${envFile}" must resolve to a file inside the project root.`);
   }
-  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-    throw new Error(`Secret envFile "${envFile}" does not exist or is not a regular file.`);
+  if (!fs.existsSync(resolved) || !fs.lstatSync(resolved).isFile()) {
+    throw new Error(`Secret envFile "${envFile}" does not exist, is a symlink, or is not a regular file.`);
   }
   try {
     childProcess.execFileSync("git", ["check-ignore", "-q", "--", relative], { cwd: projectRoot, stdio: "ignore" });
