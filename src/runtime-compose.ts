@@ -30,22 +30,67 @@ function hashValue(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
 }
 
-/** Fingerprints the local build context so changed source receives a new image tag. */
+/**
+ * Applies Docker .dockerignore rules when fingerprinting a build context.
+ * Supports comments, negation, *, ?, character classes and **. Directory
+ * matches also cover descendants, matching Docker build-context semantics.
+ */
+function dockerIgnoreMatcher(contextDir: string): (relativePath: string) => boolean {
+  const ignoreFile = path.join(contextDir, ".dockerignore");
+  let source = "";
+  try { source = fs.readFileSync(ignoreFile, "utf8"); } catch {}
+  const rules = source.split(/\r?\n/).flatMap((raw) => {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) return [];
+    const negated = line.startsWith("!");
+    const pattern = (negated ? line.slice(1) : line).replace(/^\/+|\/+$/g, "");
+    if (!pattern || pattern === ".") return [];
+    let regex = "^";
+    for (let i = 0; i < pattern.length; i++) {
+      const char = pattern[i];
+      if (char === "*") {
+        if (pattern[i + 1] === "*") {
+          i++;
+          if (pattern[i + 1] === "/") { regex += "(?:.*/)?"; i++; }
+          else regex += ".*";
+        } else regex += "[^/]*";
+      } else if (char === "?") regex += "[^/]";
+      else if (char === "[") {
+        const close = pattern.indexOf("]", i + 1);
+        if (close > i) { regex += pattern.slice(i, close + 1); i = close; }
+        else regex += "\\[";
+      } else regex += char.replace(/[\\^$+.()|{}]/g, "\\\\$&");
+    }
+    return [{ negated, regex: new RegExp(`${regex}(?:/.*)?$`) }];
+  });
+  return (relativePath) => {
+    let ignored = false;
+    const normalized = relativePath.split(path.sep).join("/");
+    for (const rule of rules) if (rule.regex.test(normalized)) ignored = !rule.negated;
+    return ignored;
+  };
+}
+
+/** Fingerprints the effective local build context so changed source receives a new image tag. */
 function hashBuildContext(contextDir: string): string {
   const hash = createHash("sha256");
+  const isIgnored = dockerIgnoreMatcher(contextDir);
   const visit = (directory: string, relative = "") => {
     const entries = fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const rel = relative ? path.join(relative, entry.name) : entry.name;
+      if (isIgnored(rel)) continue;
       const full = path.join(directory, entry.name);
-      hash.update(rel.split(path.sep).join("/")).update("\0");
+      hash.update(rel.split(path.sep).join("/")).update("\\0");
       if (entry.isDirectory()) {
-        hash.update("directory\0");
+        hash.update("directory\\0");
         visit(full, rel);
       } else if (entry.isSymbolicLink()) {
-        hash.update("symlink\0").update(fs.readlinkSync(full)).update("\0");
+        hash.update("symlink\\0").update(fs.readlinkSync(full)).update("\\0");
       } else if (entry.isFile()) {
-        hash.update("file\0").update(fs.readFileSync(full)).update("\0");
+        const mode = fs.statSync(full).mode & 0o777;
+        hash.update("file\\0").update(String(mode)).update("\\0");
+        hash.update(fs.readFileSync(full)).update("\\0");
       }
     }
   };
