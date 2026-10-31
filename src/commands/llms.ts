@@ -9,29 +9,44 @@ import { COMMANDS, GLOBAL_OPTIONS, CliOptionDef } from "../help.js";
  */
 
 const CORE_CONCEPTS = `## Core Concepts
-- Manages single reverse proxy (Caddy 2) listening on :80 and :443.
-- All Docker projects attach to a shared Docker bridge network named \`pegas-network\`.
-- Never expose 80:80 or 443:443 in application compose files.
-- Each project gets an isolated declarative drop-in configuration in \`conf.d/<projectName>.caddy\`.
-- Hot-reloads Caddy via API with zero downtime and automatic validation rollback.
+- Declarative environment manager for Docker multi-app setups: \`pegas.json\` is the single source of truth.
+- \`runtime: "docker"\` in pegas.json opts into the container runtime; \`init\` auto-detects it (Dockerfile or compose files present).
+- One shared Docker bridge network \`pegas-network\`; one shared Caddy Gateway container owning ports 80/443.
+- Never expose 80:80 or 443:443 in application compose files; the Gateway owns host ports and proxies by network aliases.
+- The launch manifest is generated from pegas.json and is ephemeral (passed via stdin); user compose files are not the source of truth.
+- Containers carry Docker labels: \`pegas.project\`, \`pegas.environment\`, \`pegas.service\`, \`pegas.manifest-hash\`.
+- Service aliases inside the shared network are \`<checkout-id>-<environment>-<service>\`: several checkouts and environments coexist.
+- Each project gets an isolated declarative route file \`conf.d/<projectName>.caddy\` (per environment); hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
-- Local dev: trusted HTTPS via \`pegas ca install\` (one-time), clean URLs on port 443 (\`[service].[project].localhost\`).`;
+- Dev containers bind-mount sources and keep dependencies in named volumes; apps run their real dev commands inside containers.
+- \`pegas dev\` never manages lifecycle: it verifies the environment matches the contract and attaches to logs; Ctrl+C only detaches.
+- Local dev HTTPS: \`pegas ca install\` (one-time), clean URLs on port 443 (\`[service].[project].localhost\`).`;
 
-const COMPOSE_EXAMPLE = `## Example Docker Compose Patch for Any App
-\`\`\`yaml
-services:
-  app:
-    expose:
-      - "3000"
-    networks:
-      pegas-network:
-        aliases:
-          - <projectName>-app
-
-networks:
-  pegas-network:
-    external: true
-\`\`\``;
+const CONTRACT_EXAMPLE = `## Example pegas.json (docker runtime)
+\`\`\`jsonc
+{
+  "projectName": "my-app",
+  "runtime": "docker",
+  "services": {
+    "web": {
+      "role": "app",
+      "port": 3000,
+      "domains": {
+        "development": ["my-app.localhost"],
+        "production": ["my-app.com"]
+      }
+    },
+    "postgres": {
+      "role": "infra",
+      "image": "postgres:18-alpine",
+      "env": { "POSTGRES_USER": "app", "POSTGRES_PASSWORD": "see envFile" },
+      "volumes": ["pgdata:/var/lib/postgresql"]
+    }
+  }
+}
+\`\`\`
+Do not patch user compose files or expose host ports: pegas generates the launch manifest,
+attaches services to the shared network and routes domains through the shared Gateway.`;
 
 /** Человекочитаемая строка вызова команды с учётом usage. */
 function formatUsageLine(cmdName: string, usage: string): string {
@@ -55,7 +70,7 @@ export function buildLlmsText(): string {
 
   lines.push("# pegas");
   lines.push("");
-  lines.push("> Agent-native zero-config Caddy reverse proxy for Docker multi-app VPS setups.");
+  lines.push("> Agent-native declarative environment manager for Docker multi-app VPS setups (Caddy Gateway, containers, routes, domains).");
   lines.push("");
   lines.push(CORE_CONCEPTS);
   lines.push("");
@@ -91,7 +106,7 @@ export function buildLlmsText(): string {
   }
 
   lines.push("");
-  lines.push(COMPOSE_EXAMPLE);
+  lines.push(CONTRACT_EXAMPLE);
   lines.push("");
 
   return lines.join("\n");

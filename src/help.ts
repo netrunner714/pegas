@@ -48,7 +48,7 @@ export const GLOBAL_OPTIONS: CliOptionDef[] = [
 export const COMMANDS: CliCommandDef[] = [
   {
     name: "init",
-    summary: "Init Pegas in current project",
+    summary: "Create the pegas.json contract (runtime auto-detected from the project), docs and scripts",
     usage: "init [options]",
     options: [
       {
@@ -94,7 +94,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "dev",
-    summary: "Start local HTTPS proxy and development environment",
+    summary: "Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app",
     usage: "dev [options] [-- <command...>]",
     options: [
       {
@@ -111,7 +111,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "deploy",
-    summary: "Deploy project containers and configure Caddy routes",
+    summary: "Deploy an environment (development/production): network, shared Gateway, containers, routes",
     usage: "deploy <env> [options]",
     options: [
       {
@@ -135,7 +135,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "down",
-    summary: "Tear down project containers and remove Caddy routes",
+    summary: "Remove project containers and Caddy routes (all environments, or one with --env)",
     usage: "down [options]",
     options: [
       {
