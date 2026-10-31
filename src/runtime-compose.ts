@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { validatePegasContract } from "./contract.js";
@@ -28,6 +29,29 @@ function stableValue(value: unknown): unknown {
 
 function hashValue(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
+}
+
+/** Fingerprints the local build context so changed source receives a new image tag. */
+function hashBuildContext(contextDir: string): string {
+  const hash = createHash("sha256");
+  const visit = (directory: string, relative = "") => {
+    const entries = fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const rel = relative ? path.join(relative, entry.name) : entry.name;
+      const full = path.join(directory, entry.name);
+      hash.update(rel.split(path.sep).join("/")).update("\0");
+      if (entry.isDirectory()) {
+        hash.update("directory\0");
+        visit(full, rel);
+      } else if (entry.isSymbolicLink()) {
+        hash.update("symlink\0").update(fs.readlinkSync(full)).update("\0");
+      } else if (entry.isFile()) {
+        hash.update("file\0").update(fs.readFileSync(full)).update("\0");
+      }
+    }
+  };
+  visit(contextDir);
+  return hash.digest("hex");
 }
 
 const INFRA_IMAGES: Record<string, string> = {
@@ -294,9 +318,11 @@ export function createRuntimeCompose(
         ? path.resolve(options.projectRoot, service.build.context, "Dockerfile")
         : "";
     const dockerIgnorePath = path.resolve(options.projectRoot, service.build?.context || ".", ".dockerignore");
+    const buildContext = service.build ? path.resolve(options.projectRoot, service.build.context) : options.projectRoot;
     const dockerfileHash = createHash("sha256")
       .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
       .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
+      .update(service.build ? hashBuildContext(buildContext) : "")
       .digest("hex");
     const environmentName = options.environment || "development";
     const configuredWatchMode = service.hmr?.fileWatch;
