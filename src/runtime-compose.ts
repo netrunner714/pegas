@@ -3,7 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
-import { validatePegasContract } from "./contract.js";
+import { validatePegasContract, normalizeEnvironment } from "./contract.js";
 
 export interface RuntimeComposeOptions {
   projectRoot: string;
@@ -376,6 +376,26 @@ function getVolumeTarget(spec: string | { target?: string }): string | undefined
 }
 
 /**
+ * Q6: a host-installed node_modules directory sits directly under the bind mount
+ * and is silently shadowed by the Docker dependency volume — the host copy never
+ * updates the container. Warn loudly instead of letting the drift go unnoticed.
+ */
+export function hasHostNodeModules(
+  contract: PegasContract,
+  projectRoot: string
+): string[] {
+  const sources: string[] = [];
+  for (const service of Object.values(contract.services || {})) {
+    const relative = service.bindMount || service.build?.context || ".";
+    const dir = path.join(projectRoot, relative);
+    try {
+      if (fs.statSync(path.join(dir, "node_modules")).isDirectory()) sources.push(relative);
+    } catch {}
+  }
+  return sources;
+}
+
+/**
  * Builds an ephemeral Compose document from the declarative contract.
  * JSON is valid YAML, which lets us avoid a runtime YAML dependency and safely
  * pass the document to `docker compose -f -` through stdin.
@@ -397,6 +417,7 @@ export function createRuntimeCompose(
   const services: Record<string, unknown> = {};
   const namedVolumes = new Set<string>();
   const serviceHashes: Record<string, string> = {};
+  const environmentName = normalizeEnvironment(options.environment);
 
   for (const [serviceName, service] of Object.entries(contract.services)) {
     const app = isAppService(serviceName, service);
@@ -409,7 +430,7 @@ export function createRuntimeCompose(
         if (!effectiveImage) {
           throw new Error(`Infrastructure service "${serviceName}" needs an explicit image in pegas.json; no built-in profile exists for this service.`);
         }
-      } else if (app && (options.environment || "development") === "development") {
+      } else if (app && environmentName === "development") {
         appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, "development");
         effectiveImage = appDefaults.image;
       } else if (app) {
@@ -435,12 +456,16 @@ export function createRuntimeCompose(
         throw new Error(`services.${serviceName}.build.dockerfile must resolve to a file inside its build context.`);
       }
     }
+    // In development the source tree is bind-mounted into the container: a source
+    // edit must not trigger an image rebuild. Only the build recipe (Dockerfile,
+    // .dockerignore, dependencies) participates in the fingerprint. In other
+    // environments the full build context is baked into the image and is hashed.
+    const hashBuildInputs = service.build && environmentName !== "development";
     const dockerfileHash = createHash("sha256")
       .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
       .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
-      .update(service.build ? hashBuildContext(buildContext) : "")
+      .update(hashBuildInputs ? hashBuildContext(buildContext) : "")
       .digest("hex");
-    const environmentName = options.environment || "development";
     const configuredWatchMode = service.hmr?.fileWatch;
     const watchMode = environmentName !== "development"
       ? "events"
@@ -462,7 +487,7 @@ export function createRuntimeCompose(
         dockerfileInline: appDefaults.dockerfileInline,
         imageHash: appDefaults.imageHash,
         command: appDefaults.command,
-        environment: options.environment || "development",
+        environment: environmentName,
       } : undefined,
     });
     serviceHashes[serviceName] = serviceHash;
@@ -533,8 +558,8 @@ export function createRuntimeCompose(
     }
     if (service.port !== undefined) generated.expose = [String(service.port)];
 
-    const volumes: unknown[] = [...(service.volumes || [])];
-    if (app && (options.environment || "development") === "development") {
+    const volumes: Array<string | { type?: string; source?: string; target?: string; bind?: unknown }> = [...(service.volumes || [])];
+    if (app && environmentName === "development") {
       const source = resolveProjectDirectory(
         options.projectRoot,
         service.bindMount || service.build?.context || ".",
@@ -550,7 +575,7 @@ export function createRuntimeCompose(
 
       const dependencyTarget = appDefaults?.dependencyTarget || "/workspace/node_modules";
       if (!volumes.some((volume) => getVolumeTarget(volume) === dependencyTarget)) {
-        const volumeName = `pegas-${options.projectId}-${serviceName}-dependencies`;
+        const volumeName = `pegas-${options.projectId}-${serviceName}-${environmentName}-dependencies`;
         volumes.push(`${volumeName}:${dependencyTarget}`);
         namedVolumes.add(volumeName);
       }
@@ -561,7 +586,7 @@ export function createRuntimeCompose(
   }
 
   const manifest: Record<string, unknown> = {
-    name: `pegas-${options.projectId}-${options.environment || "development"}`,
+    name: `pegas-${options.projectId}-${environmentName}`,
     services,
     networks: {
       "pegas-network": { external: true, name: "pegas-network" },

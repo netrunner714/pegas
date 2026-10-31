@@ -5,8 +5,8 @@ import type { ChildProcess } from "node:child_process";
 import { findProjectRoot, findGatewayDir } from "../gateway.js";
 import { CONTRACT_FILENAME, getEnvironmentDomains, getServicePort, getProjectRuntimeId } from "../contract.js";
 import { PegasContract } from "../types.js";
-import { createRuntimeCompose } from "../runtime-compose.js";
-import { runRuntimeCompose } from "../runtime.js";
+import { createRuntimeCompose, hasHostNodeModules } from "../runtime-compose.js";
+import { runRuntimeCompose, followRuntimeLogs } from "../runtime.js";
 import { ensureGatewayContainer, runCommand } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 import { findOrDownloadCaddy } from "../binary.js";
@@ -101,6 +101,13 @@ async function handleDockerRuntimeDev(
   const projectId = getProjectRuntimeId(projectRoot, projectName);
   const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: "development" });
 
+  // Q6: host-installed dependencies do not update the Docker dependency volume.
+  const hostNodeModules = hasHostNodeModules(contract, projectRoot);
+  if (hostNodeModules.length > 0) {
+    console.warn("Host node_modules detected at: " + hostNodeModules.join(", ") + ".");
+    console.warn("It is shadowed by the Docker dependency volume: installing on the host does NOT update the container.");
+    console.warn("Change the lock file and run pegas deploy development to re-sync dependencies inside the container.");
+  }
   const fail = (message: string) => {
     console.error(message);
     if (!options.noExit) process.exit(1);
@@ -196,7 +203,8 @@ async function handleDockerRuntimeDev(
   for (const url of urls) console.log(`🚀 Pegas development URL: ${url}`);
 
   console.log("📋 Attaching to existing Docker service logs. Press Ctrl+C to detach; containers will keep running.\n");
-  await runRuntimeCompose(contract, projectRoot, projectId, ["logs", "--follow", "--tail", "100"], { ...process.env, PEGAS_ENV: "development", NODE_ENV: "development" });
+  await followRuntimeLogs(contract, projectRoot, projectId, { ...process.env, PEGAS_ENV: "development", NODE_ENV: "development" });
+  console.log("\n👋 Detached from logs. Pegas development containers keep running in the background.");
 }
 
 export async function handleDev(options: DevOptions = {}): Promise<void> {

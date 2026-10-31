@@ -7,6 +7,19 @@ import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
+/**
+ * Canonical environment name: `dev` -> `development`, `prod` -> `production`,
+ * anything else is lowercased as-is. One shared definition keeps Docker labels,
+ * Compose project names, DNS aliases and route files consistent.
+ */
+export function normalizeEnvironment(env: string | undefined): string {
+  const value = (env || "").trim().toLowerCase();
+  if (!value) return "development";
+  if (value === "dev") return "development";
+  if (value === "prod") return "production";
+  return value;
+}
+
 export interface ContractValidationIssue {
   path: string;
   message: string;
