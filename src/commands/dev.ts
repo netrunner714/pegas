@@ -155,7 +155,9 @@ async function handleDockerRuntimeDev(
       continue;
     }
     if (labels["pegas.manifest-hash"] !== expectedHash) {
-      problems.push(`${serviceName}: configuration drift detected; run 'pegas deploy development'`);
+      const expectedDepsHash = (generated.manifest.services as Record<string, { labels?: Record<string, string> }>)[serviceName]?.labels?.["pegas.dependencies-hash"];
+      const depsChanged = expectedDepsHash && labels["pegas.dependencies-hash"] !== expectedDepsHash;
+      problems.push(`${serviceName}: ${depsChanged ? "dependencies changed (lock file or package manager)" : "configuration drift detected"}; run 'pegas deploy development'`);
     }
     const expectedService = (generated.manifest.services as Record<string, { labels?: Record<string, string> }>)[serviceName];
     const expectedEnvHash = expectedService?.labels?.["pegas.env-hash"];
