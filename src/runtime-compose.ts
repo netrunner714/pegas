@@ -561,7 +561,7 @@ export function createRuntimeCompose(
   }
 
   const manifest: Record<string, unknown> = {
-    name: "pegas-" + options.projectId,
+    name: `pegas-${options.projectId}-${options.environment || "development"}`,
     services,
     networks: {
       "pegas-network": { external: true, name: "pegas-network" },
