@@ -284,7 +284,6 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     let composeFile: string | null = null;
     try {
       if (contract.runtime === "docker") {
-        const hasBuilds = Object.values(contract.services || {}).some((service) => Boolean(service.build));
         await runRuntimeCompose(contract, projectRoot, runtimeId, [
           "up", "-d", "--remove-orphans",
         ], deployEnv);
