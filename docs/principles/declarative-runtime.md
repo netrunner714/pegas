@@ -142,7 +142,6 @@ Pegas перестаёт быть обёрткой над dev-процессом
 | S1 | Расширение контракта + эфемерный codegen манифеста + labels; opt-in `runtime: "docker"`; Docker runtime для app/infra; общий Gateway, registry зависимостей и безопасная сериализация deploy/down | minor |
 | S2 | Восстановление Gateway после аварии при живых контейнерах, CA-доверие для контейнера Gateway и эксплуатационное hardening | minor |
 | S3 | Новый `pegas dev` = проверка + attach к логам | minor (внутри opt-in) |
-| S4 | `pegas down` с освобождением Gateway по registry (4.1) | minor |
 | S5 | Смена default → новая модель; deprecated-период старого флоу | **major (2.0)** |
 
 Старый host-флоу (`pegas dev` с локальным Caddy) поддерживается до 2.0 включительно. Инструмент миграции контракта — часть S5.
