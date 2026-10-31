@@ -9,6 +9,7 @@ import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
+import { ensureGatewayContainer } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 
 export interface DeployOptions {
@@ -284,6 +285,8 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     try {
       if (contract.runtime === "docker") {
         await runRuntimeCompose(contract, projectRoot, runtimeId, ["up", "-d", "--remove-orphans"], deployEnv);
+        const gatewayResult = await ensureGatewayContainer(gatewayDir);
+        if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
       } else {
         await setupProjectCompose(projectRoot, projectName);
         composeFile = await findPegasCompose(projectRoot);

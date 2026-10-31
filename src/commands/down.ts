@@ -5,7 +5,7 @@ import { findProjectRoot, findGatewayDir, getConfDir, reloadGateway } from "../g
 import { CONTRACT_FILENAME } from "../contract.js";
 import { findPegasCompose } from "../compose.js";
 import { getProjectRuntimeId } from "../contract.js";
-import { runRuntimeCompose } from "../runtime.js";
+import { removeProjectContainers } from "../runtime.js";
 import { PegasContract } from "../types.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 
@@ -95,7 +95,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
     try {
       if (contract?.runtime === "docker") {
         const runtimeId = getProjectRuntimeId(projectRoot, projectName);
-        await runRuntimeCompose(contract, projectRoot, runtimeId, ["down", "--remove-orphans"]);
+        await removeProjectContainers(runtimeId);
       } else {
         const composeFile = await findPegasCompose(projectRoot);
         const composeCmd = composeFile

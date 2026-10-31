@@ -1,4 +1,6 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -67,4 +69,83 @@ export async function startGatewayContainer(gatewayDir: string): Promise<Command
 
 export async function getGatewayContainerStatus(gatewayDir: string): Promise<CommandResult> {
   return await runCommand("docker", ["compose", "ps", "--format", "json"], gatewayDir);
+}
+
+async function findGatewayComposeFile(gatewayDir: string): Promise<string | null> {
+  for (const file of ["compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"]) {
+    try {
+      await fs.access(path.join(gatewayDir, file));
+      return file;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Starts the machine-wide Caddy service and attaches it to the shared network.
+ * The Compose override is passed through stdin and never persisted.
+ */
+export async function ensureGatewayContainer(gatewayDir: string): Promise<CommandResult> {
+  const networkReady = await ensureDockerNetwork("pegas-network");
+  if (!networkReady) {
+    return { success: false, stdout: "", stderr: "Could not create or inspect the shared Docker network 'pegas-network'." };
+  }
+
+  const composeFile = await findGatewayComposeFile(gatewayDir);
+  if (!composeFile) {
+    return { success: false, stdout: "", stderr: `No Compose file found in shared Gateway directory: ${gatewayDir}` };
+  }
+
+  const override = JSON.stringify({
+    services: {
+      caddy: {
+        labels: { "pegas.gateway": "true" },
+        networks: { "pegas-network": { aliases: ["pegas-gateway"] } },
+      },
+    },
+    networks: {
+      "pegas-network": { external: true, name: "pegas-network" },
+    },
+  });
+
+  try {
+    execFileSync("docker", [
+      "compose", "--project-directory", gatewayDir,
+      "-f", composeFile, "-f", "-", "up", "-d", "caddy",
+    ], {
+      cwd: gatewayDir,
+      input: override,
+      encoding: "utf8",
+      stdio: ["pipe", "inherit", "inherit"],
+    });
+    return { success: true, stdout: "", stderr: "" };
+  } catch (error: any) {
+    return {
+      success: false,
+      stdout: (error?.stdout || "").toString().trim(),
+      stderr: (error?.stderr || error?.message || "Failed to start shared Gateway.").toString().trim(),
+    };
+  }
+}
+
+/**
+ * A stopped project still holds the Gateway dependency. Only when no
+ * containers (running or stopped) carry pegas.project may the Gateway stop.
+ */
+export async function stopGatewayIfUnused(gatewayDir: string): Promise<CommandResult> {
+  const holders = await runCommand("docker", [
+    "ps", "-aq", "--filter", "label=pegas.project",
+  ]);
+  if (!holders.success) return holders;
+  if (holders.stdout.trim()) return { success: true, stdout: "Gateway retained: other Pegas project containers still exist.", stderr: "" };
+
+  const gatewayContainers = await runCommand("docker", [
+    "ps", "-aq", "--filter", "label=pegas.gateway=true",
+  ]);
+  if (!gatewayContainers.success) return gatewayContainers;
+  if (!gatewayContainers.stdout.trim()) return { success: true, stdout: "Gateway is already stopped.", stderr: "" };
+
+  const stopped = await runCommand("docker", ["stop", ...gatewayContainers.stdout.split(/\\s+/).filter(Boolean)]);
+  if (!stopped.success) return stopped;
+  return { success: true, stdout: "Shared Gateway stopped: no Pegas projects depend on it.", stderr: "" };
 }
