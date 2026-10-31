@@ -4,6 +4,9 @@ import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getConfDir, reloadGateway } from "../gateway.js";
 import { CONTRACT_FILENAME } from "../contract.js";
 import { findPegasCompose } from "../compose.js";
+import { getProjectRuntimeId } from "../contract.js";
+import { runRuntimeCompose } from "../runtime.js";
+import { PegasContract } from "../types.js";
 
 export interface DownOptions {
   gatewayDir?: string;
@@ -20,9 +23,10 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
   const contractPath = path.join(projectRoot, CONTRACT_FILENAME);
 
   let projectName = path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  let contract: PegasContract | null = null;
   try {
     const rawContract = await fs.readFile(contractPath, "utf-8");
-    const contract = JSON.parse(rawContract);
+    contract = JSON.parse(rawContract) as PegasContract;
     if (contract.projectName) {
       projectName = contract.projectName;
     }
@@ -84,35 +88,33 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
     });
   }
 
-  // Stop containers with docker compose down
+  // Remove only this project's containers. External pegas-network and named
+  // dependency volumes are intentionally preserved.
   if (!options.skipComposeDown) {
-    const composeFile = await findPegasCompose(projectRoot);
-    const composeCmd = composeFile
-      ? `docker compose --project-directory . -f ${composeFile} down`
-      : "docker compose down";
-
-    if (!isJson) {
-      console.log(`\n🛑 [2/2] Stopping project containers with '${composeCmd}'...\n`);
-    }
     try {
-      child_process.execSync(composeCmd, {
-        stdio: "inherit",
-        cwd: projectRoot,
-      });
-    } catch (err: any) {
-      if (isJson) {
-        console.log(
-          JSON.stringify({
-            error: `Failed to execute '${composeCmd}'`,
-            details: err.message,
-          })
-        );
+      if (contract?.runtime === "docker") {
+        const runtimeId = getProjectRuntimeId(projectRoot, projectName);
+        await runRuntimeCompose(contract, projectRoot, runtimeId, ["down", "--remove-orphans"]);
       } else {
-        console.error(`❌ Error: Failed to execute '${composeCmd}':`, err.message);
+        const composeFile = await findPegasCompose(projectRoot);
+        const composeCmd = composeFile
+          ? `docker compose --project-directory . -f ${composeFile} down`
+          : "docker compose down";
+        if (!isJson) {
+          console.log(`\n🛑 [2/2] Stopping project containers with '${composeCmd}'...\n`);
+        }
+        child_process.execSync(composeCmd, { stdio: "inherit", cwd: projectRoot });
       }
-      if (!options.noExit) {
-        process.exit(1);
+    } catch (err: any) {
+      const message = contract?.runtime === "docker"
+        ? "Failed to remove declarative runtime containers"
+        : "Failed to execute Docker Compose down";
+      if (isJson) {
+        console.log(JSON.stringify({ error: message, details: err.message }));
+      } else {
+        console.error(`❌ Error: ${message}:`, err.message);
       }
+      if (!options.noExit) process.exit(1);
       return;
     }
   }

@@ -2,9 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments } from "../contract.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId } from "../contract.js";
 import { findPegasCompose, setupProjectCompose } from "../compose.js";
 import { PegasContract } from "../types.js";
+import { runRuntimeCompose } from "../runtime.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
@@ -44,6 +45,7 @@ export async function waitForContainerReadiness(
     pollIntervalMs?: number;
     gracePeriodMs?: number;
     composeFile?: string;
+    projectId?: string;
   } = {}
 ): Promise<ReadinessResult> {
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -58,15 +60,19 @@ export async function waitForContainerReadiness(
   while (Date.now() < deadline) {
     let containerId = "";
     try {
-      const composeArgs = ["compose"];
-      if (options.composeFile) {
-        composeArgs.push("--project-directory", projectRoot, "-f", options.composeFile);
-      }
-      composeArgs.push("ps", "-q", serviceName);
+      const dockerArgs = options.projectId
+        ? ["ps", "-q", "--filter", `label=pegas.project=${options.projectId}`, "--filter", `label=pegas.service=${serviceName}`]
+        : [
+            "compose",
+            ...(options.composeFile
+              ? ["--project-directory", projectRoot, "-f", options.composeFile]
+              : []),
+            "ps", "-q", serviceName,
+          ];
 
       const psRes = child_process.execFileSync(
         "docker",
-        composeArgs,
+        dockerArgs,
         { cwd: projectRoot, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 3000 }
       );
       containerId = psRes.trim().split("\n")[0]?.trim();
@@ -359,13 +365,6 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       console.log(`\n🚀 [1/3] Starting project containers for environment '${env}' with Docker Compose...`);
     }
 
-    // Sync non-invasive compose manifest if root compose exists
-    await setupProjectCompose(projectRoot, projectName);
-    const composeFile = await findPegasCompose(projectRoot);
-    const composeCmd = composeFile
-      ? `docker compose --project-directory . -f ${composeFile} up -d`
-      : "docker compose up -d";
-
     const primaryDomain = requestedDomains[0] || "";
     const deployEnv = {
       ...process.env,
@@ -374,26 +373,37 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
 
+    const runtimeId = getProjectRuntimeId(projectRoot, projectName);
+    let composeFile: string | null = null;
     try {
-      child_process.execSync(composeCmd, {
-        stdio: "inherit",
-        cwd: projectRoot,
-        env: deployEnv,
-      });
-    } catch (err: any) {
-      if (isJson) {
-        console.log(
-          JSON.stringify({
-            error: `Failed to execute '${composeCmd}'`,
-            details: err.message,
-          })
-        );
+      if (contract.runtime === "docker") {
+        const hasBuilds = Object.values(contract.services || {}).some((service) => Boolean(service.build));
+        await runRuntimeCompose(contract, projectRoot, runtimeId, [
+          "up", "-d", ...(hasBuilds ? ["--build"] : []), "--remove-orphans",
+        ], deployEnv);
       } else {
-        console.error(`❌ Error: Failed to execute '${composeCmd}':`, err.message);
+        // Legacy host runtime remains unchanged and continues to honor user Compose.
+        await setupProjectCompose(projectRoot, projectName);
+        composeFile = await findPegasCompose(projectRoot);
+        const composeCmd = composeFile
+          ? `docker compose --project-directory . -f ${composeFile} up -d`
+          : "docker compose up -d";
+        child_process.execSync(composeCmd, {
+          stdio: "inherit",
+          cwd: projectRoot,
+          env: deployEnv,
+        });
       }
-      if (!options.noExit) {
-        process.exit(1);
+    } catch (err: any) {
+      const message = contract.runtime === "docker"
+        ? "Failed to apply the declarative Docker runtime"
+        : "Failed to execute Docker Compose";
+      if (isJson) {
+        console.log(JSON.stringify({ error: message, details: err.message }));
+      } else {
+        console.error(`❌ Error: ${message}:`, err.message);
       }
+      if (!options.noExit) process.exit(1);
       return;
     }
 
@@ -416,6 +426,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
             timeoutMs: options.readinessTimeoutMs,
             gracePeriodMs: options.gracePeriodMs,
             composeFile: composeFile || undefined,
+            projectId: contract.runtime === "docker" ? runtimeId : undefined,
           });
           if (!checkRes.ready) {
             const errMsg = `Service '${sName}' failed readiness check: ${checkRes.reason}`;
