@@ -280,8 +280,10 @@ function resolveAppDefaults(
     .digest("hex");
 
   const marker = `${dependencyTarget}/.pegas-deps-hash`;
-  const uid = process.getuid?.() ?? 1000;
-  const gid = process.getgid?.() ?? 1000;
+  // Mirror the invoking user's ownership on POSIX hosts, but never create
+  // root-owned development containers when Pegas itself was run through sudo.
+  const uid = process.getuid?.() || 1000;
+  const gid = process.getgid?.() || 1000;
   const dockerfileInline = [
     `FROM ${image}`,
     "USER root",
