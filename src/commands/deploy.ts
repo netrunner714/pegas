@@ -284,7 +284,10 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     let composeFile: string | null = null;
     try {
       if (contract.runtime === "docker") {
-        await runRuntimeCompose(contract, projectRoot, runtimeId, ["up", "-d", "--remove-orphans"], deployEnv);
+        const hasBuilds = Object.values(contract.services || {}).some((service) => Boolean(service.build));
+        await runRuntimeCompose(contract, projectRoot, runtimeId, [
+          "up", "-d", ...(env !== "development" && hasBuilds ? ["--build"] : []), "--remove-orphans",
+        ], deployEnv);
         const gatewayResult = await ensureGatewayContainer(gatewayDir);
         if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
       } else {
