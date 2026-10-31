@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { validatePegasContract } from "./contract.js";
@@ -138,6 +139,27 @@ function readText(file: string): string {
     return "";
   }
 }
+/** Require secret env files to be project-relative, regular files ignored by Git. */
+function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
+  const resolved = path.resolve(projectRoot, envFile);
+  const relative = path.relative(projectRoot, resolved);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`envFile "${envFile}" must resolve to a file inside the project root.`);
+  }
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    throw new Error(`Secret envFile "${envFile}" does not exist or is not a regular file.`);
+  }
+  try {
+    childProcess.execFileSync("git", ["check-ignore", "-q", "--", relative], { cwd: projectRoot, stdio: "ignore" });
+  } catch (error: any) {
+    if (error?.status === 1) {
+      throw new Error(`Secret envFile "${envFile}" must be gitignored. Add it to .gitignore before deploying.`);
+    }
+    throw new Error(`Could not verify that envFile "${envFile}" is gitignored: ${error?.message || "Git check-ignore failed."}`);
+  }
+  return resolved;
+}
+
 
 function firstVersion(value: string, fallback: string): string {
   const match = value.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
@@ -407,7 +429,7 @@ export function createRuntimeCompose(
         ...(appDefaults ? { "pegas.dependencies-hash": appDefaults.lockHash } : {}),
         ...(service.envFile ? {
           "pegas.env-hash": createHash("sha256")
-            .update(fs.readFileSync(path.resolve(options.projectRoot, service.envFile)))
+            .update(fs.readFileSync(resolveSecretEnvFile(options.projectRoot, service.envFile)))
             .digest("hex"),
         } : {}),
       },
@@ -448,7 +470,7 @@ export function createRuntimeCompose(
       environment.WATCHPACK_POLLING ??= "false";
     }
     if (Object.keys(environment).length > 0) generated.environment = environment;
-    if (service.envFile) generated.env_file = [path.resolve(options.projectRoot, service.envFile)];
+    if (service.envFile) generated.env_file = [resolveSecretEnvFile(options.projectRoot, service.envFile)];
     if (service.dependsOn) generated.depends_on = service.dependsOn;
     if (service.healthcheck) {
       generated.healthcheck = {
