@@ -6,6 +6,7 @@ import { CONTRACT_FILENAME } from "../contract.js";
 import { findPegasCompose } from "../compose.js";
 import { getProjectRuntimeId } from "../contract.js";
 import { removeProjectContainers } from "../runtime.js";
+import { stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 
@@ -56,16 +57,20 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
   const sanitizedProject = projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 
   const removedFiles: string[] = [];
+  const previousRouteFiles = new Map<string, string>();
   try {
     const files = await fs.readdir(confDir);
     for (const f of files) {
       if (f === `${sanitizedProject}.caddy` || (f.startsWith(`${sanitizedProject}-`) && f.endsWith(".caddy"))) {
         const fullPath = path.join(confDir, f);
+        previousRouteFiles.set(fullPath, await fs.readFile(fullPath, "utf-8"));
         await fs.unlink(fullPath);
         removedFiles.push(fullPath);
       }
     }
-  } catch {}
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+  }
 
   const fileRemoved = removedFiles.length > 0;
   if (!isJson) {
@@ -81,12 +86,24 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
     if (!isJson) {
       console.log("🔄 Reloading Caddy gateway...");
     }
-    await reloadGateway({
+    const reloaded = await reloadGateway({
       gatewayDir,
       json: options.json,
-      silent: false,
+      silent: isJson,
       exitOnError: false,
     });
+    if (!reloaded) {
+      for (const [file, previousContent] of previousRouteFiles) {
+        await fs.writeFile(file, previousContent, "utf-8");
+      }
+      if (isJson) {
+        console.log(JSON.stringify({ error: "Failed to reload Gateway after removing project routes; route files were restored and containers were left running." }));
+      } else {
+        console.error("❌ Gateway reload failed. Route files were restored; project containers were left running.");
+      }
+      if (!options.noExit) process.exit(1);
+      return;
+    }
   }
 
   // Remove only this project's containers. External pegas-network and named
@@ -96,6 +113,10 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       if (contract?.runtime === "docker") {
         const runtimeId = getProjectRuntimeId(projectRoot, projectName);
         await removeProjectContainers(runtimeId);
+        const gatewayResult = await stopGatewayIfUnused(gatewayDir);
+        if (!gatewayResult.success) {
+          throw new Error(gatewayResult.stderr || "Failed to reconcile shared Gateway lifecycle.");
+        }
       } else {
         const composeFile = await findPegasCompose(projectRoot);
         const composeCmd = composeFile
