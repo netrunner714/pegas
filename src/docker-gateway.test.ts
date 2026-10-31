@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import util from "node:util";
-import * as realChildProcess from "node:child_process";
 
 const execFileSyncCalls: { cmd: string; args: string[]; opts: any }[] = [];
 let execSyncImpl: (cmd: string, args: string[]) => string = () => "";

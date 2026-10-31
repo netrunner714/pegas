@@ -15,7 +15,7 @@
     "link:global": "bun run build && bun link",
     "unlink:global": "bun unlink",
     "test": "bun scripts/test-runner.ts",
-    "test:unit": "bun test",
+    "test:unit": "bun test --isolate --preload ./src/test-silence.ts",
     "test:full": "bun scripts/test-runner.ts",
     "test:gate": "bun scripts/check-coverage.ts",
     "test:e2e": "bun scripts/e2e.ts",
