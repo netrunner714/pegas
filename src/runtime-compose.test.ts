@@ -10,6 +10,7 @@ describe("declarative runtime Compose generation", () => {
     services: {
       web: {
         role: "app",
+        domains: {},
         build: { context: ".", dockerfile: "Dockerfile.dev" },
         command: ["pnpm", "dev", "--host", "0.0.0.0"],
         port: 3000,
