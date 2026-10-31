@@ -5,7 +5,7 @@ import { COMMANDS, GLOBAL_OPTIONS, CliOptionDef } from "../help.js";
  *
  * Секция CLI Usage строится из `COMMANDS` в help.ts — единого источника
  * истины о командах. При изменении CLI достаточно запустить
- * `bun run build` (или `bun run gen:llms`): llms.txt перегенерируется.
+ * `bun run build`: llms.txt перегенерируется.
  */
 
 const CORE_CONCEPTS = `## Core Concepts

@@ -26,7 +26,7 @@ describe("pegas llms", () => {
     expect(LLMS_TXT_CONTENT).not.toContain("pegas list");
   });
 
-  it("committed llms.txt matches buildLlmsText() — regenerate with 'bun run gen:llms' when stale", async () => {
+  it("committed llms.txt matches buildLlmsText() — regenerate with 'bun run build' when stale", async () => {
     const committed = await fs.readFile(path.join(REPO_ROOT, "llms.txt"), "utf-8");
     expect(committed).toBe(buildLlmsText());
   });

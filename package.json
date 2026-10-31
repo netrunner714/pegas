@@ -11,11 +11,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun run gen:llms && bun build src/index.ts --target=node --outfile=dist/index.js && chmod +x dist/index.js",
-    "dev": "bun run src/index.ts",
+    "build": "bun scripts/gen-llms.ts && bun build src/index.ts --target=node --outfile=dist/index.js && chmod +x dist/index.js",
     "link:global": "bun run build && bun link",
     "unlink:global": "bun unlink",
-    "gen:llms": "bun scripts/gen-llms.ts",
     "test": "bun scripts/test-runner.ts",
     "test:unit": "bun test",
     "test:full": "bun scripts/test-runner.ts",

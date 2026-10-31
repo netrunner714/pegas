@@ -67,18 +67,22 @@ export async function runRuntimeCompose(
   const environmentName = normalizeEnvironment(env.PEGAS_ENV).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   const composeProjectName = `${projectId}-${environmentName}`;
   const args = ["compose", "--project-name", composeProjectName, "--project-directory", projectRoot, "-f", "-", ...composeArgs];
-  try {
-    child_process.execFileSync("docker", args, {
-      cwd: projectRoot,
-      env,
-      input: generated.content,
-      encoding: "utf-8",
-      stdio: ["pipe", "inherit", "inherit"],
-    });
-  } catch (error: any) {
-    const stderr = error?.stderr?.toString?.().trim();
-    const stdout = error?.stdout?.toString?.().trim();
-    const details = [stderr, stdout, error?.message].filter(Boolean).join("\n");
+  // stdout живёт в терминале (inherit), stderr захватывается в pipe:
+  // при провале он попадает в текст ошибки, при успехе — пробрасывается в
+  // process.stderr, чтобы warning'и Compose не терялись.
+  const result = child_process.spawnSync("docker", args, {
+    cwd: projectRoot,
+    env,
+    input: generated.content,
+    encoding: "utf-8",
+    stdio: ["pipe", "inherit", "pipe"],
+  });
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error || result.status !== 0) {
+    const stderr = (result.stderr ?? "").trim();
+    const details = [stderr, result.error?.message, result.status !== 0 ? "exit code " + String(result.status) : null]
+      .filter(Boolean)
+      .join("\n");
     throw new Error(details || "Docker Compose runtime operation failed.");
   }
 }

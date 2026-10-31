@@ -146,13 +146,14 @@ describe("pegas dev", () => {
 
   it("finds Caddy from custom cacheDir or repository .cache/bin", async () => {
     const repoCacheBin = path.join(process.cwd(), ".cache", "bin");
-    const binaryName = process.platform === "win32" ? "caddy.exe" : "caddy";
-    const cachedFile = path.join(repoCacheBin, binaryName);
+    // findOrDownloadCaddy предпочитает версионируемое имя (caddy-v2.9.1),
+    // поэтому ожидаем именно его, если оно есть в кэше.
+    const expected = await findOrDownloadCaddy({ cacheDir: repoCacheBin, silent: true });
+    expect(expected).toBeDefined();
 
-    if (await fs.access(cachedFile).then(() => true).catch(() => false)) {
-      const found = await findOrDownloadCaddy({ cacheDir: repoCacheBin, silent: true });
-      expect(found).toBe(cachedFile);
-    }
+    const exists = await fs.access(expected).then(() => true).catch(() => false);
+    expect(exists).toBe(true);
+    expect(expected.startsWith(repoCacheBin)).toBe(true);
   });
 
   it("detects infrastructure services and their host ports from compose YAML", () => {

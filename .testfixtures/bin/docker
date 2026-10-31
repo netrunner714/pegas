@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+LOG="${PEGAS_FAKE_DOCKER_LOG:-/tmp/pegas-fake-docker.log}"
+printf "%s\n" "$*" >> "$LOG"
+cmd="$1"
+sub="$2"
+if [ "$cmd" = "network" ] && [ "$sub" = "inspect" ]; then
+  echo "[{\"Driver\":\"bridge\",\"Internal\":false}]"
+  exit 0
+fi
+if [ "$cmd" = "ps" ]; then
+  if [ "${PEGAS_FAKE_EMPTY:-0}" = "1" ]; then exit 0; fi
+  echo "container-1"
+  exit 0
+fi
+if [ "$cmd" = "inspect" ]; then
+  cat "${PEGAS_FAKE_INSPECT_FILE:-/dev/null}"
+  exit 0
+fi
+if [ "$cmd" = "compose" ]; then
+  if [ "${PEGAS_FAKE_COMPOSE_FAIL:-0}" = "1" ]; then
+    echo "Error response from daemon: port is already allocated" >&2
+    exit 1
+  fi
+  cat > /dev/null
+  exit 0
+fi
+exit 0
