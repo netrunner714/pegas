@@ -144,7 +144,7 @@ function readText(file: string): string {
 function resolveProjectDirectory(projectRoot: string, relativePath: string, field: string): string {
   const resolved = path.resolve(projectRoot, relativePath);
   const lexicalRelative = path.relative(path.resolve(projectRoot), resolved);
-  if (lexicalRelative.startsWith("..") || path.isAbsolute(lexicalRelative)) {
+  if (isPathOutside(path.resolve(projectRoot), resolved)) {
     throw new Error(`${field} must resolve to a directory inside the project root.`);
   }
   let realPath: string;
@@ -154,16 +154,21 @@ function resolveProjectDirectory(projectRoot: string, relativePath: string, fiel
     throw new Error(`${field} directory does not exist: ${relativePath}`);
   }
   const realRelative = path.relative(fs.realpathSync(projectRoot), realPath);
-  if (realRelative.startsWith("..") || path.isAbsolute(realRelative) || !fs.statSync(realPath).isDirectory()) {
+  if (isPathOutside(fs.realpathSync(projectRoot), realPath) || !fs.statSync(realPath).isDirectory()) {
     throw new Error(`${field} must resolve to a directory inside the project root.`);
   }
   return realPath;
 }
+function isPathOutside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
 /** Require secret env files to be project-relative, regular files ignored by Git. */
 function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
   const resolved = path.resolve(projectRoot, envFile);
   const relative = path.relative(projectRoot, resolved);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (!relative || isPathOutside(projectRoot, resolved)) {
     throw new Error(`envFile "${envFile}" must resolve to a file inside the project root.`);
   }
   if (!fs.existsSync(resolved) || !fs.lstatSync(resolved).isFile()) {
@@ -172,7 +177,7 @@ function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
   const realRoot = fs.realpathSync(projectRoot);
   const realFile = fs.realpathSync(resolved);
   const realRelative = path.relative(realRoot, realFile);
-  if (!realRelative || realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
+  if (!realRelative || isPathOutside(realRoot, realFile)) {
     throw new Error(`Secret envFile "${envFile}" resolves outside the project root.`);
   }
   try {
@@ -428,7 +433,7 @@ export function createRuntimeCompose(
     if (service.build && fs.existsSync(dockerfilePath)) {
       const realDockerfile = fs.realpathSync(dockerfilePath);
       const relativeDockerfile = path.relative(buildContext, realDockerfile);
-      if (!relativeDockerfile || relativeDockerfile.startsWith("..") || path.isAbsolute(relativeDockerfile) || !fs.statSync(realDockerfile).isFile()) {
+      if (!relativeDockerfile || isPathOutside(buildContext, realDockerfile) || !fs.statSync(realDockerfile).isFile()) {
         throw new Error(`services.${serviceName}.build.dockerfile must resolve to a file inside its build context.`);
       }
     }
