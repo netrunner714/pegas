@@ -39,7 +39,7 @@ jobs:
         run: bun run typecheck
 
       - name: Run unit tests
-        run: bun test
+        run: bun run test
 
       - name: Build bundle
         run: bun run build
