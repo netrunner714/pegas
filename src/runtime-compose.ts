@@ -35,7 +35,10 @@ function isAppService(service: ServiceContract): boolean {
 
 function getVolumeTarget(spec: string): string | undefined {
   const parts = spec.split(":");
-  return parts.length >= 2 ? parts[parts.length - 1].split(":")[0] : undefined;
+  // Compose short syntax is source:target[:mode]. On Windows, the host drive
+  // letter adds one extra colon before the target.
+  if (/^[A-Za-z]:\\\\/.test(spec)) return parts[2]?.split(":")[0];
+  return parts.length >= 2 ? parts[1] : undefined;
 }
 
 /**
@@ -63,9 +66,9 @@ export function createRuntimeCompose(
 
   for (const [serviceName, service] of Object.entries(contract.services)) {
     const app = isAppService(service);
-    if (app && !service.build && !service.image) {
+    if (!service.build && !service.image) {
       throw new Error(
-        `Service "${serviceName}" is an app but has no build or image. Stack-based default images are not available in this runtime stage.`
+        `Service "${serviceName}" has no build or image. Stack-based default images are not available in this runtime stage.`
       );
     }
 
@@ -96,7 +99,15 @@ export function createRuntimeCompose(
     }
     if (service.image) generated.image = service.image;
     if (service.command) generated.command = service.command;
-    if (service.env && Object.keys(service.env).length > 0) generated.environment = service.env;
+    const environment: Record<string, string> = { ...(service.env || {}) };
+    if (service.hmr?.fileWatch === "polling") {
+      environment.CHOKIDAR_USEPOLLING ??= "true";
+      environment.WATCHPACK_POLLING ??= "true";
+    } else if (service.hmr?.fileWatch === "events") {
+      environment.CHOKIDAR_USEPOLLING ??= "false";
+      environment.WATCHPACK_POLLING ??= "false";
+    }
+    if (Object.keys(environment).length > 0) generated.environment = environment;
     if (service.envFile) generated.env_file = [path.resolve(options.projectRoot, service.envFile)];
     if (service.port !== undefined) generated.expose = [String(service.port)];
 
