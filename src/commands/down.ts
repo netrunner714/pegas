@@ -26,29 +26,46 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
 
   let projectName = path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
   let contract: PegasContract | null = null;
+  let runtimeId: string | undefined;
   try {
     const rawContract = await fs.readFile(contractPath, "utf-8");
     contract = JSON.parse(rawContract) as PegasContract;
-    if (contract.projectName) {
-      projectName = contract.projectName;
-    }
+    if (contract.projectName) projectName = contract.projectName;
+    if (contract.runtime === "docker") runtimeId = getProjectRuntimeId(projectRoot, projectName);
   } catch {
-    const composeFile = await findPegasCompose(projectRoot);
-    if (!composeFile) {
-      if (isJson) {
-        console.log(
-          JSON.stringify({
-            error: `Contract '${CONTRACT_FILENAME}' not found in '${projectRoot}'. Run this command inside a Pegas project.`,
-          })
-        );
-      } else {
-        console.error(`❌ Error: Contract '${CONTRACT_FILENAME}' not found in project root (${projectRoot}).`);
-        console.error(`   Run this command inside a Pegas project.`);
+    // Recover ownership from Docker labels if pegas.json was removed or corrupted.
+    const defaultRuntimeId = getProjectRuntimeId(projectRoot, projectName);
+    const checkoutDigest = defaultRuntimeId.slice(defaultRuntimeId.lastIndexOf("-") + 1);
+    const listed = await runCommand("docker", ["ps", "-aq", "--filter", "label=pegas.project"]);
+    let recovered: any;
+    if (listed.success && listed.stdout.trim()) {
+      const ids = listed.stdout.split(/\s+/).filter(Boolean);
+      const inspected = await runCommand("docker", ["inspect", ...ids]);
+      if (inspected.success) {
+        try {
+          const containers = JSON.parse(inspected.stdout);
+          recovered = containers.find((container: any) => {
+            const labels = container.Config?.Labels || {};
+            const id = labels["pegas.project"];
+            return typeof id === "string" && id.endsWith("-" + checkoutDigest);
+          });
+        } catch {}
       }
-      if (!options.noExit) {
-        process.exit(1);
+    }
+    if (recovered) {
+      const labels = recovered.Config?.Labels || {};
+      runtimeId = labels["pegas.project"];
+      if (typeof labels["pegas.project-name"] === "string") projectName = labels["pegas.project-name"];
+      contract = { runtime: "docker", services: {} } as PegasContract;
+    } else {
+      const composeFile = await findPegasCompose(projectRoot);
+      if (!composeFile) {
+        const message = "Contract " + CONTRACT_FILENAME + " not found in " + projectRoot + ", and no matching Pegas Docker containers were found."; 
+        if (isJson) console.log(JSON.stringify({ error: message }));
+        else console.error("❌ Error: " + message);
+        if (!options.noExit) process.exit(1);
+        return;
       }
-      return;
     }
   }
 
@@ -121,7 +138,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
   if (!options.skipComposeDown) {
     try {
       if (contract?.runtime === "docker") {
-        const runtimeId = getProjectRuntimeId(projectRoot, projectName);
+        runtimeId ||= getProjectRuntimeId(projectRoot, projectName);
         await removeProjectContainers(runtimeId);
         const gatewayResult = await stopGatewayIfUnused(gatewayDir);
         if (!gatewayResult.success) {
