@@ -140,12 +140,16 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
   switch (command) {
     case "init": {
+      const initRuntime = (positionals[1] as string | undefined)?.toLowerCase() === "docker"
+        ? "docker"
+        : (values.runtime as string | undefined)?.toLowerCase() === "docker" ? "docker" : undefined;
       await dispatch.handleInit({
         cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         force: values.force as boolean | undefined,
         json: values.json as boolean | undefined,
+        runtime: initRuntime as "docker" | undefined,
       });
       break;
     }

@@ -27,6 +27,8 @@ export interface InitOptions {
   force?: boolean;
   json?: boolean;
   noExit?: boolean;
+  /** Init-time opt-in for the declarative Docker runtime (pegas init --runtime docker). */
+  runtime?: "host" | "docker";
 }
 
 export interface UpdateOptions {

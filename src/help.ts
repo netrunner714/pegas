@@ -58,6 +58,12 @@ export const COMMANDS: CliCommandDef[] = [
         description: "Reset contract pegas.json to defaults (creates pegas.json.bak)",
       },
       {
+        name: "runtime",
+        type: "string",
+        placeholder: "<host|docker>",
+        description: "Runtime for a new contract: docker enables the declarative container runtime",
+      },
+      {
         name: "dry-run",
         type: "boolean",
         default: false,
