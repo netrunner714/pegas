@@ -20,6 +20,7 @@ describe("declarative runtime Compose generation", () => {
       },
       postgres: {
         role: "infra",
+        domains: {},
         image: "postgres:17",
         port: 5432,
       },
@@ -38,7 +39,11 @@ describe("declarative runtime Compose generation", () => {
     expect(parsed.services.web.command).toEqual(["pnpm", "dev", "--host", "0.0.0.0"]);
     expect(parsed.services.web.expose).toEqual(["3000"]);
     expect(parsed.services.web.ports).toBeUndefined();
-    expect(parsed.services.web.environment).toEqual({ NODE_ENV: "development" });
+    expect(parsed.services.web.environment).toEqual({
+      NODE_ENV: "development",
+      CHOKIDAR_USEPOLLING: "true",
+      WATCHPACK_POLLING: "true",
+    });
     expect(parsed.services.web.env_file).toEqual([path.resolve("/work/apps/shop", ".env.local")]);
     expect(parsed.services.web.networks["pegas-network"].aliases).toEqual([
       "shop-a1b2c3d4e5f6-web",
