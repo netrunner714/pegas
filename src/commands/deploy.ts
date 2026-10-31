@@ -194,6 +194,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   }
 
   const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const runtimeId = getProjectRuntimeId(projectRoot, projectName);
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const confDir = getConfDir(gatewayDir);
   if (!options.dryRun) await fs.mkdir(confDir, { recursive: true });
@@ -278,7 +279,6 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
       NODE_ENV: "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
-    const runtimeId = getProjectRuntimeId(projectRoot, projectName);
     let composeFile: string | null = null;
     try {
       if (contract.runtime === "docker") {
@@ -335,7 +335,7 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     const envDomains = getEnvironmentDomains(serviceConfig, env);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
-    const scopedUpstream = resolveScopedUpstream(upstream, projectName);
+    const scopedUpstream = resolveScopedUpstream(upstream, contract.runtime === "docker" ? runtimeId : projectName);
     for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
       if (!normDomain || normDomain === "yourdomain.com") continue;
