@@ -278,7 +278,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     const deployEnv = {
       ...process.env,
       PEGAS_ENV: env,
-      NODE_ENV: "production",
+      NODE_ENV: contract.runtime === "docker" && env !== "production" ? "development" : "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
     let composeFile: string | null = null;

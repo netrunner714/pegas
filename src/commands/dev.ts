@@ -97,7 +97,7 @@ async function handleDockerRuntimeDev(
 ): Promise<void> {
   const projectName = contract.projectName || path.basename(projectRoot);
   const projectId = getProjectRuntimeId(projectRoot, projectName);
-  const generated = createRuntimeCompose(contract, { projectRoot, projectId });
+  const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: "development" });
 
   const fail = (message: string) => {
     console.error(message);
@@ -154,6 +154,8 @@ async function handleDockerRuntimeDev(
     }
     if (container.State?.Status !== "running") {
       problems.push(`${serviceName}: container is ${container.State?.Status || "not running"}; run 'pegas deploy development'`);
+    } else if (container.State?.Health && container.State.Health.Status !== "healthy") {
+      problems.push(`${serviceName}: healthcheck is ${container.State.Health.Status}; run 'pegas deploy development'`);
     }
   }
 
@@ -185,7 +187,7 @@ async function handleDockerRuntimeDev(
   for (const url of urls) console.log(`🚀 Pegas development URL: ${url}`);
 
   console.log("📋 Attaching to existing Docker service logs. Press Ctrl+C to detach; containers will keep running.\n");
-  await runRuntimeCompose(contract, projectRoot, projectId, ["logs", "--follow", "--tail", "100"]);
+  await runRuntimeCompose(contract, projectRoot, projectId, ["logs", "--follow", "--tail", "100"], { ...process.env, PEGAS_ENV: "development", NODE_ENV: "development" });
 }
 
 export async function handleDev(options: DevOptions = {}): Promise<void> {

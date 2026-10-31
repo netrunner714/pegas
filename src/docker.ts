@@ -116,15 +116,16 @@ export async function ensureGatewayContainer(gatewayDir: string): Promise<Comman
       cwd: gatewayDir,
       input: override,
       encoding: "utf8",
-      stdio: ["pipe", "inherit", "inherit"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     return { success: true, stdout: "", stderr: "" };
   } catch (error: any) {
-    return {
-      success: false,
-      stdout: (error?.stdout || "").toString().trim(),
-      stderr: (error?.stderr || error?.message || "Failed to start shared Gateway.").toString().trim(),
-    };
+    const stdout = (error?.stdout || "").toString().trim();
+    const stderr = (error?.stderr || error?.message || "Failed to start shared Gateway.").toString().trim();
+    if (/port is already allocated|address already in use|failed to bind|bind: permission denied/i.test(stderr)) {
+      return { success: false, stdout, stderr: "Shared Caddy Gateway cannot bind host port 80 or 443. Free the conflicting port and retry. Docker reported: " + stderr };
+    }
+    return { success: false, stdout, stderr };
   }
 }
 
@@ -140,7 +141,7 @@ export async function stopGatewayIfUnused(gatewayDir: string): Promise<CommandRe
   if (holders.stdout.trim()) return { success: true, stdout: "Gateway retained: other Pegas project containers still exist.", stderr: "" };
 
   const gatewayContainers = await runCommand("docker", [
-    "ps", "-aq", "--filter", "label=pegas.gateway=true",
+    "ps", "-q", "--filter", "label=pegas.gateway=true",
   ]);
   if (!gatewayContainers.success) return gatewayContainers;
   if (!gatewayContainers.stdout.trim()) return { success: true, stdout: "Gateway is already stopped.", stderr: "" };

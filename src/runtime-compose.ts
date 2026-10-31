@@ -7,6 +7,7 @@ import { validatePegasContract } from "./contract.js";
 export interface RuntimeComposeOptions {
   projectRoot: string;
   projectId: string;
+  environment?: string;
 }
 
 export interface RuntimeComposeResult {
@@ -49,6 +50,8 @@ interface AppDefaults {
   runtimeVersion: string;
   packageManager: string;
   packageManagerVersion: string;
+  dockerfileInline: string;
+  imageHash: string;
 }
 
 function readJson(file: string): Record<string, any> {
@@ -79,7 +82,8 @@ function shellQuote(value: string): string {
 function resolveAppDefaults(
   serviceName: string,
   service: ServiceContract,
-  projectRoot: string
+  projectRoot: string,
+  environment: string
 ): AppDefaults {
   const sourceDir = path.resolve(projectRoot, service.bindMount || service.build?.context || ".");
   const pkg = readJson(path.join(sourceDir, "package.json"));
@@ -120,20 +124,26 @@ function resolveAppDefaults(
       else packageManager = "npm";
       packageManagerVersion = packageManagerField || `${packageManager}-bundled`;
       image = `node:${runtimeVersion}-bookworm`;
+      const yarnLock = readText(path.join(sourceDir, "yarn.lock"));
+      const yarnMajor = packageManagerField.startsWith("yarn@")
+        ? firstVersion(packageManagerField, "4").split(".")[0]
+        : yarnLock.includes("# yarn lockfile v1") ? "1" : "4";
       installCommand = packageManager === "pnpm"
-        ? "corepack enable && pnpm install --frozen-lockfile"
+        ? "pnpm install --frozen-lockfile"
         : packageManager === "yarn"
-          ? "corepack enable && yarn install --immutable"
+          ? "yarn install " + (Number(yarnMajor) < 2 ? "--frozen-lockfile" : "--immutable")
           : hasNpmLock ? "npm ci" : "npm install";
     }
     dependencyTarget = "/workspace/node_modules";
     const scripts = pkg.scripts || {};
+    const preferredScript = environment === "development" ? "dev" : "start";
+    const fallbackScript = environment === "development" ? "start" : "dev";
     defaultCommand = service.command || (
-      scripts.dev ? [packageManager, "run", "dev"] :
-      scripts.start ? [packageManager, "run", "start"] : []
+      scripts[preferredScript] ? [packageManager, "run", preferredScript] :
+      scripts[fallbackScript] ? [packageManager, "run", fallbackScript] : []
     );
     if (defaultCommand.length === 0) {
-      throw new Error(`Service "${serviceName}" was detected as ${stack}, but package.json has no "dev" or "start" script. Set services.${serviceName}.command explicitly.`);
+      throw new Error(`Service "${serviceName}" was detected as ${stack}, but package.json has no "${preferredScript}" or "${fallbackScript}" script. Set services.${serviceName}.command explicitly.`);
     }
   } else if (pythonProject) {
     stack = "python";
@@ -148,7 +158,7 @@ function resolveAppDefaults(
     image = `python:${runtimeVersion}-slim`;
     dependencyTarget = "/workspace/.venv";
     installCommand = packageManager === "uv"
-      ? "pip install uv && uv sync --frozen"
+      ? "python -m venv /workspace/.venv && /workspace/.venv/bin/pip install uv && /workspace/.venv/bin/uv sync --frozen"
       : "python -m venv /workspace/.venv && . /workspace/.venv/bin/activate && " +
         (fs.existsSync(path.join(sourceDir, "requirements.txt"))
           ? "pip install -r requirements.txt"
@@ -179,13 +189,25 @@ function resolveAppDefaults(
     .digest("hex");
 
   const marker = `${dependencyTarget}/.pegas-deps-hash`;
+  const uid = process.getuid?.() ?? 1000;
+  const gid = process.getgid?.() ?? 1000;
+  const dockerfileInline = [
+    `FROM ${image}`,
+    "USER root",
+    ...(stack === "node" ? ["RUN corepack enable"] : []),
+    `RUN set -eux; if ! getent group ${gid} >/dev/null; then groupadd -g ${gid} pegas; fi; if ! getent passwd ${uid} >/dev/null; then useradd -m -u ${uid} -g ${gid} pegas; fi; mkdir -p ${dependencyTarget}; chown -R ${uid}:${gid} /workspace`,
+    "WORKDIR /workspace",
+    `USER ${uid}:${gid}`,
+  ].join("\n");
+  const imageHash = hashValue({ image, dockerfileInline });
   const wrapper = [
-    `mkdir -p ${shellQuote(dependencyTarget)}`,
+    `mkdir -p ${shellQuote(dependencyTarget)}` ,
     `if [ ! -f ${shellQuote(marker)} ] || [ "$(cat ${shellQuote(marker)})" != ${shellQuote(lockHash)} ]; then`,
-    `  ${installCommand}`,
-    `  printf %s ${shellQuote(lockHash)} > ${shellQuote(marker)}`,
+    `  ${installCommand}` ,
+    `  printf %s ${shellQuote(lockHash)} > ${shellQuote(marker)}` ,
     "fi",
-    `exec ${defaultCommand.map(shellQuote).join(" ")}`,
+    ...(stack === "python" ? [". /workspace/.venv/bin/activate"] : []),
+    `exec ${defaultCommand.map(shellQuote).join(" ")}` ,
   ].join("\n");
 
   return {
@@ -196,6 +218,8 @@ function resolveAppDefaults(
     runtimeVersion,
     packageManager,
     packageManagerVersion,
+    dockerfileInline,
+    imageHash,
   };
 }
 
@@ -253,7 +277,7 @@ export function createRuntimeCompose(
           throw new Error(`Infrastructure service "${serviceName}" needs an explicit image in pegas.json; no built-in profile exists for this service.`);
         }
       } else if (app) {
-        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot);
+        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, options.environment || "development");
         effectiveImage = appDefaults.image;
       } else {
         throw new Error(`Service "${serviceName}" needs an image, build configuration, or a recognized app/infra profile.`);
@@ -265,9 +289,11 @@ export function createRuntimeCompose(
       : service.build
         ? path.resolve(options.projectRoot, service.build.context, "Dockerfile")
         : "";
-    const dockerfileHash = dockerfilePath && fs.existsSync(dockerfilePath)
-      ? createHash("sha256").update(fs.readFileSync(dockerfilePath)).digest("hex")
-      : "";
+    const dockerIgnorePath = path.resolve(options.projectRoot, service.build?.context || ".", ".dockerignore");
+    const dockerfileHash = createHash("sha256")
+      .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
+      .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
+      .digest("hex");
     const watchMode = service.hmr?.fileWatch || (process.platform === "linux" ? "events" : "polling");
     const serviceHash = hashValue({
       service,
@@ -280,6 +306,10 @@ export function createRuntimeCompose(
         packageManager: appDefaults.packageManager,
         packageManagerVersion: appDefaults.packageManagerVersion,
         lockHash: appDefaults.lockHash,
+        dockerfileInline: appDefaults.dockerfileInline,
+        imageHash: appDefaults.imageHash,
+        command: appDefaults.command,
+        environment: options.environment || "development",
       } : undefined,
     });
     serviceHashes[serviceName] = serviceHash;
@@ -317,6 +347,12 @@ export function createRuntimeCompose(
         ...(service.build.dockerfile ? { dockerfile: service.build.dockerfile } : {}),
       };
       generated.image = `pegas/${options.projectId}/${serviceName}:${serviceHash.slice(0, 12)}`;
+    } else if (appDefaults) {
+      generated.build = {
+        context: options.projectRoot,
+        dockerfile_inline: appDefaults.dockerfileInline,
+      };
+      generated.image = `pegas/${options.projectId}/${serviceName}:${appDefaults.imageHash.slice(0, 12)}`;
     } else if (effectiveImage) {
       generated.image = effectiveImage;
     }
