@@ -45,7 +45,8 @@ function dockerIgnoreMatcher(contextDir: string): (relativePath: string) => bool
     const negated = line.startsWith("!");
     const pattern = (negated ? line.slice(1) : line).replace(/^\/+|\/+$/g, "");
     if (!pattern || pattern === ".") return [];
-    let regex = "^";
+    // A pattern without a slash matches that name at any depth in the context.
+    let regex = pattern.includes("/") ? "^" : "^(?:.*/)?";
     for (let i = 0; i < pattern.length; i++) {
       const char = pattern[i];
       if (char === "*") {
