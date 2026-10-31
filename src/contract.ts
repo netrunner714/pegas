@@ -1,10 +1,131 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
 import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
+
+export interface ContractValidationIssue {
+  path: string;
+  message: string;
+}
+
+/**
+ * Validates the opt-in Docker contract fields. Legacy host contracts remain
+ * valid and are deliberately not subjected to new Docker-only requirements.
+ */
+export function validatePegasContract(value: unknown): ContractValidationIssue[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [{ path: "$", message: "Contract must be a JSON object." }];
+  }
+
+  const contract = value as Record<string, unknown>;
+  const issues: ContractValidationIssue[] = [];
+  const add = (field: string, message: string) => issues.push({ path: field, message });
+
+  if (contract.runtime !== undefined && contract.runtime !== "host" && contract.runtime !== "docker") {
+    add("runtime", 'Expected "host" or "docker".');
+  }
+
+  if (!contract.services || typeof contract.services !== "object" || Array.isArray(contract.services)) {
+    add("services", "Expected an object containing service definitions.");
+    return issues;
+  }
+
+  if (contract.runtime !== "docker") return issues;
+
+  const services = contract.services as Record<string, unknown>;
+  if (Object.keys(services).length === 0) add("services", "Docker runtime requires at least one service.");
+
+  for (const [name, rawService] of Object.entries(services)) {
+    const base = `services.${name}`;
+    if (!rawService || typeof rawService !== "object" || Array.isArray(rawService)) {
+      add(base, "Expected a service object.");
+      continue;
+    }
+
+    const service = rawService as Record<string, unknown>;
+    if (service.build !== undefined && service.image !== undefined) {
+      add(base, '"build" and "image" are mutually exclusive.');
+    }
+
+    if (service.build !== undefined) {
+      if (!service.build || typeof service.build !== "object" || Array.isArray(service.build)) {
+        add(`${base}.build`, "Expected an object with a context path.");
+      } else {
+        const build = service.build as Record<string, unknown>;
+        if (typeof build.context !== "string" || !build.context.trim()) {
+          add(`${base}.build.context`, "Expected a non-empty path.");
+        }
+        if (build.dockerfile !== undefined && (typeof build.dockerfile !== "string" || !build.dockerfile.trim())) {
+          add(`${base}.build.dockerfile`, "Expected a non-empty path.");
+        }
+      }
+    }
+
+    if (service.image !== undefined && (typeof service.image !== "string" || !service.image.trim())) {
+      add(`${base}.image`, "Expected a non-empty image reference.");
+    }
+
+    if (service.command !== undefined &&
+      (!Array.isArray(service.command) || service.command.length === 0 ||
+        service.command.some((part) => typeof part !== "string" || !part.trim()))) {
+      add(`${base}.command`, "Expected a non-empty array of command strings.");
+    }
+
+    if (service.env !== undefined) {
+      if (!service.env || typeof service.env !== "object" || Array.isArray(service.env)) {
+        add(`${base}.env`, "Expected an object of non-secret string values.");
+      } else {
+        for (const [key, val] of Object.entries(service.env as Record<string, unknown>)) {
+          if (!key.trim() || typeof val !== "string") add(`${base}.env.${key}`, "Environment keys and values must be strings.");
+        }
+      }
+    }
+
+    for (const field of ["envFile", "bindMount"] as const) {
+      if (service[field] !== undefined &&
+        (typeof service[field] !== "string" || !(service[field] as string).trim())) {
+        add(`${base}.${field}`, "Expected a non-empty path.");
+      }
+    }
+
+    if (service.volumes !== undefined &&
+      (!Array.isArray(service.volumes) || service.volumes.some((item) => typeof item !== "string" || !item.trim()))) {
+      add(`${base}.volumes`, "Expected an array of non-empty volume specifications.");
+    }
+
+    if (service.role !== undefined && service.role !== "app" && service.role !== "infra") {
+      add(`${base}.role`, 'Expected "app" or "infra".');
+    }
+
+    if (service.hmr !== undefined) {
+      if (!service.hmr || typeof service.hmr !== "object" || Array.isArray(service.hmr)) {
+        add(`${base}.hmr`, "Expected an object.");
+      } else {
+        const mode = (service.hmr as Record<string, unknown>).fileWatch;
+        if (mode !== undefined && mode !== "auto" && mode !== "events" && mode !== "polling") {
+          add(`${base}.hmr.fileWatch`, 'Expected "auto", "events", or "polling".');
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Stable, checkout-specific identifier for Docker labels. It intentionally
+ * differs between two clones with the same projectName, while remaining
+ * stable across invocations from the same checkout.
+ */
+export function getProjectRuntimeId(projectRoot: string, projectName: string): string {
+  const canonicalRoot = path.resolve(projectRoot);
+  const digest = createHash("sha256").update(canonicalRoot).digest("hex").slice(0, 12);
+  return `${slugify(projectName)}-${digest}`;
+}
 
 /**
  * Normalizes a domain name, stripping protocols, paths, query strings, and ports.
