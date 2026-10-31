@@ -150,20 +150,6 @@ export async function stopGatewayIfUnused(gatewayDir: string): Promise<CommandRe
   if (!holders.success) return holders;
   if (holders.stdout.trim()) return { success: true, stdout: "Gateway retained: other Pegas project containers still exist.", stderr: "" };
 
-  // Persisted routes remain durable Gateway dependencies even if their
-  // app containers were removed outside Pegas. Fail safe if state is unreadable.
-  const confDir = path.join(gatewayDir, "conf.d");
-  try {
-    const routeFiles = (await fs.readdir(confDir)).filter((file) => file.endsWith(".caddy"));
-    if (routeFiles.length > 0) {
-      return { success: true, stdout: "Gateway retained: persisted project routes still exist.", stderr: "" };
-    }
-  } catch (error: any) {
-    if (error?.code !== "ENOENT") {
-      return { success: false, stdout: "", stderr: `Could not inspect persisted Gateway routes: ${error?.message || String(error)}` };
-    }
-  }
-
   const gatewayContainers = await runCommand("docker", [
     "ps", "-q", "--filter", "label=pegas.gateway=true",
   ]);
