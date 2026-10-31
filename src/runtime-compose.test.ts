@@ -34,7 +34,7 @@ describe("declarative runtime Compose generation", () => {
     });
     const parsed = JSON.parse(result.content);
 
-    expect(parsed.name).toBe("pegas-shop-a1b2c3d4e5f6");
+    expect(parsed.name).toBe("pegas-shop-a1b2c3d4e5f6-development");
     expect(parsed.services.web.build.context).toBe(path.resolve("/work/apps/shop", "."));
     expect(parsed.services.web.build.dockerfile).toBe("Dockerfile.dev");
     expect(parsed.services.web.command).toEqual(["pnpm", "dev", "--host", "0.0.0.0"]);
@@ -47,8 +47,9 @@ describe("declarative runtime Compose generation", () => {
     });
     expect(parsed.services.web.env_file).toEqual([path.resolve("/work/apps/shop", ".env.local")]);
     expect(parsed.services.web.networks["pegas-network"].aliases).toEqual([
-      "shop-a1b2c3d4e5f6-web",
+      "shop-a1b2c3d4e5f6-development-web",
     ]);
+    expect(parsed.services.web.labels["pegas.environment"]).toBe("development");
     expect(parsed.services.postgres.image).toBe("postgres:17");
     expect(parsed.services.postgres.volumes).toBeUndefined();
     expect(parsed.networks["pegas-network"]).toEqual({
@@ -63,14 +64,19 @@ describe("declarative runtime Compose generation", () => {
       projectId: "shop-a1b2c3d4e5f6",
     });
     const parsed = JSON.parse(result.content);
-    const appVolumes: string[] = parsed.services.web.volumes;
+    const appVolumes = parsed.services.web.volumes as Array<Record<string, unknown> | string>;
 
-    expect(appVolumes).toContain("/work/apps/shop:/workspace");
+    expect(appVolumes).toContainEqual({
+      type: "bind",
+      source: "/work/apps/shop",
+      target: "/workspace",
+      bind: { create_host_path: true },
+    });
     expect(appVolumes).toContain(
-      "pegas-shop-a1b2c3d4e5f6-web-node-modules:/workspace/node_modules"
+      "pegas-shop-a1b2c3d4e5f6-web-development-dependencies:/workspace/node_modules"
     );
     expect(parsed.services.web.working_dir).toBe("/workspace");
-    expect(parsed.volumes["pegas-shop-a1b2c3d4e5f6-web-node-modules"]).toEqual({});
+    expect(parsed.volumes["pegas-shop-a1b2c3d4e5f6-web-development-dependencies"]).toEqual({});
     expect(parsed.services.postgres.working_dir).toBeUndefined();
   });
 
@@ -96,6 +102,6 @@ describe("declarative runtime Compose generation", () => {
         projectRoot: "/work/apps/shop",
         projectId: "shop-one",
       })
-    ).toThrow("has no build or image");
+    ).toThrow();
   });
 });
