@@ -169,6 +169,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const env = options.env;
+  const runtimeEnvironment = env === "dev" ? "development" : env === "prod" ? "production" : env;
 
   if (!env) {
     if (isJson) console.log(JSON.stringify({ error: "Environment contour is required for deploy (e.g. 'production' or 'stage')." }));
@@ -302,8 +303,8 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     const primaryDomain = requestedDomains[0] || "";
     const deployEnv = {
       ...process.env,
-      PEGAS_ENV: env,
-      NODE_ENV: contract.runtime === "docker" && env === "development" ? "development" : "production",
+      PEGAS_ENV: runtimeEnvironment,
+      NODE_ENV: contract.runtime === "docker" && runtimeEnvironment === "development" ? "development" : "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
     let composeFile: string | null = null;
