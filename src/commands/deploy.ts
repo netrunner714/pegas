@@ -9,6 +9,7 @@ import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
+import { withRuntimeLock } from "../runtime-lock.js";
 
 export interface DeployOptions {
   env?: string;
@@ -150,7 +151,7 @@ export function resolveScopedUpstream(upstream: string, projectName: string): st
   return `${projectName}-${host}:${port}`;
 }
 
-export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
+async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const env = options.env;
@@ -391,4 +392,9 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
     return;
   }
   console.log(`\n🎉 Project '${projectName}' [${env}] successfully deployed to Pegas gateway!\n`);
+}
+
+
+export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
+  return withRuntimeLock(() => handleDeployUnlocked(options));
 }

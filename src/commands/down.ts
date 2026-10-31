@@ -7,6 +7,7 @@ import { findPegasCompose } from "../compose.js";
 import { getProjectRuntimeId } from "../contract.js";
 import { runRuntimeCompose } from "../runtime.js";
 import { PegasContract } from "../types.js";
+import { withRuntimeLock } from "../runtime-lock.js";
 
 export interface DownOptions {
   gatewayDir?: string;
@@ -16,7 +17,7 @@ export interface DownOptions {
   noExit?: boolean;
 }
 
-export async function handleDown(options: DownOptions = {}): Promise<void> {
+async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
@@ -132,4 +133,9 @@ export async function handleDown(options: DownOptions = {}): Promise<void> {
   }
 
   console.log(`\n✨ Project '${projectName}' taken down and routes cleaned up successfully.\n`);
+}
+
+
+export async function handleDown(options: DownOptions = {}): Promise<void> {
+  return withRuntimeLock(() => handleDownUnlocked(options));
 }
