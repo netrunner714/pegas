@@ -41,6 +41,9 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
 
   for (const [name, rawService] of Object.entries(services)) {
     const base = `services.${name}`;
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
+      add(base, "Service names must start with a letter or number and contain only letters, numbers, dots, underscores, or hyphens.");
+    }
     if (!rawService || typeof rawService !== "object" || Array.isArray(rawService)) {
       add(base, "Expected a service object.");
       continue;
@@ -79,10 +82,20 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
       } else {
         const build = service.build as Record<string, unknown>;
         if (typeof build.context !== "string" || !build.context.trim()) {
-          add(`${base}.build.context`, "Expected a non-empty path.");
+          add(`${base}.build.context`, "Expected a non-empty project-relative path.");
+        } else if (path.isAbsolute(build.context) || path.win32.isAbsolute(build.context) ||
+          path.posix.normalize(build.context).split("/").includes("..") ||
+          path.win32.normalize(build.context).split(/[\\/]/).includes("..")) {
+          add(`${base}.build.context`, "Build context must stay inside the project and cannot be absolute or traverse to a parent directory.");
         }
-        if (build.dockerfile !== undefined && (typeof build.dockerfile !== "string" || !build.dockerfile.trim())) {
-          add(`${base}.build.dockerfile`, "Expected a non-empty path.");
+        if (build.dockerfile !== undefined) {
+          if (typeof build.dockerfile !== "string" || !build.dockerfile.trim()) {
+            add(`${base}.build.dockerfile`, "Expected a non-empty path.");
+          } else if (path.isAbsolute(build.dockerfile) || path.win32.isAbsolute(build.dockerfile) ||
+            path.posix.normalize(build.dockerfile).split("/").includes("..") ||
+            path.win32.normalize(build.dockerfile).split(/[\\/]/).includes("..")) {
+            add(`${base}.build.dockerfile`, "Dockerfile path must stay inside its build context.");
+          }
         }
       }
     }
