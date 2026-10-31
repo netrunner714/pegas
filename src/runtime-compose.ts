@@ -37,7 +37,7 @@ function getVolumeTarget(spec: string): string | undefined {
   const parts = spec.split(":");
   // Compose short syntax is source:target[:mode]. On Windows, the host drive
   // letter adds one extra colon before the target.
-  if (/^[A-Za-z]:\\\\/.test(spec)) return parts[2]?.split(":")[0];
+  if (/^[A-Za-z]:\\/.test(spec)) return parts[2]?.split(":")[0];
   return parts.length >= 2 ? parts[1] : undefined;
 }
 
