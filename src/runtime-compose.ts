@@ -195,7 +195,8 @@ function resolveAppDefaults(
     `FROM ${image}`,
     "USER root",
     ...(stack === "node" ? ["RUN corepack enable"] : []),
-    `RUN set -eux; if ! getent group ${gid} >/dev/null; then groupadd -g ${gid} pegas; fi; if ! getent passwd ${uid} >/dev/null; then useradd -m -u ${uid} -g ${gid} pegas; fi; mkdir -p ${dependencyTarget}; chown -R ${uid}:${gid} /workspace`,
+    `RUN mkdir -p ${dependencyTarget} /tmp/pegas-home && chown -R ${uid}:${gid} /workspace /tmp/pegas-home`,
+    "ENV HOME=/tmp/pegas-home",
     "WORKDIR /workspace",
     `USER ${uid}:${gid}`,
   ].join("\n");
@@ -234,7 +235,8 @@ function isAppService(serviceName: string, service: ServiceContract): boolean {
   return Boolean(service.build || service.command || service.port || service.domains?.development?.length || service.domains?.dev?.length);
 }
 
-function getVolumeTarget(spec: string): string | undefined {
+function getVolumeTarget(spec: string | { target?: string }): string | undefined {
+  if (typeof spec !== "string") return spec.target;
   const parts = spec.split(":");
   // Compose short syntax is source:target[:mode]. On Windows, the host drive
   // letter adds one extra colon before the target.
@@ -276,9 +278,11 @@ export function createRuntimeCompose(
         if (!effectiveImage) {
           throw new Error(`Infrastructure service "${serviceName}" needs an explicit image in pegas.json; no built-in profile exists for this service.`);
         }
-      } else if (app) {
-        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, options.environment || "development");
+      } else if (app && (options.environment || "development") === "development") {
+        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, "development");
         effectiveImage = appDefaults.image;
+      } else if (app) {
+        throw new Error(`Production service "${serviceName}" must declare build or image in pegas.json. Automatic stack images are for development only.`);
       } else {
         throw new Error(`Service "${serviceName}" needs an image, build configuration, or a recognized app/infra profile.`);
       }
@@ -294,9 +298,16 @@ export function createRuntimeCompose(
       .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
       .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
       .digest("hex");
-    const watchMode = service.hmr?.fileWatch || (process.platform === "linux" ? "events" : "polling");
+    const environmentName = options.environment || "development";
+    const configuredWatchMode = service.hmr?.fileWatch;
+    const watchMode = environmentName !== "development"
+      ? "events"
+      : !configuredWatchMode || configuredWatchMode === "auto"
+        ? (process.platform === "linux" ? "events" : "polling")
+        : configuredWatchMode;
     const serviceHash = hashValue({
       service,
+      environment: environmentName,
       effectiveImage,
       dockerfileHash,
       watchMode,
@@ -328,11 +339,6 @@ export function createRuntimeCompose(
             .update(fs.readFileSync(path.resolve(options.projectRoot, service.envFile)))
             .digest("hex"),
         } : {}),
-        ...(service.envFile ? {
-          "pegas.env-hash": createHash("sha256")
-            .update(fs.readFileSync(path.resolve(options.projectRoot, service.envFile)))
-            .digest("hex"),
-        } : {}),
       },
       networks: {
         "pegas-network": {
@@ -346,23 +352,27 @@ export function createRuntimeCompose(
         context: path.resolve(options.projectRoot, service.build.context),
         ...(service.build.dockerfile ? { dockerfile: service.build.dockerfile } : {}),
       };
-      generated.image = `pegas/${options.projectId}/${serviceName}:${serviceHash.slice(0, 12)}`;
+      generated.image = `pegas/${options.projectId}/${serviceName.toLowerCase()}:${serviceHash.slice(0, 12)}`;
     } else if (appDefaults) {
       generated.build = {
         context: options.projectRoot,
         dockerfile_inline: appDefaults.dockerfileInline,
       };
-      generated.image = `pegas/${options.projectId}/${serviceName}:${appDefaults.imageHash.slice(0, 12)}`;
+      generated.image = `pegas/${options.projectId}/${serviceName.toLowerCase()}:${appDefaults.imageHash.slice(0, 12)}`;
     } else if (effectiveImage) {
       generated.image = effectiveImage;
     }
     if (appDefaults) generated.command = appDefaults.command;
     else if (service.command) generated.command = service.command;
     const environment: Record<string, string> = { ...(service.env || {}) };
-    if (watchMode === "polling") {
+    if (app) {
+      environment.NODE_ENV ??= environmentName === "development" ? "development" : "production";
+      environment.PEGAS_ENV ??= environmentName;
+    }
+    if (environmentName === "development" && watchMode === "polling") {
       environment.CHOKIDAR_USEPOLLING ??= "true";
       environment.WATCHPACK_POLLING ??= "true";
-    } else if (watchMode === "events") {
+    } else if (environmentName === "development" && watchMode === "events") {
       environment.CHOKIDAR_USEPOLLING ??= "false";
       environment.WATCHPACK_POLLING ??= "false";
     }
@@ -380,10 +390,15 @@ export function createRuntimeCompose(
     }
     if (service.port !== undefined) generated.expose = [String(service.port)];
 
-    const volumes = [...(service.volumes || [])];
-    if (app) {
+    const volumes: unknown[] = [...(service.volumes || [])];
+    if (app && (options.environment || "development") === "development") {
       const source = path.resolve(options.projectRoot, service.bindMount || ".");
-      volumes.unshift(`${source}:/workspace`);
+      volumes.unshift({
+        type: "bind",
+        source,
+        target: "/workspace",
+        bind: { create_host_path: true },
+      });
       generated.working_dir = "/workspace";
 
       const dependencyTarget = appDefaults?.dependencyTarget || "/workspace/node_modules";
