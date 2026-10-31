@@ -366,9 +366,10 @@ function getVolumeTarget(spec: string | { target?: string }): string | undefined
   if (typeof spec !== "string") return spec.target;
   const parts = spec.split(":");
   // Compose short syntax is source:target[:mode]. On Windows, the host drive
-  // letter adds one extra colon before the target.
-  if (/^[A-Za-z]:\\/.test(spec)) return parts[2]?.split(":")[0];
-  return parts.length >= 2 ? parts[1] : undefined;
+  // letter adds one extra colon before the target. A single segment is an
+  // anonymous-volume target.
+  if (/^[A-Za-z]:[\\/]/.test(spec)) return parts[2]?.split(":")[0];
+  return parts.length >= 2 ? parts[1] : spec;
 }
 
 /**
