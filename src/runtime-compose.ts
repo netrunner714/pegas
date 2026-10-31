@@ -282,8 +282,16 @@ function resolveAppDefaults(
   const marker = `${dependencyTarget}/.pegas-deps-hash`;
   // Mirror the invoking user's ownership on POSIX hosts, but never create
   // root-owned development containers when Pegas itself was run through sudo.
-  const uid = process.getuid?.() || 1000;
-  const gid = process.getgid?.() || 1000;
+  const processUid = process.getuid?.();
+  const processGid = process.getgid?.();
+  const sudoUid = Number(process.env.SUDO_UID);
+  const sudoGid = Number(process.env.SUDO_GID);
+  const uid = processUid === 0
+    ? (Number.isInteger(sudoUid) && sudoUid > 0 ? sudoUid : 1000)
+    : (processUid ?? 1000);
+  const gid = processGid === 0
+    ? (Number.isInteger(sudoGid) && sudoGid > 0 ? sudoGid : 1000)
+    : (processGid ?? 1000);
   const dockerfileInline = [
     `FROM ${image}`,
     "USER root",
@@ -487,7 +495,7 @@ export function createRuntimeCompose(
 
     const volumes: unknown[] = [...(service.volumes || [])];
     if (app && (options.environment || "development") === "development") {
-      const source = path.resolve(options.projectRoot, service.bindMount || ".");
+      const source = path.resolve(options.projectRoot, service.bindMount || service.build?.context || ".");
       volumes.unshift({
         type: "bind",
         source,
