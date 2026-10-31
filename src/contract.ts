@@ -111,6 +111,53 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
         }
       }
     }
+    if (service.dependsOn !== undefined) {
+      const dependencyNames = Array.isArray(service.dependsOn)
+        ? service.dependsOn
+        : service.dependsOn && typeof service.dependsOn === "object"
+          ? Object.keys(service.dependsOn as Record<string, unknown>)
+          : null;
+      if (!dependencyNames || dependencyNames.some((dependency) => typeof dependency !== "string" || !dependency.trim())) {
+        add(`${base}.dependsOn`, "Expected an array of service names or a dependency map.");
+      } else {
+        for (const dependency of dependencyNames) {
+          if (!Object.prototype.hasOwnProperty.call(services, dependency)) {
+            add(`${base}.dependsOn`, `Unknown service dependency "${dependency}".`);
+          }
+        }
+      }
+      if (service.dependsOn && !Array.isArray(service.dependsOn) && typeof service.dependsOn === "object") {
+        for (const [dependency, config] of Object.entries(service.dependsOn as Record<string, unknown>)) {
+          if (!config || typeof config !== "object" || Array.isArray(config)) {
+            add(`${base}.dependsOn.${dependency}`, "Expected a dependency configuration object.");
+            continue;
+          }
+          const condition = (config as Record<string, unknown>).condition;
+          if (condition !== undefined && !["service_started", "service_healthy", "service_completed_successfully"].includes(String(condition))) {
+            add(`${base}.dependsOn.${dependency}.condition`, "Unsupported dependency condition.");
+          }
+        }
+      }
+    }
+
+    if (service.healthcheck !== undefined) {
+      const healthcheck = service.healthcheck as Record<string, unknown>;
+      if (!healthcheck || typeof healthcheck !== "object" || Array.isArray(healthcheck)) {
+        add(`${base}.healthcheck`, "Expected a healthcheck object.");
+      } else {
+        if (!Array.isArray(healthcheck.test) || healthcheck.test.length === 0 || healthcheck.test.some((item) => typeof item !== "string" || !item.trim())) {
+          add(`${base}.healthcheck.test`, "Expected a non-empty command array.");
+        }
+        for (const field of ["interval", "timeout", "startPeriod"] as const) {
+          if (healthcheck[field] !== undefined && (typeof healthcheck[field] !== "string" || !(healthcheck[field] as string).trim())) {
+            add(`${base}.healthcheck.${field}`, "Expected a non-empty duration string.");
+          }
+        }
+        if (healthcheck.retries !== undefined && (!Number.isInteger(healthcheck.retries) || Number(healthcheck.retries) < 1)) {
+          add(`${base}.healthcheck.retries`, "Expected a positive integer.");
+        }
+      }
+    }
   }
 
   return issues;

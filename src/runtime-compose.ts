@@ -137,9 +137,10 @@ function resolveAppDefaults(
     }
   } else if (pythonProject) {
     stack = "python";
+    const pyproject = readText(path.join(sourceDir, "pyproject.toml"));
+    const pythonRequirement = pyproject.match(/requires-python\s*=\s*["']([^"']+)["']/)?.[1] || "";
     runtimeVersion = firstVersion(
-      readText(path.join(sourceDir, ".python-version")) ||
-      (typeof pkg.requiresPython === "string" ? pkg.requiresPython : ""),
+      readText(path.join(sourceDir, ".python-version")) || pythonRequirement,
       "3.13"
     );
     packageManager = fs.existsSync(path.join(sourceDir, "uv.lock")) ? "uv" : "pip";

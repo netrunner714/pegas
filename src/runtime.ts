@@ -49,7 +49,7 @@ export async function removeProjectContainers(projectId: string): Promise<void> 
   const listed = child_process.execFileSync("docker", [
     "ps", "-aq", "--filter", "label=pegas.project=" + projectId,
   ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const ids = listed.trim().split(/\\s+/).filter(Boolean);
+  const ids = listed.trim().split(/\s+/).filter(Boolean);
   if (ids.length === 0) return;
   child_process.execFileSync("docker", ["rm", "-f", ...ids], {
     encoding: "utf8",

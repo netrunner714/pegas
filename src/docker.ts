@@ -145,7 +145,7 @@ export async function stopGatewayIfUnused(gatewayDir: string): Promise<CommandRe
   if (!gatewayContainers.success) return gatewayContainers;
   if (!gatewayContainers.stdout.trim()) return { success: true, stdout: "Gateway is already stopped.", stderr: "" };
 
-  const stopped = await runCommand("docker", ["stop", ...gatewayContainers.stdout.split(/\\s+/).filter(Boolean)]);
+  const stopped = await runCommand("docker", ["stop", ...gatewayContainers.stdout.split(/\s+/).filter(Boolean)]);
   if (!stopped.success) return stopped;
   return { success: true, stdout: "Shared Gateway stopped: no Pegas projects depend on it.", stderr: "" };
 }
