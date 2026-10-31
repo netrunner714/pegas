@@ -139,6 +139,26 @@ function readText(file: string): string {
     return "";
   }
 }
+
+/** Resolve an existing project directory without allowing symlink escapes. */
+function resolveProjectDirectory(projectRoot: string, relativePath: string, field: string): string {
+  const resolved = path.resolve(projectRoot, relativePath);
+  const lexicalRelative = path.relative(path.resolve(projectRoot), resolved);
+  if (!lexicalRelative || lexicalRelative.startsWith("..") || path.isAbsolute(lexicalRelative)) {
+    throw new Error(`${field} must resolve to a directory inside the project root.`);
+  }
+  let realPath: string;
+  try {
+    realPath = fs.realpathSync(resolved);
+  } catch {
+    throw new Error(`${field} directory does not exist: ${relativePath}`);
+  }
+  const realRelative = path.relative(fs.realpathSync(projectRoot), realPath);
+  if (!realRelative || realRelative.startsWith("..") || path.isAbsolute(realRelative) || !fs.statSync(realPath).isDirectory()) {
+    throw new Error(`${field} must resolve to a directory inside the project root.`);
+  }
+  return realPath;
+}
 /** Require secret env files to be project-relative, regular files ignored by Git. */
 function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
   const resolved = path.resolve(projectRoot, envFile);
@@ -148,6 +168,12 @@ function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
   }
   if (!fs.existsSync(resolved) || !fs.lstatSync(resolved).isFile()) {
     throw new Error(`Secret envFile "${envFile}" does not exist, is a symlink, or is not a regular file.`);
+  }
+  const realRoot = fs.realpathSync(projectRoot);
+  const realFile = fs.realpathSync(resolved);
+  const realRelative = path.relative(realRoot, realFile);
+  if (!realRelative || realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
+    throw new Error(`Secret envFile "${envFile}" resolves outside the project root.`);
   }
   try {
     childProcess.execFileSync("git", ["check-ignore", "-q", "--", relative], { cwd: projectRoot, stdio: "ignore" });
@@ -395,7 +421,16 @@ export function createRuntimeCompose(
         ? path.resolve(options.projectRoot, service.build.context, "Dockerfile")
         : "";
     const dockerIgnorePath = path.resolve(options.projectRoot, service.build?.context || ".", ".dockerignore");
-    const buildContext = service.build ? path.resolve(options.projectRoot, service.build.context) : options.projectRoot;
+    const buildContext = service.build
+      ? resolveProjectDirectory(options.projectRoot, service.build.context, `services.${serviceName}.build.context`)
+      : options.projectRoot;
+    if (service.build?.dockerfile) {
+      const realDockerfile = fs.realpathSync(dockerfilePath);
+      const relativeDockerfile = path.relative(buildContext, realDockerfile);
+      if (!relativeDockerfile || relativeDockerfile.startsWith("..") || path.isAbsolute(relativeDockerfile) || !fs.statSync(realDockerfile).isFile()) {
+        throw new Error(`services.${serviceName}.build.dockerfile must resolve to a file inside its build context.`);
+      }
+    }
     const dockerfileHash = createHash("sha256")
       .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
       .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
@@ -495,7 +530,11 @@ export function createRuntimeCompose(
 
     const volumes: unknown[] = [...(service.volumes || [])];
     if (app && (options.environment || "development") === "development") {
-      const source = path.resolve(options.projectRoot, service.bindMount || service.build?.context || ".");
+      const source = resolveProjectDirectory(
+        options.projectRoot,
+        service.bindMount || service.build?.context || ".",
+        `services.${serviceName}.bindMount`
+      );
       volumes.unshift({
         type: "bind",
         source,

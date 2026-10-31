@@ -125,11 +125,14 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
         const value = service[field];
         if (typeof value !== "string" || !value.trim()) {
           add(`${base}.${field}`, "Expected a non-empty path.");
-        } else if (field === "envFile" &&
-          (path.isAbsolute(value) || path.win32.isAbsolute(value) ||
-            path.posix.normalize(value).split("/").includes("..") ||
-            path.win32.normalize(value).split(/[\\/]/).includes(".."))) {
-          add(`${base}.envFile`, "Secret envFile must be a project-relative path.");
+        } else if (
+          path.isAbsolute(value) || path.win32.isAbsolute(value) ||
+          path.posix.normalize(value).split("/").includes("..") ||
+          path.win32.normalize(value).split(/[\\/]/).includes("..")
+        ) {
+          add(`${base}.${field}`, field === "envFile"
+            ? "Secret envFile must be a project-relative path."
+            : "bindMount must be a project-relative path that stays inside the project.");
         }
       }
     }
