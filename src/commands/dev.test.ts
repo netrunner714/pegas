@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import * as child_process from "node:child_process";
 import { generateDevCaddyfile, handleDev } from "./dev.js";
-import { findOrDownloadCaddy } from "../binary.js";
+import { findOrDownloadCaddy, getCaddyBinaryNames } from "../binary.js";
 import { findAvailablePort, isPortAvailable } from "../ports.js";
 import { detectInfraServices } from "../compose.js";
 import { PegasContract } from "../types.js";
@@ -145,15 +145,17 @@ describe("pegas dev", () => {
   });
 
   it("finds Caddy from custom cacheDir or repository .cache/bin", async () => {
-    const repoCacheBin = path.join(process.cwd(), ".cache", "bin");
-    // findOrDownloadCaddy предпочитает версионируемое имя (caddy-v2.9.1),
-    // поэтому ожидаем именно его, если оно есть в кэше.
-    const expected = await findOrDownloadCaddy({ cacheDir: repoCacheBin, silent: true });
-    expect(expected).toBeDefined();
+    const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dev-caddy-cache-"));
+    const { versionedName } = getCaddyBinaryNames();
+    const cachedCaddy = path.join(cacheDir, versionedName);
+    await fs.writeFile(cachedCaddy, "test binary");
 
-    const exists = await fs.access(expected).then(() => true).catch(() => false);
-    expect(exists).toBe(true);
-    expect(expected.startsWith(repoCacheBin)).toBe(true);
+    try {
+      const found = await findOrDownloadCaddy({ cacheDir, silent: true });
+      expect(found).toBe(cachedCaddy);
+    } finally {
+      await fs.rm(cacheDir, { recursive: true, force: true });
+    }
   });
 
   it("detects infrastructure services and their host ports from compose YAML", () => {
