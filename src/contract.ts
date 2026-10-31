@@ -558,8 +558,7 @@ export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web
 export async function setupProjectContract(
   projectDir: string,
   dryRun = false,
-  force = false,
-  runtime: "host" | "docker" | undefined = undefined
+  force = false
 ): Promise<{
   created: boolean;
   overwritten?: boolean;
@@ -569,11 +568,7 @@ export async function setupProjectContract(
   file: string;
   slug: string;
   contract?: PegasContract;
-  dockerOptInRequired?: boolean;
 }> {
-  const existingJsonLike = (content: string | null): PegasContract | undefined => {
-    try { return content ? JSON.parse(content) as PegasContract : undefined; } catch { return undefined; }
-  };
   const contractPath = path.join(projectDir, CONTRACT_FILENAME);
   const backupPath = path.join(projectDir, `${CONTRACT_FILENAME}.bak`);
   const slug = await detectProjectSlug(projectDir);
@@ -591,14 +586,11 @@ export async function setupProjectContract(
   const exists = existingContent !== null;
 
   if (exists && force) {
-    const resetContract = runtime === "docker"
-      ? { ...defaultContract, runtime: "docker" as const }
-      : defaultContract;
     if (!dryRun) {
       await fs.copyFile(contractPath, backupPath);
       await fs.writeFile(
         contractPath,
-        JSON.stringify(resetContract, null, 2) + "\n",
+        JSON.stringify(defaultContract, null, 2) + "\n",
         "utf-8"
       );
     }
@@ -608,24 +600,8 @@ export async function setupProjectContract(
       backupFile: `${CONTRACT_FILENAME}.bak`,
       file: CONTRACT_FILENAME,
       slug,
-      contract: resetContract,
+      contract: defaultContract,
     };
-  }
-
-  // Explicit opt-in on an existing contract is a user decision: init reports it
-  // as a notice instead of silently rewriting pegas.json.
-  if (exists && !force && runtime === "docker") {
-    const existingRuntime = (() => { try { return JSON.parse(existingContent!).runtime; } catch { return undefined; } })();
-    if (existingRuntime !== "docker") {
-      return {
-        created: false,
-        updated: false,
-        file: CONTRACT_FILENAME,
-        slug,
-        contract: existingJsonLike(existingContent),
-        dockerOptInRequired: true,
-      };
-    }
   }
 
   if (exists && !force) {
@@ -663,15 +639,14 @@ export async function setupProjectContract(
     }
   }
 
-  const newContract = runtime === "docker" ? { ...defaultContract, runtime: "docker" as const } : defaultContract;
   if (!dryRun) {
     await fs.writeFile(
       contractPath,
-      JSON.stringify(newContract, null, 2) + "\n",
+      JSON.stringify(defaultContract, null, 2) + "\n",
       "utf-8"
     );
   }
-  return { created: true, file: CONTRACT_FILENAME, slug, contract: newContract };
+  return { created: true, file: CONTRACT_FILENAME, slug, contract: defaultContract };
 }
 
 export async function updatePackageJson(

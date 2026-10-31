@@ -174,13 +174,9 @@ export async function handleProjectInit(
   cwd = process.cwd(),
   isJson = false,
   dryRun = false,
-  optionsOrForce: boolean | { skipNpmCheck?: boolean; force?: boolean; runtime?: "host" | "docker" } = {}
+  optionsOrForce: boolean | { skipNpmCheck?: boolean; force?: boolean } = {}
 ): Promise<void> {
   const force = typeof optionsOrForce === "boolean" ? optionsOrForce : (optionsOrForce.force ?? false);
-  const runtimeOption =
-    typeof optionsOrForce === "object" && typeof optionsOrForce.runtime === "string"
-      ? (optionsOrForce.runtime === "docker" ? "docker" : "host")
-      : undefined;
   const skipNpm =
     typeof optionsOrForce === "object" && typeof optionsOrForce.skipNpmCheck === "boolean"
       ? optionsOrForce.skipNpmCheck
@@ -197,10 +193,7 @@ export async function handleProjectInit(
   }
 
   // 1. Contract generation (pegas.json) with smart slug detection
-  const contractRes = await setupProjectContract(cwd, dryRun, force, runtimeOption);
-  if (contractRes.dockerOptInRequired) {
-    notices.push("Контракт pegas.json уже существует. Для перехода на Docker runtime добавьте \"runtime\": \"docker\" в pegas.json вручную.");
-  }
+  const contractRes = await setupProjectContract(cwd, dryRun, force);
   if (contractRes.created) {
     actions.push(`Создан контракт ${contractRes.file} для проекта '${contractRes.slug}'`);
   } else if (contractRes.overwritten) {
@@ -354,8 +347,7 @@ export async function handleInit(options: InitOptions = {}): Promise<void> {
   const cwd = options.cwd ? path.resolve(options.cwd) : process.cwd();
   const dryRun = options.dryRun ?? false;
   const force = Boolean(options.force);
-  const runtimeOption = options.runtime;
 
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
-  await handleProjectInit(projectRoot, isJson, dryRun, { force, runtime: runtimeOption });
+  await handleProjectInit(projectRoot, isJson, dryRun, { force });
 }
