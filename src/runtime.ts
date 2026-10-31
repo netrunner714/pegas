@@ -23,7 +23,9 @@ export async function runRuntimeCompose(
     }
   }
 
-  const args = ["compose", "--project-name", projectId, "--project-directory", projectRoot, "-f", "-", ...composeArgs];
+  const environmentName = (env.PEGAS_ENV || "development").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const composeProjectName = `${projectId}-${environmentName}`;
+  const args = ["compose", "--project-name", composeProjectName, "--project-directory", projectRoot, "-f", "-", ...composeArgs];
   try {
     child_process.execFileSync("docker", args, {
       cwd: projectRoot,

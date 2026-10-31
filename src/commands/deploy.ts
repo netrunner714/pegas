@@ -61,6 +61,7 @@ export async function waitForContainerReadiness(
     gracePeriodMs?: number;
     composeFile?: string;
     projectId?: string;
+    environment?: string;
   } = {}
 ): Promise<ReadinessResult> {
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -76,7 +77,7 @@ export async function waitForContainerReadiness(
     let containerId = "";
     try {
       const dockerArgs = options.projectId
-        ? ["ps", "-q", "--filter", `label=pegas.project=${options.projectId}`, "--filter", `label=pegas.service=${serviceName}`]
+        ? ["ps", "-q", "--filter", `label=pegas.project=${options.projectId}`, "--filter", `label=pegas.environment=${options.environment || "development"}`, "--filter", `label=pegas.service=${serviceName}`]
         : [
             "compose",
             ...(options.composeFile
@@ -352,6 +353,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
             gracePeriodMs: options.gracePeriodMs,
             composeFile: composeFile || undefined,
             projectId: contract.runtime === "docker" ? runtimeId : undefined,
+            environment: runtimeEnvironment,
           });
           if (!checkRes.ready) {
             const errMsg = `Service '${sName}' failed readiness check: ${checkRes.reason}`;

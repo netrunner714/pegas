@@ -110,6 +110,7 @@ async function handleDockerRuntimeDev(
   try {
     const listed = child_process.execFileSync("docker", [
       "ps", "-aq", "--filter", "label=pegas.project=" + projectId,
+      "--filter", "label=pegas.environment=development",
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     containerIds = listed.trim().split(/\s+/).filter(Boolean);
   } catch (error: any) {

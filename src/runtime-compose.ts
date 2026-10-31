@@ -471,6 +471,7 @@ export function createRuntimeCompose(
       restart: "unless-stopped",
       labels: {
         "pegas.project": options.projectId,
+        "pegas.environment": environmentName,
         "pegas.project-name": contract.projectName || options.projectId,
         "pegas.service": serviceName,
         "pegas.manifest-hash": serviceHash,
