@@ -1,0 +1,604 @@
+import fs from "node:fs";
+import path from "node:path";
+import childProcess from "node:child_process";
+import { createHash } from "node:crypto";
+import { PegasContract, ServiceContract } from "./types.js";
+import { validatePegasContract, normalizeEnvironment } from "./contract.js";
+
+export interface RuntimeComposeOptions {
+  projectRoot: string;
+  projectId: string;
+  environment?: string;
+}
+
+export interface RuntimeComposeResult {
+  manifest: Record<string, unknown>;
+  content: string;
+  serviceHashes: Record<string, string>;
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => [key, stableValue(item)])
+  );
+}
+
+function hashValue(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
+}
+
+/**
+ * Applies Docker .dockerignore rules when fingerprinting a build context.
+ * Supports comments, negation, *, ?, character classes and **. Directory
+ * matches also cover descendants, matching Docker build-context semantics.
+ */
+function dockerIgnoreMatcher(contextDir: string): (relativePath: string) => boolean {
+  const ignoreFile = path.join(contextDir, ".dockerignore");
+  let source = "";
+  try { source = fs.readFileSync(ignoreFile, "utf8"); } catch {}
+  const rules = source.split(/\r?\n/).flatMap((raw) => {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) return [];
+    const negated = line.startsWith("!");
+    const pattern = (negated ? line.slice(1) : line).replace(/^\/+|\/+$/g, "");
+    if (!pattern || pattern === ".") return [];
+    // A pattern without a slash matches that name at any depth in the context.
+    let regex = pattern.includes("/") ? "^" : "^(?:.*/)?";
+    for (let i = 0; i < pattern.length; i++) {
+      const char = pattern[i];
+      if (char === "*") {
+        if (pattern[i + 1] === "*") {
+          i++;
+          if (pattern[i + 1] === "/") { regex += "(?:.*/)?"; i++; }
+          else regex += ".*";
+        } else regex += "[^/]*";
+      } else if (char === "?") regex += "[^/]";
+      else if (char === "[") {
+        const close = pattern.indexOf("]", i + 1);
+        if (close > i) { regex += pattern.slice(i, close + 1); i = close; }
+        else regex += "\\[";
+      } else regex += "\\" + char;
+    }
+    return [{ negated, regex: new RegExp(`${regex}(?:/.*)?$`) }];
+  });
+  return (relativePath) => {
+    let ignored = false;
+    const normalized = relativePath.split(path.sep).join("/");
+    for (const rule of rules) if (rule.regex.test(normalized)) ignored = !rule.negated;
+    return ignored;
+  };
+}
+
+/** Fingerprints the effective local build context so changed source receives a new image tag. */
+function hashBuildContext(contextDir: string): string {
+  const hash = createHash("sha256");
+  const isIgnored = dockerIgnoreMatcher(contextDir);
+  const visit = (directory: string, relative = "") => {
+    const entries = fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const rel = relative ? path.join(relative, entry.name) : entry.name;
+      if (isIgnored(rel)) continue;
+      const full = path.join(directory, entry.name);
+      hash.update(rel.split(path.sep).join("/")).update("\0");
+      if (entry.isDirectory()) {
+        hash.update("directory\0");
+        visit(full, rel);
+      } else if (entry.isSymbolicLink()) {
+        hash.update("symlink\0").update(fs.readlinkSync(full)).update("\0");
+      } else if (entry.isFile()) {
+        const mode = fs.statSync(full).mode & 0o777;
+        hash.update("file\0").update(String(mode)).update("\0");
+        hash.update(fs.readFileSync(full)).update("\0");
+      }
+    }
+  };
+  visit(contextDir);
+  return hash.digest("hex");
+}
+
+const INFRA_IMAGES: Record<string, string> = {
+  postgres: "postgres:17",
+  postgresql: "postgres:17",
+  redis: "redis:8-alpine",
+  mongo: "mongo:8",
+  mongodb: "mongo:8",
+  mysql: "mysql:9",
+  mariadb: "mariadb:11",
+  rabbitmq: "rabbitmq:4-management",
+  memcached: "memcached:1.6-alpine",
+};
+
+interface AppDefaults {
+  image: string;
+  command: string[];
+  dependencyTarget: string;
+  lockHash: string;
+  runtimeVersion: string;
+  packageManager: string;
+  packageManagerVersion: string;
+  dockerfileInline: string;
+  imageHash: string;
+}
+
+function readJson(file: string): Record<string, any> {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function readText(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Resolve an existing project directory without allowing symlink escapes. */
+function resolveProjectDirectory(projectRoot: string, relativePath: string, field: string): string {
+  const resolved = path.resolve(projectRoot, relativePath);
+  if (isPathOutside(path.resolve(projectRoot), resolved)) {
+    throw new Error(`${field} must resolve to a directory inside the project root.`);
+  }
+  let realPath: string;
+  try {
+    realPath = fs.realpathSync(resolved);
+  } catch {
+    throw new Error(`${field} directory does not exist: ${relativePath}`);
+  }
+  if (isPathOutside(fs.realpathSync(projectRoot), realPath) || !fs.statSync(realPath).isDirectory()) {
+    throw new Error(`${field} must resolve to a directory inside the project root.`);
+  }
+  return realPath;
+}
+function isPathOutside(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+}
+
+/** Require secret env files to be project-relative, regular files ignored by Git. */
+function resolveSecretEnvFile(projectRoot: string, envFile: string): string {
+  const resolved = path.resolve(projectRoot, envFile);
+  const relative = path.relative(projectRoot, resolved);
+  if (!relative || isPathOutside(projectRoot, resolved)) {
+    throw new Error(`envFile "${envFile}" must resolve to a file inside the project root.`);
+  }
+  if (!fs.existsSync(resolved) || !fs.lstatSync(resolved).isFile()) {
+    throw new Error(`Secret envFile "${envFile}" does not exist, is a symlink, or is not a regular file.`);
+  }
+  const realRoot = fs.realpathSync(projectRoot);
+  const realFile = fs.realpathSync(resolved);
+  const realRelative = path.relative(realRoot, realFile);
+  if (!realRelative || isPathOutside(realRoot, realFile)) {
+    throw new Error(`Secret envFile "${envFile}" resolves outside the project root.`);
+  }
+  try {
+    childProcess.execFileSync("git", ["check-ignore", "-q", "--", relative], { cwd: projectRoot, stdio: "ignore" });
+  } catch (error: any) {
+    if (error?.status === 1) {
+      throw new Error(`Secret envFile "${envFile}" must be gitignored. Add it to .gitignore before deploying.`);
+    }
+    throw new Error(`Could not verify that envFile "${envFile}" is gitignored: ${error?.message || "Git check-ignore failed."}`);
+  }
+  return resolved;
+}
+
+
+function firstVersion(value: string, fallback: string): string {
+  const match = value.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  return match ? [match[1], match[2], match[3]].filter(Boolean).join(".") : fallback;
+}
+
+function shellQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+function resolveAppDefaults(
+  serviceName: string,
+  service: ServiceContract,
+  projectRoot: string,
+  environment: string
+): AppDefaults {
+  const sourceDir = path.resolve(projectRoot, service.bindMount || service.build?.context || ".");
+  const pkg = readJson(path.join(sourceDir, "package.json"));
+  const packageManagerField = typeof pkg.packageManager === "string" ? pkg.packageManager : "";
+  const hasBunLock = ["bun.lock", "bun.lockb"].some((file) => fs.existsSync(path.join(sourceDir, file)));
+  const hasPnpmLock = fs.existsSync(path.join(sourceDir, "pnpm-lock.yaml"));
+  const hasYarnLock = fs.existsSync(path.join(sourceDir, "yarn.lock"));
+  const hasNpmLock = fs.existsSync(path.join(sourceDir, "package-lock.json"));
+  const pythonProject =
+    fs.existsSync(path.join(sourceDir, "pyproject.toml")) ||
+    fs.existsSync(path.join(sourceDir, "requirements.txt"));
+
+  let stack: "node" | "bun" | "python";
+  let runtimeVersion: string;
+  let packageManager: string;
+  let packageManagerVersion: string;
+  let image: string;
+  let dependencyTarget: string;
+  let installCommand: string;
+  let defaultCommand: string[];
+
+  if (pkg.name || fs.existsSync(path.join(sourceDir, "package.json"))) {
+    stack = packageManagerField.startsWith("bun@") || hasBunLock ? "bun" : "node";
+    if (stack === "bun") {
+      runtimeVersion = firstVersion(
+        packageManagerField.startsWith("bun@") ? packageManagerField : readText(path.join(sourceDir, ".bun-version")),
+        "1"
+      );
+      packageManager = "bun";
+      packageManagerVersion = packageManagerField || `bun@${runtimeVersion}`;
+      image = `oven/bun:${runtimeVersion}`;
+      installCommand = hasBunLock ? "bun install --frozen-lockfile" : "bun install";
+    } else {
+      const engines = typeof pkg.engines?.node === "string" ? pkg.engines.node : "";
+      runtimeVersion = firstVersion(readText(path.join(sourceDir, ".nvmrc")) || engines, "24");
+      if (packageManagerField.startsWith("pnpm@") || hasPnpmLock) packageManager = "pnpm";
+      else if (packageManagerField.startsWith("yarn@") || hasYarnLock) packageManager = "yarn";
+      else packageManager = "npm";
+      packageManagerVersion = packageManagerField || `${packageManager}-bundled`;
+      image = `node:${runtimeVersion}-bookworm`;
+      const yarnLock = readText(path.join(sourceDir, "yarn.lock"));
+      const yarnMajor = packageManagerField.startsWith("yarn@")
+        ? firstVersion(packageManagerField, "4").split(".")[0]
+        : yarnLock.includes("# yarn lockfile v1") ? "1" : "4";
+      installCommand = packageManager === "pnpm"
+        ? "pnpm install --frozen-lockfile"
+        : packageManager === "yarn"
+          ? "yarn install " + (Number(yarnMajor) < 2 ? "--frozen-lockfile" : "--immutable")
+          : hasNpmLock ? "npm ci" : "npm install";
+    }
+    dependencyTarget = "/workspace/node_modules";
+    const scripts = pkg.scripts || {};
+    const preferredScript = environment === "development" ? "dev" : "start";
+    const fallbackScript = environment === "development" ? "start" : "dev";
+    defaultCommand = service.command || (
+      scripts[preferredScript] ? [packageManager, "run", preferredScript] :
+      scripts[fallbackScript] ? [packageManager, "run", fallbackScript] : []
+    );
+    if (defaultCommand.length === 0) {
+      throw new Error(`Service "${serviceName}" was detected as ${stack}, but package.json has no "${preferredScript}" or "${fallbackScript}" script. Set services.${serviceName}.command explicitly.`);
+    }
+  } else if (pythonProject) {
+    stack = "python";
+    const pyproject = readText(path.join(sourceDir, "pyproject.toml"));
+    const pythonRequirement = pyproject.match(/requires-python\s*=\s*["']([^"']+)["']/)?.[1] || "";
+    runtimeVersion = firstVersion(
+      readText(path.join(sourceDir, ".python-version")) || pythonRequirement,
+      "3.13"
+    );
+    packageManager = fs.existsSync(path.join(sourceDir, "uv.lock")) ? "uv" : "pip";
+    packageManagerVersion = packageManager === "uv" ? "uv-lock" : "pip";
+    image = `python:${runtimeVersion}-slim`;
+    dependencyTarget = "/workspace/.venv";
+    installCommand = packageManager === "uv"
+      ? "python -m venv /workspace/.venv && /workspace/.venv/bin/pip install uv && /workspace/.venv/bin/uv sync --frozen"
+      : "python -m venv /workspace/.venv && . /workspace/.venv/bin/activate && " +
+        (fs.existsSync(path.join(sourceDir, "requirements.txt"))
+          ? "pip install -r requirements.txt"
+          : "pip install -e .");
+    defaultCommand = service.command || [];
+    if (defaultCommand.length === 0) {
+      throw new Error(`Python service "${serviceName}" needs an explicit services.${serviceName}.command in pegas.json.`);
+    }
+  } else {
+    throw new Error(
+      `Cannot detect the stack for app service "${serviceName}". Add a package.json, pyproject.toml or requirements.txt, or specify image/build in pegas.json.`
+    );
+  }
+
+  const lockFiles = [
+    "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+    "uv.lock", "poetry.lock", "requirements.txt", "pyproject.toml",
+  ];
+  const lockContent = lockFiles
+    .map((file) => {
+      const fullPath = path.join(sourceDir, file);
+      return fs.existsSync(fullPath) ? `${file}\0${fs.readFileSync(fullPath)}` : "";
+    })
+    .filter(Boolean)
+    .join("\0");
+  const lockHash = createHash("sha256")
+    .update([lockContent, packageManager, packageManagerVersion, runtimeVersion].join("\0"))
+    .digest("hex");
+
+  const marker = `${dependencyTarget}/.pegas-deps-hash`;
+  // Mirror the invoking user's ownership on POSIX hosts, but never create
+  // root-owned development containers when Pegas itself was run through sudo.
+  const processUid = process.getuid?.();
+  const processGid = process.getgid?.();
+  const sudoUid = Number(process.env.SUDO_UID);
+  const sudoGid = Number(process.env.SUDO_GID);
+  const uid = processUid === 0
+    ? (Number.isInteger(sudoUid) && sudoUid > 0 ? sudoUid : 1000)
+    : (processUid ?? 1000);
+  const gid = processGid === 0
+    ? (Number.isInteger(sudoGid) && sudoGid > 0 ? sudoGid : 1000)
+    : (processGid ?? 1000);
+  const dockerfileInline = [
+    `FROM ${image}`,
+    "USER root",
+    ...(stack === "node" ? ["RUN corepack enable"] : []),
+    `RUN mkdir -p ${dependencyTarget} /tmp/pegas-home && chown -R ${uid}:${gid} /workspace /tmp/pegas-home`,
+    "ENV HOME=/tmp/pegas-home",
+    "WORKDIR /workspace",
+    `USER ${uid}:${gid}`,
+  ].join("\n");
+  const imageHash = hashValue({ image, dockerfileInline });
+  const wrapper = [
+    `mkdir -p ${shellQuote(dependencyTarget)}` ,
+    `if [ ! -f ${shellQuote(marker)} ] || [ "$(cat ${shellQuote(marker)})" != ${shellQuote(lockHash)} ]; then`,
+    `  ${installCommand}` ,
+    `  printf %s ${shellQuote(lockHash)} > ${shellQuote(marker)}` ,
+    "fi",
+    ...(stack === "python" ? [". /workspace/.venv/bin/activate"] : []),
+    `exec ${defaultCommand.map(shellQuote).join(" ")}` ,
+  ].join("\n");
+
+  return {
+    image,
+    command: ["sh", "-lc", wrapper],
+    dependencyTarget,
+    lockHash,
+    runtimeVersion,
+    packageManager,
+    packageManagerVersion,
+    dockerfileInline,
+    imageHash,
+  };
+}
+
+function isInfraService(serviceName: string, service: ServiceContract): boolean {
+  if (service.role) return service.role === "infra";
+  return Boolean(INFRA_IMAGES[serviceName.toLowerCase()]);
+}
+
+function isAppService(serviceName: string, service: ServiceContract): boolean {
+  if (service.role) return service.role === "app";
+  if (INFRA_IMAGES[serviceName.toLowerCase()]) return false;
+  return Boolean(service.build || service.command || service.port || service.domains?.development?.length || service.domains?.dev?.length);
+}
+
+function getVolumeTarget(spec: string | { target?: string }): string | undefined {
+  if (typeof spec !== "string") return spec.target;
+  const parts = spec.split(":");
+  // Compose short syntax is source:target[:mode]. On Windows, the host drive
+  // letter adds one extra colon before the target. A single segment is an
+  // anonymous-volume target.
+  if (/^[A-Za-z]:[\\/]/.test(spec)) return parts[2]?.split(":")[0];
+  return parts.length >= 2 ? parts[1] : spec;
+}
+
+/**
+ * Q6: a host-installed node_modules directory sits directly under the bind mount
+ * and is silently shadowed by the Docker dependency volume — the host copy never
+ * updates the container. Warn loudly instead of letting the drift go unnoticed.
+ */
+export function hasHostNodeModules(
+  contract: PegasContract,
+  projectRoot: string
+): string[] {
+  const sources: string[] = [];
+  for (const service of Object.values(contract.services || {})) {
+    const relative = service.bindMount || service.build?.context || ".";
+    const dir = path.join(projectRoot, relative);
+    try {
+      if (fs.statSync(path.join(dir, "node_modules")).isDirectory()) sources.push(relative);
+    } catch {}
+  }
+  return sources;
+}
+
+/**
+ * Builds an ephemeral Compose document from the declarative contract.
+ * JSON is valid YAML, which lets us avoid a runtime YAML dependency and safely
+ * pass the document to `docker compose -f -` through stdin.
+ */
+export function createRuntimeCompose(
+  contract: PegasContract,
+  options: RuntimeComposeOptions
+): RuntimeComposeResult {
+  const issues = validatePegasContract(contract);
+  if (issues.length > 0) {
+    throw new Error(
+      `Invalid Pegas Docker contract: ${issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`
+    );
+  }
+  if (contract.runtime !== "docker") {
+    throw new Error('The generated Compose manifest requires runtime: "docker".');
+  }
+
+  const services: Record<string, unknown> = {};
+  const namedVolumes = new Set<string>();
+  const serviceHashes: Record<string, string> = {};
+  const environmentName = normalizeEnvironment(options.environment);
+
+  for (const [serviceName, service] of Object.entries(contract.services)) {
+    const app = isAppService(serviceName, service);
+    const infra = isInfraService(serviceName, service);
+    let appDefaults: AppDefaults | undefined;
+    let effectiveImage = service.image;
+    if (!service.build && !service.image) {
+      if (infra) {
+        effectiveImage = INFRA_IMAGES[serviceName.toLowerCase()];
+        if (!effectiveImage) {
+          throw new Error(`Infrastructure service "${serviceName}" needs an explicit image in pegas.json; no built-in profile exists for this service.`);
+        }
+      } else if (app && environmentName === "development") {
+        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, "development");
+        effectiveImage = appDefaults.image;
+      } else if (app) {
+        throw new Error(`Production service "${serviceName}" must declare build or image in pegas.json. Automatic stack images are for development only.`);
+      } else {
+        throw new Error(`Service "${serviceName}" needs an image, build configuration, or a recognized app/infra profile.`);
+      }
+    }
+
+    const dockerfilePath = service.build?.dockerfile
+      ? path.resolve(options.projectRoot, service.build.context, service.build.dockerfile)
+      : service.build
+        ? path.resolve(options.projectRoot, service.build.context, "Dockerfile")
+        : "";
+    const dockerIgnorePath = path.resolve(options.projectRoot, service.build?.context || ".", ".dockerignore");
+    const buildContext = service.build
+      ? resolveProjectDirectory(options.projectRoot, service.build.context, `services.${serviceName}.build.context`)
+      : options.projectRoot;
+    if (service.build && fs.existsSync(dockerfilePath)) {
+      const realDockerfile = fs.realpathSync(dockerfilePath);
+      const relativeDockerfile = path.relative(buildContext, realDockerfile);
+      if (!relativeDockerfile || isPathOutside(buildContext, realDockerfile) || !fs.statSync(realDockerfile).isFile()) {
+        throw new Error(`services.${serviceName}.build.dockerfile must resolve to a file inside its build context.`);
+      }
+    }
+    // In development the source tree is bind-mounted into the container: a source
+    // edit must not trigger an image rebuild. Only the build recipe (Dockerfile,
+    // .dockerignore, dependencies) participates in the fingerprint. In other
+    // environments the full build context is baked into the image and is hashed.
+    const hashBuildInputs = service.build && environmentName !== "development";
+    const dockerfileHash = createHash("sha256")
+      .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
+      .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
+      .update(hashBuildInputs ? hashBuildContext(buildContext) : "")
+      .digest("hex");
+    const configuredWatchMode = service.hmr?.fileWatch;
+    const watchMode = environmentName !== "development"
+      ? "events"
+      : !configuredWatchMode || configuredWatchMode === "auto"
+        ? (process.platform === "linux" ? "events" : "polling")
+        : configuredWatchMode;
+    const serviceHash = hashValue({
+      service,
+      environment: environmentName,
+      effectiveImage,
+      dockerfileHash,
+      watchMode,
+      defaults: appDefaults ? {
+        image: appDefaults.image,
+        runtimeVersion: appDefaults.runtimeVersion,
+        packageManager: appDefaults.packageManager,
+        packageManagerVersion: appDefaults.packageManagerVersion,
+        lockHash: appDefaults.lockHash,
+        dockerfileInline: appDefaults.dockerfileInline,
+        imageHash: appDefaults.imageHash,
+        command: appDefaults.command,
+        environment: environmentName,
+      } : undefined,
+    });
+    serviceHashes[serviceName] = serviceHash;
+
+    const generated: Record<string, unknown> = {
+      restart: "unless-stopped",
+      labels: {
+        "pegas.project": options.projectId,
+        "pegas.environment": environmentName,
+        "pegas.project-name": contract.projectName || options.projectId,
+        "pegas.service": serviceName,
+        "pegas.manifest-hash": serviceHash,
+        "pegas.role": service.role || (app ? "app" : "infra"),
+        ...(appDefaults ? { "pegas.dependencies-hash": appDefaults.lockHash } : {}),
+        ...(service.envFile ? {
+          "pegas.env-hash": createHash("sha256")
+            .update(fs.readFileSync(resolveSecretEnvFile(options.projectRoot, service.envFile)))
+            .digest("hex"),
+        } : {}),
+      },
+      networks: {
+        "pegas-network": {
+          aliases: [`${options.projectId}-${environmentName}-${serviceName}`],
+        },
+      },
+    };
+
+    if (service.build) {
+      generated.build = {
+        context: path.resolve(options.projectRoot, service.build.context),
+        ...(service.build.dockerfile ? { dockerfile: service.build.dockerfile } : {}),
+      };
+      generated.image = `pegas/${options.projectId}/${serviceName.toLowerCase()}:${serviceHash.slice(0, 12)}`;
+    } else if (appDefaults) {
+      generated.build = {
+        context: options.projectRoot,
+        dockerfile_inline: appDefaults.dockerfileInline,
+      };
+      generated.image = `pegas/${options.projectId}/${serviceName.toLowerCase()}:${appDefaults.imageHash.slice(0, 12)}`;
+    } else if (effectiveImage) {
+      generated.image = effectiveImage;
+    }
+    if (appDefaults) generated.command = appDefaults.command;
+    else if (service.command) generated.command = service.command;
+    const environment: Record<string, string> = { ...(service.env || {}) };
+    if (app) {
+      environment.NODE_ENV ??= environmentName === "development" ? "development" : "production";
+      environment.PEGAS_ENV ??= environmentName;
+    }
+    if (environmentName === "development" && watchMode === "polling") {
+      environment.CHOKIDAR_USEPOLLING ??= "true";
+      environment.WATCHPACK_POLLING ??= "true";
+    } else if (environmentName === "development" && watchMode === "events") {
+      environment.CHOKIDAR_USEPOLLING ??= "false";
+      environment.WATCHPACK_POLLING ??= "false";
+    }
+    if (Object.keys(environment).length > 0) generated.environment = environment;
+    if (service.envFile) generated.env_file = [resolveSecretEnvFile(options.projectRoot, service.envFile)];
+    if (service.dependsOn) generated.depends_on = service.dependsOn;
+    if (service.healthcheck) {
+      generated.healthcheck = {
+        test: service.healthcheck.test,
+        ...(service.healthcheck.interval ? { interval: service.healthcheck.interval } : {}),
+        ...(service.healthcheck.timeout ? { timeout: service.healthcheck.timeout } : {}),
+        ...(service.healthcheck.retries ? { retries: service.healthcheck.retries } : {}),
+        ...(service.healthcheck.startPeriod ? { start_period: service.healthcheck.startPeriod } : {}),
+      };
+    }
+    if (service.port !== undefined) generated.expose = [String(service.port)];
+
+    const volumes: Array<string | { type?: string; source?: string; target?: string; bind?: unknown }> = [...(service.volumes || [])];
+    if (app && environmentName === "development") {
+      const source = resolveProjectDirectory(
+        options.projectRoot,
+        service.bindMount || service.build?.context || ".",
+        `services.${serviceName}.bindMount`
+      );
+      volumes.unshift({
+        type: "bind",
+        source,
+        target: "/workspace",
+        bind: { create_host_path: true },
+      });
+      generated.working_dir = "/workspace";
+
+      const dependencyTarget = appDefaults?.dependencyTarget || "/workspace/node_modules";
+      if (!volumes.some((volume) => getVolumeTarget(volume) === dependencyTarget)) {
+        const volumeName = `pegas-${options.projectId}-${serviceName}-${environmentName}-dependencies`;
+        volumes.push(`${volumeName}:${dependencyTarget}`);
+        namedVolumes.add(volumeName);
+      }
+    }
+    if (volumes.length > 0) generated.volumes = volumes;
+
+    services[serviceName] = generated;
+  }
+
+  const manifest: Record<string, unknown> = {
+    name: `pegas-${options.projectId}-${environmentName}`,
+    services,
+    networks: {
+      "pegas-network": { external: true, name: "pegas-network" },
+    },
+    ...(namedVolumes.size > 0
+      ? { volumes: Object.fromEntries([...namedVolumes].sort().map((name) => [name, {}])) }
+      : {}),
+  };
+
+  return {
+    manifest,
+    content: JSON.stringify(manifest, null, 2) + "\n",
+    serviceHashes,
+  };
+}

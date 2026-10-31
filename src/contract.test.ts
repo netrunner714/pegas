@@ -15,10 +15,67 @@ import {
   detectComposeWebService,
   createDefaultContract,
   CONTRACT_FILENAME,
+  validatePegasContract,
+  getProjectRuntimeId,
 } from "./contract.js";
 import { getRouteFilePath } from "./gateway.js";
 
 describe("contract & package.json integration", () => {
+  it("keeps legacy contracts valid and validates opt-in Docker contract fields", () => {
+    const legacy = {
+      projectName: "legacy-app",
+      services: { web: { port: 3000, domains: { development: ["legacy.localhost"] } } },
+    };
+    expect(validatePegasContract(legacy)).toEqual([]);
+
+    const docker = {
+      ...legacy,
+      runtime: "docker",
+      services: {
+        web: {
+          ...legacy.services.web,
+          role: "app",
+          build: { context: ".", dockerfile: "Dockerfile" },
+          command: ["npm", "run", "dev"],
+          env: { NODE_ENV: "development" },
+          envFile: ".env.local",
+          volumes: ["pegas-web-node-modules:/app/node_modules"],
+          bindMount: ".",
+          hmr: { fileWatch: "polling" },
+        },
+        postgres: { role: "infra", image: "postgres:17", port: 5432, domains: {} },
+      },
+    };
+    expect(validatePegasContract(docker)).toEqual([]);
+  });
+
+  it("reports precise paths for invalid Docker contract fields", () => {
+    const issues = validatePegasContract({
+      runtime: "docker",
+      services: {
+        web: {
+          image: "node:24",
+          build: { context: "" },
+          command: [],
+          role: "worker",
+          hmr: { fileWatch: "sometimes" },
+        },
+      },
+    });
+    const paths = issues.map((issue) => issue.path);
+    expect(paths).toContain("services.web");
+    expect(paths).toContain("services.web.build.context");
+    expect(paths).toContain("services.web.command");
+    expect(paths).toContain("services.web.role");
+    expect(paths).toContain("services.web.hmr.fileWatch");
+  });
+
+  it("creates stable checkout-specific runtime identities", () => {
+    const first = getProjectRuntimeId("/work/apps/shop", "shop");
+    expect(getProjectRuntimeId("/work/apps/shop", "shop")).toBe(first);
+    expect(getProjectRuntimeId("/work/apps/shop-copy", "shop")).not.toBe(first);
+    expect(first).toMatch(/^shop-[a-f0-9]{12}$/);
+  });
   it("toAsciiDomain handles IDN Cyrillic and unicode domains with Punycode", () => {
     expect(toAsciiDomain("россия.рф")).toBe("xn--h1alffa9f.xn--p1ai");
     expect(toAsciiDomain("президент.рф")).toBe("xn--d1abbgf6aiiy.xn--p1ai");

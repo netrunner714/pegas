@@ -1,10 +1,236 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
 import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
+
+/**
+ * Canonical environment name: `dev` -> `development`, `prod` -> `production`,
+ * anything else is lowercased as-is. One shared definition keeps Docker labels,
+ * Compose project names, DNS aliases and route files consistent.
+ */
+export function normalizeEnvironment(env: string | undefined): string {
+  const value = (env || "").trim().toLowerCase();
+  if (!value) return "development";
+  if (value === "dev") return "development";
+  if (value === "prod") return "production";
+  return value;
+}
+
+export interface ContractValidationIssue {
+  path: string;
+  message: string;
+}
+
+/**
+ * Validates the opt-in Docker contract fields. Legacy host contracts remain
+ * valid and are deliberately not subjected to new Docker-only requirements.
+ */
+export function validatePegasContract(value: unknown): ContractValidationIssue[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [{ path: "$", message: "Contract must be a JSON object." }];
+  }
+
+  const contract = value as Record<string, unknown>;
+  const issues: ContractValidationIssue[] = [];
+  const add = (field: string, message: string) => issues.push({ path: field, message });
+
+  if (contract.runtime !== undefined && contract.runtime !== "host" && contract.runtime !== "docker") {
+    add("runtime", 'Expected "host" or "docker".');
+  }
+
+  if (!contract.services || typeof contract.services !== "object" || Array.isArray(contract.services)) {
+    add("services", "Expected an object containing service definitions.");
+    return issues;
+  }
+
+  if (contract.runtime !== "docker") return issues;
+
+  const services = contract.services as Record<string, unknown>;
+  if (Object.keys(services).length === 0) add("services", "Docker runtime requires at least one service.");
+
+  for (const [name, rawService] of Object.entries(services)) {
+    const base = `services.${name}`;
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
+      add(base, "Service names must start with a letter or number and contain only letters, numbers, dots, underscores, or hyphens.");
+    }
+    if (!rawService || typeof rawService !== "object" || Array.isArray(rawService)) {
+      add(base, "Expected a service object.");
+      continue;
+    }
+
+    const service = rawService as Record<string, unknown>;
+    if (service.domains !== undefined) {
+      if (!service.domains || typeof service.domains !== "object" || Array.isArray(service.domains)) {
+        add(`${base}.domains`, "Expected an object mapping environment names to domain arrays.");
+      } else {
+        for (const [environment, domains] of Object.entries(service.domains as Record<string, unknown>)) {
+          if (!environment.trim() || !Array.isArray(domains) || domains.some((domain) => typeof domain !== "string" || !domain.trim())) {
+            add(`${base}.domains.${environment}`, "Expected an array of non-empty domain strings.");
+          }
+        }
+      }
+    }
+
+    if (service.port !== undefined) {
+      const port = typeof service.port === "string" && String(Number(service.port)) === service.port ? Number(service.port) : service.port;
+      if (!Number.isInteger(port) || Number(port) < 1 || Number(port) > 65535) {
+        add(`${base}.port`, "Expected a TCP port number between 1 and 65535.");
+      }
+    }
+    if (service.upstream !== undefined && (typeof service.upstream !== "string" || !service.upstream.trim())) {
+      add(`${base}.upstream`, "Expected a non-empty upstream target.");
+    }
+
+    if (service.build !== undefined && service.image !== undefined) {
+      add(base, '"build" and "image" are mutually exclusive.');
+    }
+
+    if (service.build !== undefined) {
+      if (!service.build || typeof service.build !== "object" || Array.isArray(service.build)) {
+        add(`${base}.build`, "Expected an object with a context path.");
+      } else {
+        const build = service.build as Record<string, unknown>;
+        if (typeof build.context !== "string" || !build.context.trim()) {
+          add(`${base}.build.context`, "Expected a non-empty project-relative path.");
+        } else if (path.isAbsolute(build.context) || path.win32.isAbsolute(build.context) ||
+          path.posix.normalize(build.context).split("/").includes("..") ||
+          path.win32.normalize(build.context).split(/[\\/]/).includes("..")) {
+          add(`${base}.build.context`, "Build context must stay inside the project and cannot be absolute or traverse to a parent directory.");
+        }
+        if (build.dockerfile !== undefined) {
+          if (typeof build.dockerfile !== "string" || !build.dockerfile.trim()) {
+            add(`${base}.build.dockerfile`, "Expected a non-empty path.");
+          } else if (path.isAbsolute(build.dockerfile) || path.win32.isAbsolute(build.dockerfile) ||
+            path.posix.normalize(build.dockerfile).split("/").includes("..") ||
+            path.win32.normalize(build.dockerfile).split(/[\\/]/).includes("..")) {
+            add(`${base}.build.dockerfile`, "Dockerfile path must stay inside its build context.");
+          }
+        }
+      }
+    }
+
+    if (service.image !== undefined && (typeof service.image !== "string" || !service.image.trim())) {
+      add(`${base}.image`, "Expected a non-empty image reference.");
+    }
+
+    if (service.command !== undefined &&
+      (!Array.isArray(service.command) || service.command.length === 0 ||
+        service.command.some((part) => typeof part !== "string" || !part.trim()))) {
+      add(`${base}.command`, "Expected a non-empty array of command strings.");
+    }
+
+    if (service.env !== undefined) {
+      if (!service.env || typeof service.env !== "object" || Array.isArray(service.env)) {
+        add(`${base}.env`, "Expected an object of non-secret string values.");
+      } else {
+        for (const [key, val] of Object.entries(service.env as Record<string, unknown>)) {
+          if (!key.trim() || typeof val !== "string") add(`${base}.env.${key}`, "Environment keys and values must be strings.");
+        }
+      }
+    }
+
+    for (const field of ["envFile", "bindMount"] as const) {
+      if (service[field] !== undefined) {
+        const value = service[field];
+        if (typeof value !== "string" || !value.trim()) {
+          add(`${base}.${field}`, "Expected a non-empty path.");
+        } else if (
+          path.isAbsolute(value) || path.win32.isAbsolute(value) ||
+          path.posix.normalize(value).split("/").includes("..") ||
+          path.win32.normalize(value).split(/[\\/]/).includes("..")
+        ) {
+          add(`${base}.${field}`, field === "envFile"
+            ? "Secret envFile must be a project-relative path."
+            : "bindMount must be a project-relative path that stays inside the project.");
+        }
+      }
+    }
+
+    if (service.volumes !== undefined &&
+      (!Array.isArray(service.volumes) || service.volumes.some((item) => typeof item !== "string" || !item.trim()))) {
+      add(`${base}.volumes`, "Expected an array of non-empty volume specifications.");
+    }
+
+    if (service.role !== undefined && service.role !== "app" && service.role !== "infra") {
+      add(`${base}.role`, 'Expected "app" or "infra".');
+    }
+
+    if (service.hmr !== undefined) {
+      if (!service.hmr || typeof service.hmr !== "object" || Array.isArray(service.hmr)) {
+        add(`${base}.hmr`, "Expected an object.");
+      } else {
+        const mode = (service.hmr as Record<string, unknown>).fileWatch;
+        if (mode !== undefined && mode !== "auto" && mode !== "events" && mode !== "polling") {
+          add(`${base}.hmr.fileWatch`, 'Expected "auto", "events", or "polling".');
+        }
+      }
+    }
+    if (service.dependsOn !== undefined) {
+      const dependencyNames = Array.isArray(service.dependsOn)
+        ? service.dependsOn
+        : service.dependsOn && typeof service.dependsOn === "object"
+          ? Object.keys(service.dependsOn as Record<string, unknown>)
+          : null;
+      if (!dependencyNames || dependencyNames.some((dependency) => typeof dependency !== "string" || !dependency.trim())) {
+        add(`${base}.dependsOn`, "Expected an array of service names or a dependency map.");
+      } else {
+        for (const dependency of dependencyNames) {
+          if (!Object.prototype.hasOwnProperty.call(services, dependency)) {
+            add(`${base}.dependsOn`, `Unknown service dependency "${dependency}".`);
+          }
+        }
+      }
+      if (service.dependsOn && !Array.isArray(service.dependsOn) && typeof service.dependsOn === "object") {
+        for (const [dependency, config] of Object.entries(service.dependsOn as Record<string, unknown>)) {
+          if (!config || typeof config !== "object" || Array.isArray(config)) {
+            add(`${base}.dependsOn.${dependency}`, "Expected a dependency configuration object.");
+            continue;
+          }
+          const condition = (config as Record<string, unknown>).condition;
+          if (condition !== undefined && !["service_started", "service_healthy", "service_completed_successfully"].includes(String(condition))) {
+            add(`${base}.dependsOn.${dependency}.condition`, "Unsupported dependency condition.");
+          }
+        }
+      }
+    }
+
+    if (service.healthcheck !== undefined) {
+      const healthcheck = service.healthcheck as Record<string, unknown>;
+      if (!healthcheck || typeof healthcheck !== "object" || Array.isArray(healthcheck)) {
+        add(`${base}.healthcheck`, "Expected a healthcheck object.");
+      } else {
+        if (!Array.isArray(healthcheck.test) || healthcheck.test.length === 0 || healthcheck.test.some((item) => typeof item !== "string" || !item.trim())) {
+          add(`${base}.healthcheck.test`, "Expected a non-empty command array.");
+        }
+        for (const field of ["interval", "timeout", "startPeriod"] as const) {
+          if (healthcheck[field] !== undefined && (typeof healthcheck[field] !== "string" || !(healthcheck[field] as string).trim())) {
+            add(`${base}.healthcheck.${field}`, "Expected a non-empty duration string.");
+          }
+        }
+        if (healthcheck.retries !== undefined && (!Number.isInteger(healthcheck.retries) || Number(healthcheck.retries) < 1)) {
+          add(`${base}.healthcheck.retries`, "Expected a positive integer.");
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Stable, checkout-specific identifier for Docker labels. It intentionally
+ * differs between two clones with the same projectName, while remaining
+ * stable across invocations from the same checkout.
+ */
+export function getProjectRuntimeId(projectRoot: string, projectName: string): string {
+  const canonicalRoot = path.resolve(projectRoot);
+  const digest = createHash("sha256").update(canonicalRoot).digest("hex").slice(0, 12);
+  return `${slugify(projectName)}-${digest}`;
+}
 
 /**
  * Normalizes a domain name, stripping protocols, paths, query strings, and ports.
@@ -329,6 +555,30 @@ export function reconcileContract(
 
 export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", 3000);
 
+/**
+ * Detects the runtime for a NEW contract from the project itself: a project
+ * that already ships Docker artifacts (Dockerfile or a Compose file) is treated
+ * as a Docker project; everything else keeps the legacy host flow. The user
+ * never passes flags for this - pegas reads the project, pegas decides.
+ */
+export async function detectContractRuntime(projectDir: string): Promise<"host" | "docker"> {
+  const dockerMarkers = [
+    "Dockerfile",
+    "Dockerfile.dev",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml",
+  ];
+  for (const marker of dockerMarkers) {
+    try {
+      await fs.access(path.join(projectDir, marker));
+      return "docker";
+    } catch {}
+  }
+  return "host";
+}
+
 export async function setupProjectContract(
   projectDir: string,
   dryRun = false,
@@ -350,7 +600,11 @@ export async function setupProjectContract(
   const detected = await detectComposeWebService(projectDir);
   const serviceName = detected?.name || "web";
   const port = detected?.port || "3000";
+  const runtime = await detectContractRuntime(projectDir);
   const defaultContract = createDefaultContract(slug, serviceName, port);
+  if (runtime === "docker") {
+    defaultContract.runtime = "docker";
+  }
 
   let existingContent: string | null = null;
   try {
@@ -425,7 +679,8 @@ export async function setupProjectContract(
 
 export async function updatePackageJson(
   projectDir: string,
-  dryRun = false
+  dryRun = false,
+  runtime?: "host" | "docker"
 ): Promise<string[]> {
   const actions: string[] = [];
   const pkgPath = path.join(projectDir, "package.json");
@@ -438,18 +693,26 @@ export async function updatePackageJson(
       pkg.scripts = {};
     }
 
-    // 1. Update dev script with pegas wrapper
-    if (pkg.scripts.dev) {
+    // Host runtime wraps the user command. Docker runtime keeps the real app command
+    // untouched because it is executed inside the service container.
+    if (runtime === "docker") {
+      if (typeof pkg.scripts.dev === "string" && pkg.scripts.dev.startsWith("pegas dev -- ")) {
+        pkg.scripts.dev = pkg.scripts.dev.replace(/^pegas dev --\s*/, "");
+        actions.push("Восстановлен исходный dev-скрипт для запуска внутри Docker");
+      } else if (pkg.scripts.dev === "pegas dev") {
+        delete pkg.scripts.dev;
+        actions.push("Удалён host-wrapper dev-скрипта; Docker runtime использует command из pegas.json или package.json");
+      }
+    } else if (pkg.scripts.dev) {
       if (!pkg.scripts.dev.includes("pegas dev")) {
         const cleanDev = pkg.scripts.dev.replace(/^pegas up --env development --\s*/, "");
-        pkg.scripts.dev = `pegas dev -- ${cleanDev}`;
+        pkg.scripts.dev = "pegas dev -- " + cleanDev;
         actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas dev --'");
       }
     } else {
       pkg.scripts.dev = "pegas dev";
       actions.push("Добавлен скрипт 'dev': 'pegas dev' в package.json");
     }
-
     // 2. Add deploy script
     if (!pkg.scripts.deploy || !pkg.scripts.deploy.includes("pegas deploy")) {
       pkg.scripts.deploy = "pegas deploy production";

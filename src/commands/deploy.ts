@@ -1,13 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments } from "../contract.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId, validatePegasContract, normalizeEnvironment } from "../contract.js";
 import { findPegasCompose, setupProjectCompose } from "../compose.js";
 import { PegasContract } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
+import { runRuntimeCompose } from "../runtime.js";
+import { hasHostNodeModules } from "../runtime-compose.js";
+import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
+import { withRuntimeLock } from "../runtime-lock.js";
 
 export interface DeployOptions {
   env?: string;
@@ -32,6 +37,18 @@ export interface ReadinessResult {
   containerId?: string;
 }
 
+/** Replace a route file atomically so Caddy never observes a partial write. */
+async function writeFileAtomically(filePath: string, content: string): Promise<void> {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporaryPath, content, { encoding: "utf-8", mode: 0o644, flag: "wx" });
+    await fs.rename(temporaryPath, filePath);
+  } catch (error) {
+    await fs.unlink(temporaryPath).catch(() => {});
+    throw error;
+  }
+}
+
 /**
  * Polls container status until running and healthy, preventing 502 Bad Gateway
  * errors during deployments before Caddy routes traffic to the container.
@@ -44,6 +61,8 @@ export async function waitForContainerReadiness(
     pollIntervalMs?: number;
     gracePeriodMs?: number;
     composeFile?: string;
+    projectId?: string;
+    environment?: string;
   } = {}
 ): Promise<ReadinessResult> {
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -58,15 +77,19 @@ export async function waitForContainerReadiness(
   while (Date.now() < deadline) {
     let containerId = "";
     try {
-      const composeArgs = ["compose"];
-      if (options.composeFile) {
-        composeArgs.push("--project-directory", projectRoot, "-f", options.composeFile);
-      }
-      composeArgs.push("ps", "-q", serviceName);
+      const dockerArgs = options.projectId
+        ? ["ps", "-q", "--filter", `label=pegas.project=${options.projectId}`, "--filter", `label=pegas.environment=${options.environment || "development"}`, "--filter", `label=pegas.service=${serviceName}`]
+        : [
+            "compose",
+            ...(options.composeFile
+              ? ["--project-directory", projectRoot, "-f", options.composeFile]
+              : []),
+            "ps", "-q", serviceName,
+          ];
 
       const psRes = child_process.execFileSync(
         "docker",
-        composeArgs,
+        dockerArgs,
         { cwd: projectRoot, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"], timeout: 3000 }
       );
       containerId = psRes.trim().split("\n")[0]?.trim();
@@ -112,9 +135,7 @@ export async function waitForContainerReadiness(
                   reason: `Container healthcheck failed: status is '${state.Health.Status}'`,
                 };
               }
-              // If "starting", continue polling until timeout
             } else {
-              // No built-in healthcheck: wait brief grace period for app to bind port
               if (gracePeriodMs > 0) {
                 await new Promise((r) => setTimeout(r, gracePeriodMs));
               }
@@ -135,70 +156,45 @@ export async function waitForContainerReadiness(
   };
 }
 
-/**
- * Resolves a service upstream into a project-scoped network alias to prevent
- * Docker DNS Round-Robin collisions across multiple projects on pegas-network.
- * e.g. "web:3000" in project "my-app" -> "my-app-web:3000"
- */
 export function resolveScopedUpstream(upstream: string, projectName: string): string {
   const parts = upstream.split(":");
   const host = parts[0];
   const port = parts[1] || "3000";
 
   if (!host) return upstream;
-  if (host.startsWith(`${projectName}-`)) {
-    return upstream;
-  }
-  if (host === "localhost" || host === "127.0.0.1" || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
-    return upstream;
-  }
-
+  if (host.startsWith(`${projectName}-`)) return upstream;
+  if (host === "localhost" || host === "127.0.0.1" || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return upstream;
   return `${projectName}-${host}:${port}`;
 }
 
-export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
+async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const env = options.env;
+  const runtimeEnvironment = normalizeEnvironment(env);
 
   if (!env) {
-    if (isJson) {
-      console.log(
-        JSON.stringify({
-          error: "Environment contour is required for deploy (e.g. 'production' or 'stage').",
-        })
-      );
-    } else {
+    if (isJson) console.log(JSON.stringify({ error: "Environment contour is required for deploy (e.g. 'production' or 'stage')." }));
+    else {
       console.error("❌ Error: Environment contour is required for deploy.");
       console.error("   Usage: pegas deploy <environment> (e.g. 'pegas deploy production' or 'pegas deploy stage')");
     }
-    if (!options.noExit) {
-      process.exit(1);
-    }
+    if (!options.noExit) process.exit(1);
     return;
   }
 
-  // 1. Find project root and contract
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
   const contractPath = path.join(projectRoot, CONTRACT_FILENAME);
-
   let rawContract: string;
   try {
     rawContract = await fs.readFile(contractPath, "utf-8");
   } catch {
-    if (isJson) {
-      console.log(
-        JSON.stringify({
-          error: `Contract '${CONTRACT_FILENAME}' not found. Run 'pegas init' first.`,
-        })
-      );
-    } else {
+    if (isJson) console.log(JSON.stringify({ error: `Contract '${CONTRACT_FILENAME}' not found. Run 'pegas init' first.` }));
+    else {
       console.error(`❌ Error: Contract '${CONTRACT_FILENAME}' not found in project root (${projectRoot}).`);
-      console.error(`   Run 'pegas init' to generate it.`);
+      console.error("   Run 'pegas init' to generate it.");
     }
-    if (!options.noExit) {
-      process.exit(1);
-    }
+    if (!options.noExit) process.exit(1);
     return;
   }
 
@@ -206,374 +202,288 @@ export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   try {
     contract = JSON.parse(rawContract);
   } catch (err: any) {
-    if (isJson) {
-      console.log(
-        JSON.stringify({
-          error: `Failed to parse '${path.basename(contractPath)}': Invalid JSON syntax.`,
-          details: err.message,
-        })
-      );
-    } else {
+    if (isJson) console.log(JSON.stringify({ error: `Failed to parse '${path.basename(contractPath)}': Invalid JSON syntax.`, details: err.message }));
+    else {
       console.error(`❌ Error: Failed to parse '${path.basename(contractPath)}': Invalid JSON syntax.`);
       console.error(`   ${err.message}`);
     }
-    if (!options.noExit) {
-      process.exit(1);
-    }
+    if (!options.noExit) process.exit(1);
     return;
   }
 
-  const projectName =
-    contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const contractIssues = validatePegasContract(contract);
+  if (contractIssues.length > 0) {
+    const details = contractIssues.map((issue) => `${issue.path}: ${issue.message}`);
+    if (isJson) console.log(JSON.stringify({ error: "Invalid Pegas contract", details }));
+    else {
+      console.error("❌ Invalid Pegas contract:");
+      for (const detail of details) console.error(`  - ${detail}`);
+    }
+    if (!options.noExit) process.exit(1);
+    return;
+  }
 
+  const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const runtimeId = getProjectRuntimeId(projectRoot, projectName);
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const confDir = getConfDir(gatewayDir);
-  if (!options.dryRun) {
-    await fs.mkdir(confDir, { recursive: true });
-  }
+  if (!options.dryRun) await fs.mkdir(confDir, { recursive: true });
 
   const strictDns = contract.deploy?.strictDns ?? options.strictDns ?? false;
   const skipDnsCheck = contract.deploy?.skipDnsCheck ?? options.skipDnsCheck ?? false;
   const skipReadiness = contract.deploy?.skipReadiness ?? options.skipReadiness ?? false;
 
-  // Anti-Hijacking Domain Collision Check
   const requestedDomains: string[] = [];
   for (const [, serviceConfig] of Object.entries(contract.services || {})) {
-    const domains = getEnvironmentDomains(serviceConfig, env);
-    for (const d of domains) {
+    for (const d of getEnvironmentDomains(serviceConfig, runtimeEnvironment)) {
       const norm = normalizeDomain(d);
       if (norm && norm !== "yourdomain.com") {
-        if (!requestedDomains.includes(norm)) {
-          requestedDomains.push(norm);
-        }
+        if (!requestedDomains.includes(norm)) requestedDomains.push(norm);
         const parts = norm.split(".");
-        if (!norm.startsWith("www.") && parts.length === 2) {
-          const wwwVar = `www.${norm}`;
-          if (!requestedDomains.includes(wwwVar)) {
-            requestedDomains.push(wwwVar);
-          }
+        if (!norm.startsWith("www.") && parts.length === 2 && !requestedDomains.includes(`www.${norm}`)) {
+          requestedDomains.push(`www.${norm}`);
         }
       }
     }
   }
 
-  // Pre-flight check: ensure the requested environment exists and has at least one domain
   if (requestedDomains.length === 0) {
     const available = listAvailableEnvironments(contract);
-    const envHint =
-      available.length > 0
-        ? `Available environments: ${available.join(", ")}`
-        : `No environments with active domains defined in '${CONTRACT_FILENAME}'.`;
-
-    if (isJson) {
-      console.log(
-        JSON.stringify({
-          error: `Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`,
-          availableEnvironments: available,
-        })
-      );
-    } else {
+    const envHint = available.length > 0
+      ? `Available environments: ${available.join(", ")}`
+      : `No environments with active domains defined in '${CONTRACT_FILENAME}'.`;
+    if (isJson) console.log(JSON.stringify({ error: `Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`, availableEnvironments: available }));
+    else {
       console.error(`\n❌ Error: Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`);
       console.error(`   ${envHint}`);
     }
-    if (!options.noExit) {
-      process.exit(1);
-    }
+    if (!options.noExit) process.exit(1);
     return;
   }
 
-  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, env);
+  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, runtimeEnvironment);
   const currentProjectFileName = path.basename(projectRouteFile);
+
+  // Canonical name of this project's own route files (for any environment).
+  const ownRouteFilePrefix = `${projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+
+  // Remove stale route files left by alias environment names of this project
+  // (e.g. `project-dev.caddy` after `pegas deploy development` writes `project-development.caddy`).
+  // They are superseded by the canonical file written below.
+  const aliasEnvironmentRouteFiles: string[] = [];
+  try {
+    const existingFiles = await fs.readdir(confDir);
+    for (const file of existingFiles) {
+      if (!file.endsWith(".caddy") || file === currentProjectFileName) continue;
+      if (!file.startsWith(`${ownRouteFilePrefix}-`) || !file.endsWith(".caddy")) continue;
+      if (file.startsWith(`${ownRouteFilePrefix}-${runtimeEnvironment}`)) continue;
+      const otherContent = await fs.readFile(path.join(confDir, file), "utf-8");
+      const otherRoutes = parseCaddyProjectFile(otherContent, file);
+      // The project comment carries the authoritative project name.
+      const isOwn = otherRoutes.every((route) => route.projectName === projectName) && otherRoutes.length > 0;
+      if (!isOwn) continue;
+      // Only clean files whose upstreams point at this checkout's scoped aliases.
+      const checkoutPrefix = `${runtimeId}-`;
+      const ownUpstreams = otherRoutes.every((route) => route.upstream.startsWith(checkoutPrefix));
+      if (!ownUpstreams) continue;
+      await fs.unlink(path.join(confDir, file)).catch(() => {});
+      aliasEnvironmentRouteFiles.push(path.join(confDir, file));
+    }
+  } catch (err: any) {
+    if (err.code !== "ENOENT") {}
+  }
+  if (aliasEnvironmentRouteFiles.length > 0 && !isJson) {
+    console.log(`\n🧹 Removed superseded route file(s) of this project (other environments):\n${aliasEnvironmentRouteFiles.map((f) => `   - ${f}`).join("\n")}`);
+  }
 
   try {
     const existingFiles = await fs.readdir(confDir);
     for (const file of existingFiles) {
-      if (!file.endsWith(".caddy") || file === currentProjectFileName) {
-        continue;
-      }
-      const otherFilePath = path.join(confDir, file);
-      const otherContent = await fs.readFile(otherFilePath, "utf-8");
+      if (!file.endsWith(".caddy") || file === currentProjectFileName) continue;
+      const otherContent = await fs.readFile(path.join(confDir, file), "utf-8");
       const otherRoutes = parseCaddyProjectFile(otherContent, file);
-
       for (const route of otherRoutes) {
+        // Never treat this project's own (other-environment) routes as conflicts.
+        if (route.projectName === projectName) continue;
         for (const claimedDomain of route.domains) {
           if (requestedDomains.includes(claimedDomain)) {
             const conflictErr = `Domain '${claimedDomain}' is already owned by project '${route.projectName}' (in ${file}).`;
-            if (isJson) {
-              console.log(
-                JSON.stringify({
-                  error: "Domain collision",
-                  domain: claimedDomain,
-                  ownerProject: route.projectName,
-                  ownerFile: file,
-                })
-              );
-            } else {
+            if (isJson) console.log(JSON.stringify({ error: "Domain collision", domain: claimedDomain, ownerProject: route.projectName, ownerFile: file }));
+            else {
               console.error(`\n❌ Error: ${conflictErr}`);
-              console.error(`   Deploy aborted to prevent route hijacking.`);
+              console.error("   Deploy aborted to prevent route hijacking.");
             }
-            if (!options.noExit) {
-              process.exit(1);
-            }
+            if (!options.noExit) process.exit(1);
             return;
           }
         }
       }
     }
   } catch (err: any) {
-    if (err.code !== "ENOENT") {
-      // ignore
-    }
+    if (err.code !== "ENOENT") {}
   }
 
-  // 3. DNS Pre-flight Validation: Verify domains resolve to server IP before deployment
   if (!skipDnsCheck && requestedDomains.length > 0) {
     const dnsResult = await validateDomains(requestedDomains, {
-      skipDnsCheck,
-      strictDns,
-      serverIp: options.serverIp,
-      json: isJson,
-      noExit: options.noExit,
+      skipDnsCheck, strictDns, serverIp: options.serverIp, json: isJson, noExit: options.noExit,
     });
-
     if (!dnsResult.valid && strictDns) {
-      if (isJson) {
-        console.log(
-          JSON.stringify({
-            error: "Strict DNS validation failed",
-            warnings: dnsResult.warnings,
-            serverIp: dnsResult.serverIp,
-          })
-        );
-      }
-      if (!options.noExit) {
-        process.exit(1);
-      }
+      if (isJson) console.log(JSON.stringify({ error: "Strict DNS validation failed", warnings: dnsResult.warnings, serverIp: dnsResult.serverIp }));
+      if (!options.noExit) process.exit(1);
       return;
     }
   }
 
-  // 4. Cold Start: Start project containers FIRST so they begin spinning up
   if (!options.dryRun && !options.skipUp) {
-    if (!isJson) {
-      console.log(`\n🚀 [1/3] Starting project containers for environment '${env}' with Docker Compose...`);
-    }
-
-    // Sync non-invasive compose manifest if root compose exists
-    await setupProjectCompose(projectRoot, projectName);
-    const composeFile = await findPegasCompose(projectRoot);
-    const composeCmd = composeFile
-      ? `docker compose --project-directory . -f ${composeFile} up -d`
-      : "docker compose up -d";
-
+    if (!isJson) console.log(`\n🚀 [1/3] Starting project containers for environment '${env}'...`);
     const primaryDomain = requestedDomains[0] || "";
     const deployEnv = {
       ...process.env,
-      PEGAS_ENV: env,
-      NODE_ENV: "production",
+      PEGAS_ENV: runtimeEnvironment,
+      NODE_ENV: contract.runtime === "docker" && runtimeEnvironment === "development" ? "development" : "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
-
+    // Q6: host-installed dependencies do not update the Docker dependency volume.
+    if (contract.runtime === "docker" && runtimeEnvironment === "development") {
+      const hostNodeModules = hasHostNodeModules(contract, projectRoot);
+      if (hostNodeModules.length > 0 && !isJson) {
+        console.warn("⚠️  Host node_modules detected at: " + hostNodeModules.join(", ") + ".");
+        console.warn("   It is shadowed by the Docker dependency volume: installing on the host does NOT update the container.");
+      }
+    }
+    let composeFile: string | null = null;
+    let gatewayPrepared = false;
     try {
-      child_process.execSync(composeCmd, {
-        stdio: "inherit",
-        cwd: projectRoot,
-        env: deployEnv,
-      });
-    } catch (err: any) {
-      if (isJson) {
-        console.log(
-          JSON.stringify({
-            error: `Failed to execute '${composeCmd}'`,
-            details: err.message,
-          })
-        );
+      if (contract.runtime === "docker") {
+        // Verify/start the shared edge before mutating the application stack.
+        // A port conflict must fail before any project service is started.
+        const gatewayResult = await ensureGatewayContainer(gatewayDir);
+        if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
+        gatewayPrepared = true;
+        await runRuntimeCompose(contract, projectRoot, runtimeId, [
+          "up", "-d", "--remove-orphans",
+        ], deployEnv);
       } else {
-        console.error(`❌ Error: Failed to execute '${composeCmd}':`, err.message);
+        await setupProjectCompose(projectRoot, projectName);
+        composeFile = await findPegasCompose(projectRoot);
+        const composeCmd = composeFile
+          ? `docker compose --project-directory . -f ${composeFile} up -d`
+          : "docker compose up -d";
+        child_process.execSync(composeCmd, { stdio: "inherit", cwd: projectRoot, env: deployEnv });
       }
-      if (!options.noExit) {
-        process.exit(1);
+    } catch (err: any) {
+      if (gatewayPrepared && contract.runtime === "docker") {
+        // Do not leave an otherwise unused shared Gateway running after a failed first deploy.
+        await stopGatewayIfUnused(gatewayDir).catch(() => {});
       }
+      const message = contract.runtime === "docker" ? "Failed to apply the declarative Docker runtime" : "Failed to execute Docker Compose";
+      if (isJson) console.log(JSON.stringify({ error: message, details: err.message }));
+      else console.error(`❌ Error: ${message}:`, err.message);
+      if (!options.noExit) process.exit(1);
       return;
     }
 
-    // Readiness Probe: verify containers are running and healthy before updating Caddy routes
     if (!skipReadiness) {
       const servicesToCheck: string[] = [];
       for (const [sName, sCfg] of Object.entries(contract.services || {})) {
-        const domains = getEnvironmentDomains(sCfg, env);
-        if (domains.length > 0) {
-          servicesToCheck.push(sName);
-        }
+        if (getEnvironmentDomains(sCfg, runtimeEnvironment).length > 0) servicesToCheck.push(sName);
       }
-
       if (servicesToCheck.length > 0) {
-        if (!isJson) {
-          console.log(`\n⏳ Checking container readiness for: ${servicesToCheck.join(", ")}...`);
-        }
+        if (!isJson) console.log(`\n⏳ Checking container readiness for: ${servicesToCheck.join(", ")}...`);
         for (const sName of servicesToCheck) {
           const checkRes = await waitForContainerReadiness(projectRoot, sName, {
             timeoutMs: options.readinessTimeoutMs,
             gracePeriodMs: options.gracePeriodMs,
             composeFile: composeFile || undefined,
+            projectId: contract.runtime === "docker" ? runtimeId : undefined,
+            environment: runtimeEnvironment,
           });
           if (!checkRes.ready) {
             const errMsg = `Service '${sName}' failed readiness check: ${checkRes.reason}`;
-            if (isJson) {
-              console.log(JSON.stringify({ error: errMsg, service: sName, reason: checkRes.reason }));
-            } else {
+            if (isJson) console.log(JSON.stringify({ error: errMsg, service: sName, reason: checkRes.reason }));
+            else {
               console.error(`\n❌ Error: ${errMsg}`);
-              console.error(`   Deployment aborted before updating Caddy routes.`);
+              console.error("   Deployment aborted before updating Caddy routes.");
             }
-            if (!options.noExit) {
-              process.exit(1);
+            if (contract.runtime === "docker") {
+              await stopGatewayIfUnused(gatewayDir).catch(() => {});
             }
+            if (!options.noExit) process.exit(1);
             return;
           }
-          if (!isJson) {
-            console.log(`  🟢 Service '${sName}' is ready to accept traffic`);
-          }
+          if (!isJson) console.log(`  🟢 Service '${sName}' is ready to accept traffic`);
         }
       }
     }
   }
 
-  // 3. Garbage Collection: Generate ONE combined file per project in conf.d/<projectName>.caddy
   const snippets: string[] = [];
-  const deployedRoutes: {
-    service: string;
-    domain: string;
-    upstream: string;
-  }[] = [];
-
-  const services = contract.services || {};
-  for (const [serviceName, serviceConfig] of Object.entries(services)) {
-    const envDomains = getEnvironmentDomains(serviceConfig, env);
+  const deployedRoutes: { service: string; domain: string; upstream: string }[] = [];
+  for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
+    const envDomains = getEnvironmentDomains(serviceConfig, runtimeEnvironment);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
-
-    if (!Array.isArray(envDomains) || envDomains.length === 0) {
-      continue;
-    }
-
-    const scopedUpstream = resolveScopedUpstream(upstream, projectName);
-
+    if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
+    const scopedUpstream = resolveScopedUpstream(
+      upstream,
+      contract.runtime === "docker" ? `${runtimeId}-${runtimeEnvironment}` : projectName
+    );
     for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
-      if (!normDomain) continue;
-
-      if (normDomain === "yourdomain.com") {
-        if (!isJson) {
-          console.warn(`⚠️  Warning: Service '${serviceName}' has placeholder domain 'yourdomain.com'. Skipping.`);
-        }
-        continue;
-      }
-
-      const snippet = generateCaddyfileSnippet({
-        domain: normDomain,
-        upstream: scopedUpstream,
-      });
-      snippets.push(snippet);
-      deployedRoutes.push({
-        service: serviceName,
-        domain: normDomain,
-        upstream: scopedUpstream,
-      });
+      if (!normDomain || normDomain === "yourdomain.com") continue;
+      snippets.push(generateCaddyfileSnippet({ domain: normDomain, upstream: scopedUpstream }));
+      deployedRoutes.push({ service: serviceName, domain: normDomain, upstream: scopedUpstream });
     }
   }
 
   if (options.dryRun) {
     if (!isJson) {
       console.log(`\n📋 [dry-run] Target project route file: ${projectRouteFile}`);
-      for (const r of deployedRoutes) {
-        console.log(`  - Route: https://${r.domain} -> ${r.upstream}`);
-      }
-      if (snippets.length === 0) {
-        console.log(`  (No ${env} domains to configure)`);
-      }
-    } else {
-      console.log(JSON.stringify({ status: "dry-run", env, project: projectName, file: projectRouteFile, routes: deployedRoutes }));
-    }
+      for (const route of deployedRoutes) console.log(`  - Route: https://${route.domain} -> ${route.upstream}`);
+      if (snippets.length === 0) console.log(`  (No ${env} domains to configure)`);
+    } else console.log(JSON.stringify({ status: "dry-run", env, project: projectName, file: projectRouteFile, routes: deployedRoutes }));
     return;
   }
 
-  // Check if original project file existed for rollback
   let originalContent: string | null = null;
-  try {
-    originalContent = await fs.readFile(projectRouteFile, "utf-8");
-  } catch {}
-
+  try { originalContent = await fs.readFile(projectRouteFile, "utf-8"); } catch {}
   let fileModified = false;
   if (snippets.length > 0) {
     const combinedCaddyfile =
       `# Auto-generated by Pegas for project: ${projectName} [${env}]\n# Do not edit manually; update pegas.json instead.\n\n` +
-      snippets.join("\n\n") +
-      "\n";
-
+      snippets.join("\n\n") + "\n";
     await fs.mkdir(path.dirname(projectRouteFile), { recursive: true });
-    await fs.writeFile(projectRouteFile, combinedCaddyfile, "utf-8");
-    await fs.chmod(projectRouteFile, 0o644).catch(() => {});
+    await writeFileAtomically(projectRouteFile, combinedCaddyfile);
     fileModified = true;
-
     if (!isJson) {
       console.log(`\n📄 [2/3] Generated route config: ${projectRouteFile}`);
-      for (const r of deployedRoutes) {
-        console.log(`  ✓ Route: https://${r.domain} -> ${r.upstream}`);
-      }
+      for (const route of deployedRoutes) console.log(`  ✓ Route: https://${route.domain} -> ${route.upstream}`);
     }
   } else if (originalContent !== null) {
-    // If all routes were removed, delete old project caddyfile
     await fs.unlink(projectRouteFile).catch(() => {});
     fileModified = true;
-    if (!isJson) {
-      console.log(`\n🗑️  [2/3] Removed old project route config: ${projectRouteFile}`);
-    }
-  } else {
-    if (!isJson) {
-      console.log(`\nℹ️  [2/3] No active ${env} domains found in 'pegas.json'.`);
-    }
-  }
+    if (!isJson) console.log(`\n🗑️  [2/3] Removed old project route config: ${projectRouteFile}`);
+  } else if (!isJson) console.log(`\nℹ️  [2/3] No active ${env} domains found in 'pegas.json'.`);
 
-  // 4. Hot reload Caddy gateway
   if (fileModified) {
-    if (!isJson) {
-      console.log("\n🔄 [3/3] Validating and hot-reloading Caddy gateway...");
-    }
-
-    const reloaded = await reloadGateway({
-      gatewayDir,
-      json: options.json,
-      silent: isJson,
-      exitOnError: false,
-    });
-
+    if (!isJson) console.log("\n🔄 [3/3] Validating and hot-reloading Caddy gateway...");
+    const reloaded = await reloadGateway({ gatewayDir, json: options.json, silent: isJson, exitOnError: false });
     if (!reloaded) {
-      if (!isJson) {
-        console.error("⚠️  Hot reload failed. Rolling back route configuration...");
-      }
-      if (originalContent !== null) {
-        await fs.writeFile(projectRouteFile, originalContent, "utf-8");
-      } else {
-        await fs.unlink(projectRouteFile).catch(() => {});
-      }
-      if (!options.noExit) {
-        process.exit(1);
-      }
+      if (!isJson) console.error("⚠️  Hot reload failed. Rolling back route configuration...");
+      if (originalContent !== null) await writeFileAtomically(projectRouteFile, originalContent);
+      else await fs.unlink(projectRouteFile).catch(() => {});
+      if (!options.noExit) process.exit(1);
       return;
     }
   }
 
   if (isJson) {
-    console.log(
-      JSON.stringify({
-        status: "success",
-        env,
-        project: projectName,
-        routeFile: projectRouteFile,
-        routes: deployedRoutes,
-      })
-    );
+    console.log(JSON.stringify({ status: "success", env, project: projectName, routeFile: projectRouteFile, routes: deployedRoutes }));
     return;
   }
-
   console.log(`\n🎉 Project '${projectName}' [${env}] successfully deployed to Pegas gateway!\n`);
+}
+
+
+export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
+  return withRuntimeLock(() => handleDeployUnlocked(options));
 }

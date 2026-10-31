@@ -45,9 +45,42 @@ export interface RouteInfo {
   apiUpstream?: string;
 }
 
+export interface ServiceBuildContract {
+  context: string;
+  dockerfile?: string;
+}
+
+export type ServiceRole = "app" | "infra";
+export type FileWatchMode = "auto" | "events" | "polling";
+
+export interface ServiceHmrContract {
+  fileWatch?: FileWatchMode;
+}
+
 export interface ServiceContract {
   port?: number | string;
   upstream?: string;
+  /** Build an image from a project-relative context. Mutually exclusive with image. */
+  build?: ServiceBuildContract;
+  /** Use a prebuilt image instead of building one. */
+  image?: string;
+  /** Container command; when omitted, the image default is used. */
+  command?: string[];
+  /** Non-secret environment variables. */
+  env?: Record<string, string>;
+  /** Path to a gitignored env file; values are passed to Docker without logging. */
+  envFile?: string;
+  /** Additional named or bind volumes in Docker Compose short syntax. */
+  volumes?: string[];
+  /** Host source path mounted into the app container; defaults to project root. */
+  bindMount?: string;
+  /** Explicitly classify the service instead of relying on stack detection. */
+  role?: ServiceRole;
+  hmr?: ServiceHmrContract;
+  /** Services that must be started before this service. */
+  dependsOn?: string[] | Record<string, { condition?: "service_started" | "service_healthy" | "service_completed_successfully" }>;
+  /** Docker healthcheck configuration. */
+  healthcheck?: { test: string[]; interval?: string; timeout?: string; retries?: number; startPeriod?: string };
   domains: {
     development?: string[];
     stage?: string[];
@@ -108,6 +141,8 @@ export interface DeployConfig {
 
 export interface PegasContract {
   projectName?: string;
+  /** Opt in to the declarative Docker runtime; absent/"host" preserves legacy behavior. */
+  runtime?: "host" | "docker";
   bootInfra?: boolean;
   deploy?: DeployConfig;
   devGateway?: DevGatewayConfig;

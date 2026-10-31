@@ -7,11 +7,23 @@ on:
       - 'v*'
   pull_request:
     branches: [main]
+    types: [opened, ready_for_review, reopened]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a release (otherwise run checks only)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     name: Lint, Test & E2E
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout code
@@ -38,7 +50,7 @@ jobs:
   publish:
     name: Build, Release & Publish
     needs: test
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish == true))
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -68,7 +80,7 @@ jobs:
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
 
-          if [[ "${{ github.ref }}" == refs/tags/v* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "${{ github.ref }}" == refs/tags/v* ]] || [[ "${{ inputs.publish }}" == "true" ]]; then
             echo "Direct release trigger detected."
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             exit 0

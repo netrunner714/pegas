@@ -206,7 +206,8 @@ export async function handleProjectInit(
   }
 
   // 2. Update package.json scripts and devDependencies
-  const pkgActions = await updatePackageJson(cwd, dryRun);
+  const runtime = contractRes.contract?.runtime;
+  const pkgActions = await updatePackageJson(cwd, dryRun, runtime);
   actions.push(...pkgActions);
 
   // 2b. Check current version vs target version
@@ -232,11 +233,14 @@ export async function handleProjectInit(
   }
 
   // 4. Create docs/pegas.md
+  const docsContent = runtime === "docker"
+    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Развернуть development: `pegas deploy development`\n- Подключиться к логам: `pegas dev` (Ctrl+C только отключает логи)\n- Деплой production: `pegas deploy production`\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
+    : DOCS_PEGAS_MD;
   const docsDir = path.join(cwd, "docs");
   const docsPath = path.join(docsDir, "pegas.md");
   if (!dryRun) {
     await fs.mkdir(docsDir, { recursive: true });
-    await fs.writeFile(docsPath, DOCS_PEGAS_MD, "utf-8");
+    await fs.writeFile(docsPath, docsContent, "utf-8");
   }
   actions.push("Сгенерирован docs/pegas.md");
 
@@ -246,22 +250,40 @@ export async function handleProjectInit(
     actions.push(agentsAction);
   }
 
-  // 6. Surgery on docker-compose.yml
-  const composeRes = await setupProjectCompose(cwd, contractRes.slug, dryRun);
-  if (composeRes.created) {
-    actions.push(`Создан ${composeRes.file} с expose и сетью pegas-network`);
-  } else if (composeRes.updated) {
-    actions.push(`Выполнена трансформация портов и подключение pegas-network в ${composeRes.file}`);
+  // 6. Compose is a legacy host-runtime artifact. Docker runtime is generated
+  // directly from pegas.json and must not create or patch project Compose files.
+  if (runtime === "docker") {
+    for (const generatedFile of [
+      ".pegas/docker-compose.yml",
+      ".pegas/docker-compose.yaml",
+      ".pegas/compose.yml",
+      ".pegas/compose.yaml",
+    ]) {
+      try {
+        if (!dryRun) await fs.unlink(path.join(cwd, generatedFile));
+        actions.push(`Удалён устаревший генерируемый ${generatedFile}`);
+      } catch {}
+    }
   } else {
-    actions.push(`${composeRes.file}: порты и сеть pegas-network уже оптимизированы`);
+    const composeRes = await setupProjectCompose(cwd, contractRes.slug, dryRun);
+    if (composeRes.created) {
+      actions.push(`Создан ${composeRes.file} с expose и сетью pegas-network`);
+    } else if (composeRes.updated) {
+      actions.push(`Выполнена трансформация портов и подключение pegas-network в ${composeRes.file}`);
+    } else {
+      actions.push(`${composeRes.file}: порты и сеть pegas-network уже оптимизированы`);
+    }
   }
 
-  // 7. Pre-warm local dev Caddy binary
-  const binaryAction = await setupDevBinary(dryRun);
-  actions.push(binaryAction);
-
-  // 8. Local Root CA hint (trusted green-lock HTTPS); skipped in tests/CI
-  if (!dryRun && !process.env.PEGAS_SKIP_CA_CHECK && process.env.NODE_ENV !== "test") {
+  // 7. Pre-warm local Caddy only for the legacy host runtime.
+  if (runtime !== "docker") {
+    const binaryAction = await setupDevBinary(dryRun);
+    actions.push(binaryAction);
+  } else {
+    actions.push("Docker runtime использует общий контейнерный Caddy Gateway");
+  }
+  // 8. Local Root CA hint is relevant only to the legacy host Caddy runtime.
+  if (runtime !== "docker" && !dryRun && !process.env.PEGAS_SKIP_CA_CHECK && process.env.NODE_ENV !== "test") {
     const caHint = await checkCaStatusHint();
     if (caHint) {
       actions.push(caHint);
@@ -312,7 +334,12 @@ export async function handleProjectInit(
 
   console.log("\nЧто дальше:");
   console.log("  1. Проверьте pegas.json и укажите свои домены.");
-  console.log("  2. Запустите локальную разработку: npm run dev\n");
+  if (runtime === "docker") {
+    console.log("  2. Разверните окружение: pegas deploy development");
+    console.log("  3. Подключитесь к логам: pegas dev (Ctrl+C не останавливает контейнеры)\n");
+  } else {
+    console.log("  2. Запустите локальную разработку: npm run dev\n");
+  }
 }
 
 export async function handleInit(options: InitOptions = {}): Promise<void> {

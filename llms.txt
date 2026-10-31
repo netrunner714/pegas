@@ -1,23 +1,28 @@
 # pegas
 
-> Agent-native zero-config Caddy reverse proxy for Docker multi-app VPS setups.
+> Agent-native declarative environment manager for Docker multi-app VPS setups (Caddy Gateway, containers, routes, domains).
 
 ## Core Concepts
-- Manages single reverse proxy (Caddy 2) listening on :80 and :443.
-- All Docker projects attach to a shared Docker bridge network named `pegas-network`.
-- Never expose 80:80 or 443:443 in application compose files.
-- Each project gets an isolated declarative drop-in configuration in `conf.d/<projectName>.caddy`.
-- Hot-reloads Caddy via API with zero downtime and automatic validation rollback.
+- Declarative environment manager for Docker multi-app setups: `pegas.json` is the single source of truth.
+- `runtime: "docker"` in pegas.json opts into the container runtime; `init` auto-detects it (Dockerfile or compose files present).
+- One shared Docker bridge network `pegas-network`; one shared Caddy Gateway container owning ports 80/443.
+- Never expose 80:80 or 443:443 in application compose files; the Gateway owns host ports and proxies by network aliases.
+- The launch manifest is generated from pegas.json and is ephemeral (passed via stdin); user compose files are not the source of truth.
+- Containers carry Docker labels: `pegas.project`, `pegas.environment`, `pegas.service`, `pegas.manifest-hash`.
+- Service aliases inside the shared network are `<checkout-id>-<environment>-<service>`: several checkouts and environments coexist.
+- Each project gets an isolated declarative route file `conf.d/<projectName>.caddy` (per environment); hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
-- Local dev: trusted HTTPS via `pegas ca install` (one-time), clean URLs on port 443 (`[service].[project].localhost`).
+- Dev containers bind-mount sources and keep dependencies in named volumes; apps run their real dev commands inside containers.
+- `pegas dev` never manages lifecycle: it verifies the environment matches the contract and attaches to logs; Ctrl+C only detaches.
+- Local dev HTTPS: `pegas ca install` (one-time), clean URLs on port 443 (`[service].[project].localhost`).
 
 ## CLI Usage for Agents
-- `npx @netrunner714/pegas init [options]` (--force, --dry-run, --cwd) — Init Pegas in current project.
+- `npx @netrunner714/pegas init [options]` (--force, --dry-run, --cwd) — Create the pegas.json contract (runtime auto-detected from the project), docs and scripts.
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update @netrunner714/pegas to latest version.
-- `npx pegas dev -- <command>` (--cwd) — Start local HTTPS proxy and development environment.
-- `npx pegas dev` (--cwd) — Start local HTTPS proxy and development environment.
-- `npx pegas deploy <env> [options]` (-e, --cwd) — Deploy project containers and configure Caddy routes.
-- `npx pegas down [options]` (--cwd) — Tear down project containers and remove Caddy routes.
+- `npx pegas dev -- <command>` (--cwd) — Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app.
+- `npx pegas dev` (--cwd) — Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app.
+- `npx pegas deploy <env> [options]` (-e, --cwd) — Deploy an environment (development/production): network, shared Gateway, containers, routes.
+- `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas uninstall [options]` (--dry-run, --cwd) — Remove Pegas from the project and clean the package (mirror of init).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
@@ -30,18 +35,28 @@
 - `-h, --help` — Show this help message.
 - `-v, --version` — Show version.
 
-## Example Docker Compose Patch for Any App
-```yaml
-services:
-  app:
-    expose:
-      - "3000"
-    networks:
-      pegas-network:
-        aliases:
-          - <projectName>-app
-
-networks:
-  pegas-network:
-    external: true
+## Example pegas.json (docker runtime)
+```jsonc
+{
+  "projectName": "my-app",
+  "runtime": "docker",
+  "services": {
+    "web": {
+      "role": "app",
+      "port": 3000,
+      "domains": {
+        "development": ["my-app.localhost"],
+        "production": ["my-app.com"]
+      }
+    },
+    "postgres": {
+      "role": "infra",
+      "image": "postgres:18-alpine",
+      "env": { "POSTGRES_USER": "app", "POSTGRES_PASSWORD": "see envFile" },
+      "volumes": ["pgdata:/var/lib/postgresql"]
+    }
+  }
+}
 ```
+Do not patch user compose files or expose host ports: pegas generates the launch manifest,
+attaches services to the shared network and routes domains through the shared Gateway.
