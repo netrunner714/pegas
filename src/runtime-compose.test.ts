@@ -34,6 +34,7 @@ describe("declarative runtime Compose generation", () => {
     });
     const parsed = JSON.parse(result.content);
 
+    expect(parsed.name).toBe("pegas-shop-a1b2c3d4e5f6");
     expect(parsed.services.web.build.context).toBe(path.resolve("/work/apps/shop", "."));
     expect(parsed.services.web.build.dockerfile).toBe("Dockerfile.dev");
     expect(parsed.services.web.command).toEqual(["pnpm", "dev", "--host", "0.0.0.0"]);
