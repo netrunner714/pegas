@@ -38,6 +38,7 @@ describe("pegas down", () => {
         gatewayDir: tmpGateway,
         skipComposeDown: true,
         json: true,
+        noExit: true,
       });
     } finally {
       console.log = origLog;
@@ -74,6 +75,7 @@ describe("pegas down", () => {
         gatewayDir: tmpGateway,
         skipComposeDown: true,
         json: true,
+        noExit: true,
       });
     } finally {
       console.log = origLog;
@@ -112,6 +114,7 @@ describe("pegas down", () => {
         gatewayDir: tmpGateway,
         skipComposeDown: true,
         json: false,
+        noExit: true,
       });
     } finally {
       console.log = origLog;
@@ -147,6 +150,7 @@ describe("pegas down", () => {
         gatewayDir: tmpGateway,
         skipComposeDown: true,
         json: false,
+        noExit: true,
       });
     } finally {
       console.log = origLog;
@@ -187,6 +191,7 @@ describe("pegas down", () => {
         gatewayDir: tmpGateway,
         skipComposeDown: false,
         json: false,
+        noExit: true,
       });
     } finally {
       child_process.execSync = origExecSync;
@@ -251,8 +256,8 @@ describe("pegas down", () => {
     const jsonLog = logs.find((l) => l.includes("docker daemon not running"));
     expect(jsonLog).toBeDefined();
     const parsed = JSON.parse(jsonLog!);
-    expect(parsed.error).toContain("Failed to execute 'docker compose down'");
-    expect(errors.some((e) => e.includes("Failed to execute 'docker compose down'"))).toBe(true);
+    expect(parsed.error).toContain("Failed to execute Docker Compose down");
+    expect(errors.some((e) => e.includes("Failed to execute Docker Compose down"))).toBe(true);
   });
 
   it("aborts when no pegas.json or compose file is found", async () => {
@@ -271,6 +276,6 @@ describe("pegas down", () => {
       await fs.rm(tmpEmpty, { recursive: true, force: true });
     }
 
-    expect(errors.some((e) => e.includes("Contract 'pegas.json' not found"))).toBe(true);
+    expect(errors.some((e) => e.includes("pegas.json not found"))).toBe(true);
   });
 });
