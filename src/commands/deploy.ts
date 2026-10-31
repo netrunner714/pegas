@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId } from "../contract.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId, validatePegasContract } from "../contract.js";
 import { findPegasCompose, setupProjectCompose } from "../compose.js";
 import { PegasContract } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
@@ -190,6 +190,18 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     else {
       console.error(`❌ Error: Failed to parse '${path.basename(contractPath)}': Invalid JSON syntax.`);
       console.error(`   ${err.message}`);
+    }
+    if (!options.noExit) process.exit(1);
+    return;
+  }
+
+  const contractIssues = validatePegasContract(contract);
+  if (contractIssues.length > 0) {
+    const details = contractIssues.map((issue) => `${issue.path}: ${issue.message}`);
+    if (isJson) console.log(JSON.stringify({ error: "Invalid Pegas contract", details }));
+    else {
+      console.error("❌ Invalid Pegas contract:");
+      for (const detail of details) console.error(`  - ${detail}`);
     }
     if (!options.noExit) process.exit(1);
     return;

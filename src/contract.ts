@@ -47,6 +47,28 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     }
 
     const service = rawService as Record<string, unknown>;
+    if (service.domains !== undefined) {
+      if (!service.domains || typeof service.domains !== "object" || Array.isArray(service.domains)) {
+        add(`${base}.domains`, "Expected an object mapping environment names to domain arrays.");
+      } else {
+        for (const [environment, domains] of Object.entries(service.domains as Record<string, unknown>)) {
+          if (!environment.trim() || !Array.isArray(domains) || domains.some((domain) => typeof domain !== "string" || !domain.trim())) {
+            add(`${base}.domains.${environment}`, "Expected an array of non-empty domain strings.");
+          }
+        }
+      }
+    }
+
+    if (service.port !== undefined) {
+      const port = typeof service.port === "string" && String(Number(service.port)) === service.port ? Number(service.port) : service.port;
+      if (!Number.isInteger(port) || Number(port) < 1 || Number(port) > 65535) {
+        add(`${base}.port`, "Expected a TCP port number between 1 and 65535.");
+      }
+    }
+    if (service.upstream !== undefined && (typeof service.upstream !== "string" || !service.upstream.trim())) {
+      add(`${base}.upstream`, "Expected a non-empty upstream target.");
+    }
+
     if (service.build !== undefined && service.image !== undefined) {
       add(base, '"build" and "image" are mutually exclusive.');
     }
