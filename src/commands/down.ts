@@ -118,6 +118,13 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       }
       gatewayNeedsReload = Boolean(runningGateway.stdout.trim());
     }
+    // A gateway directory without a Compose file has no reloadable Caddy: treat it
+    // like a stopped gateway (persisted route removal is enough).
+    const hasComposeFile = await fs.readdir(gatewayDir).then(
+      (files) => files.some((f) => /^(docker-)?compose\.ya?ml$/.test(f)),
+      () => false,
+    );
+    if (!hasComposeFile) gatewayNeedsReload = false;
     // A stopped Gateway has no in-memory routes to refresh. Removing the
     // persisted route file is sufficient and lets down recover after a crash.
     const reloaded = !gatewayNeedsReload || await reloadGateway({
