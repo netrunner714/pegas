@@ -83,16 +83,16 @@ function hashBuildContext(contextDir: string): string {
       const rel = relative ? path.join(relative, entry.name) : entry.name;
       if (isIgnored(rel)) continue;
       const full = path.join(directory, entry.name);
-      hash.update(rel.split(path.sep).join("/")).update("\\0");
+      hash.update(rel.split(path.sep).join("/")).update("\0");
       if (entry.isDirectory()) {
-        hash.update("directory\\0");
+        hash.update("directory\0");
         visit(full, rel);
       } else if (entry.isSymbolicLink()) {
-        hash.update("symlink\\0").update(fs.readlinkSync(full)).update("\\0");
+        hash.update("symlink\0").update(fs.readlinkSync(full)).update("\0");
       } else if (entry.isFile()) {
         const mode = fs.statSync(full).mode & 0o777;
-        hash.update("file\\0").update(String(mode)).update("\\0");
-        hash.update(fs.readFileSync(full)).update("\\0");
+        hash.update("file\0").update(String(mode)).update("\0");
+        hash.update(fs.readFileSync(full)).update("\0");
       }
     }
   };
