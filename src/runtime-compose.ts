@@ -144,7 +144,7 @@ function readText(file: string): string {
 function resolveProjectDirectory(projectRoot: string, relativePath: string, field: string): string {
   const resolved = path.resolve(projectRoot, relativePath);
   const lexicalRelative = path.relative(path.resolve(projectRoot), resolved);
-  if (!lexicalRelative || lexicalRelative.startsWith("..") || path.isAbsolute(lexicalRelative)) {
+  if (lexicalRelative.startsWith("..") || path.isAbsolute(lexicalRelative)) {
     throw new Error(`${field} must resolve to a directory inside the project root.`);
   }
   let realPath: string;
@@ -154,7 +154,7 @@ function resolveProjectDirectory(projectRoot: string, relativePath: string, fiel
     throw new Error(`${field} directory does not exist: ${relativePath}`);
   }
   const realRelative = path.relative(fs.realpathSync(projectRoot), realPath);
-  if (!realRelative || realRelative.startsWith("..") || path.isAbsolute(realRelative) || !fs.statSync(realPath).isDirectory()) {
+  if (realRelative.startsWith("..") || path.isAbsolute(realRelative) || !fs.statSync(realPath).isDirectory()) {
     throw new Error(`${field} must resolve to a directory inside the project root.`);
   }
   return realPath;
@@ -424,7 +424,7 @@ export function createRuntimeCompose(
     const buildContext = service.build
       ? resolveProjectDirectory(options.projectRoot, service.build.context, `services.${serviceName}.build.context`)
       : options.projectRoot;
-    if (service.build?.dockerfile) {
+    if (service.build && fs.existsSync(dockerfilePath)) {
       const realDockerfile = fs.realpathSync(dockerfilePath);
       const relativeDockerfile = path.relative(buildContext, realDockerfile);
       if (!relativeDockerfile || relativeDockerfile.startsWith("..") || path.isAbsolute(relativeDockerfile) || !fs.statSync(realDockerfile).isFile()) {
