@@ -380,7 +380,10 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     const envDomains = getEnvironmentDomains(serviceConfig, env);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
-    const scopedUpstream = resolveScopedUpstream(upstream, contract.runtime === "docker" ? runtimeId : projectName);
+    const scopedUpstream = resolveScopedUpstream(
+      upstream,
+      contract.runtime === "docker" ? `${runtimeId}-${runtimeEnvironment}` : projectName
+    );
     for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
       if (!normDomain || normDomain === "yourdomain.com") continue;

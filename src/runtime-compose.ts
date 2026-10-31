@@ -485,7 +485,7 @@ export function createRuntimeCompose(
       },
       networks: {
         "pegas-network": {
-          aliases: [`${options.projectId}-${serviceName}`],
+          aliases: [`${options.projectId}-${environmentName}-${serviceName}`],
         },
       },
     };
