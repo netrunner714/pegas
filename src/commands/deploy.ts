@@ -9,7 +9,7 @@ import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
-import { ensureGatewayContainer } from "../docker.js";
+import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 
 export interface DeployOptions {
@@ -294,13 +294,17 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
     let composeFile: string | null = null;
+    let gatewayPrepared = false;
     try {
       if (contract.runtime === "docker") {
+        // Verify/start the shared edge before mutating the application stack.
+        // A port conflict must fail before any project service is started.
+        const gatewayResult = await ensureGatewayContainer(gatewayDir);
+        if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
+        gatewayPrepared = true;
         await runRuntimeCompose(contract, projectRoot, runtimeId, [
           "up", "-d", "--remove-orphans",
         ], deployEnv);
-        const gatewayResult = await ensureGatewayContainer(gatewayDir);
-        if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
       } else {
         await setupProjectCompose(projectRoot, projectName);
         composeFile = await findPegasCompose(projectRoot);
@@ -310,6 +314,10 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
         child_process.execSync(composeCmd, { stdio: "inherit", cwd: projectRoot, env: deployEnv });
       }
     } catch (err: any) {
+      if (gatewayPrepared && contract.runtime === "docker") {
+        // Do not leave an otherwise unused shared Gateway running after a failed first deploy.
+        await stopGatewayIfUnused(gatewayDir).catch(() => {});
+      }
       const message = contract.runtime === "docker" ? "Failed to apply the declarative Docker runtime" : "Failed to execute Docker Compose";
       if (isJson) console.log(JSON.stringify({ error: message, details: err.message }));
       else console.error(`❌ Error: ${message}:`, err.message);
