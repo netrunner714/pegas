@@ -555,6 +555,30 @@ export function reconcileContract(
 
 export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", 3000);
 
+/**
+ * Detects the runtime for a NEW contract from the project itself: a project
+ * that already ships Docker artifacts (Dockerfile or a Compose file) is treated
+ * as a Docker project; everything else keeps the legacy host flow. The user
+ * never passes flags for this - pegas reads the project, pegas decides.
+ */
+export async function detectContractRuntime(projectDir: string): Promise<"host" | "docker"> {
+  const dockerMarkers = [
+    "Dockerfile",
+    "Dockerfile.dev",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "compose.yml",
+    "compose.yaml",
+  ];
+  for (const marker of dockerMarkers) {
+    try {
+      await fs.access(path.join(projectDir, marker));
+      return "docker";
+    } catch {}
+  }
+  return "host";
+}
+
 export async function setupProjectContract(
   projectDir: string,
   dryRun = false,
@@ -576,7 +600,11 @@ export async function setupProjectContract(
   const detected = await detectComposeWebService(projectDir);
   const serviceName = detected?.name || "web";
   const port = detected?.port || "3000";
+  const runtime = await detectContractRuntime(projectDir);
   const defaultContract = createDefaultContract(slug, serviceName, port);
+  if (runtime === "docker") {
+    defaultContract.runtime = "docker";
+  }
 
   let existingContent: string | null = null;
   try {
