@@ -23,7 +23,7 @@ export async function runRuntimeCompose(
     }
   }
 
-  const args = ["compose", "--project-directory", projectRoot, "-f", "-", ...composeArgs];
+  const args = ["compose", "--project-name", projectId, "--project-directory", projectRoot, "-f", "-", ...composeArgs];
   try {
     child_process.execFileSync("docker", args, {
       cwd: projectRoot,
