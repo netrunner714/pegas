@@ -2,11 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import * as child_process from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { findProjectRoot } from "../gateway.js";
+import { findProjectRoot, findGatewayDir } from "../gateway.js";
 import { CONTRACT_FILENAME, getEnvironmentDomains, getServicePort, getProjectRuntimeId } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { createRuntimeCompose } from "../runtime-compose.js";
 import { runRuntimeCompose } from "../runtime.js";
+import { ensureGatewayContainer, runCommand } from "../docker.js";
+import { withRuntimeLock } from "../runtime-lock.js";
 import { findOrDownloadCaddy } from "../binary.js";
 import { findAvailablePort, isPortAvailable } from "../ports.js";
 import { findRootCompose, detectInfraServices } from "../compose.js";
@@ -170,17 +172,19 @@ async function handleDockerRuntimeDev(
     return;
   }
 
-  let gatewayId = "";
   try {
-    gatewayId = child_process.execFileSync("docker", [
-      "ps", "-q", "--filter", "label=pegas.gateway=true",
-    ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  } catch {}
-  if (!gatewayId) {
-    fail("❌ Shared Pegas Gateway is not running. Run 'pegas deploy development' to reconcile the environment.");
+    await withRuntimeLock(async () => {
+      const runningGateway = await runCommand("docker", ["ps", "-q", "--filter", "label=pegas.gateway=true"]);
+      if (!runningGateway.success) throw new Error(runningGateway.stderr || "Could not inspect the shared Pegas Gateway.");
+      if (!runningGateway.stdout.trim()) {
+        const gatewayResult = await ensureGatewayContainer(await findGatewayDir());
+        if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to recover the shared Pegas Gateway.");
+      }
+    });
+  } catch (error: any) {
+    fail(`❌ Shared Pegas Gateway could not be started: ${error.message}`);
     return;
   }
-
   const urls = Object.values(contract.services)
     .flatMap((service) => getEnvironmentDomains(service, "development"))
     .map((domain) => `https://${domain}`);
