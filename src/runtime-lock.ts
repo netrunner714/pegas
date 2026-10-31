@@ -172,16 +172,18 @@ export async function withRuntimeLock<T>(
 
   let acquired = false;
   while (!acquired) {
+    // Publish a fully initialized lock directory atomically. A crash between
+    // mkdir and owner.json creation must not leave an ownerless global lock.
+    const candidateDir = `${lockDir}.candidate-${token}`;
     try {
-      await fs.mkdir(lockDir, { mode: 0o700 });
+      await fs.mkdir(candidateDir, { mode: 0o700 });
+      await writeOwner(candidateDir, owner);
+      await fs.rename(candidateDir, lockDir);
       acquired = true;
-      await writeOwner(lockDir, owner);
     } catch (error: any) {
-      if (acquired) {
-        await fs.rm(lockDir, { recursive: true, force: true }).catch(() => {});
-        throw error;
-      }
-      if (error?.code !== "EEXIST") throw error;
+      await fs.rm(candidateDir, { recursive: true, force: true }).catch(() => {});
+      if (error?.code !== "EEXIST" && error?.code !== "ENOTEMPTY" && error?.code !== "EPERM") throw error;
+      if (acquired) throw error;
 
       const existingOwner = await readOwner(lockDir);
       if (existingOwner) {
