@@ -179,6 +179,10 @@ async function handleDockerRuntimeDev(
       if (!runningGateway.stdout.trim()) {
         const gatewayResult = await ensureGatewayContainer(await findGatewayDir());
         if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to recover the shared Pegas Gateway.");
+        const recoveredGateway = await runCommand("docker", ["ps", "-q", "--filter", "label=pegas.gateway=true"]);
+        if (!recoveredGateway.success || !recoveredGateway.stdout.trim()) {
+          throw new Error(recoveredGateway.stderr || "Shared Pegas Gateway did not remain running after recovery.");
+        }
       }
     });
   } catch (error: any) {
