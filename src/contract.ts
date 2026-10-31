@@ -593,7 +593,8 @@ export async function setupProjectContract(
 
 export async function updatePackageJson(
   projectDir: string,
-  dryRun = false
+  dryRun = false,
+  runtime?: "host" | "docker"
 ): Promise<string[]> {
   const actions: string[] = [];
   const pkgPath = path.join(projectDir, "package.json");
@@ -606,18 +607,26 @@ export async function updatePackageJson(
       pkg.scripts = {};
     }
 
-    // 1. Update dev script with pegas wrapper
-    if (pkg.scripts.dev) {
+    // Host runtime wraps the user command. Docker runtime keeps the real app command
+    // untouched because it is executed inside the service container.
+    if (runtime === "docker") {
+      if (typeof pkg.scripts.dev === "string" && pkg.scripts.dev.startsWith("pegas dev -- ")) {
+        pkg.scripts.dev = pkg.scripts.dev.replace(/^pegas dev --\s*/, "");
+        actions.push("Восстановлен исходный dev-скрипт для запуска внутри Docker");
+      } else if (pkg.scripts.dev === "pegas dev") {
+        delete pkg.scripts.dev;
+        actions.push("Удалён host-wrapper dev-скрипта; Docker runtime использует command из pegas.json или package.json");
+      }
+    } else if (pkg.scripts.dev) {
       if (!pkg.scripts.dev.includes("pegas dev")) {
         const cleanDev = pkg.scripts.dev.replace(/^pegas up --env development --\s*/, "");
-        pkg.scripts.dev = `pegas dev -- ${cleanDev}`;
+        pkg.scripts.dev = "pegas dev -- " + cleanDev;
         actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas dev --'");
       }
     } else {
       pkg.scripts.dev = "pegas dev";
       actions.push("Добавлен скрипт 'dev': 'pegas dev' в package.json");
     }
-
     // 2. Add deploy script
     if (!pkg.scripts.deploy || !pkg.scripts.deploy.includes("pegas deploy")) {
       pkg.scripts.deploy = "pegas deploy production";
