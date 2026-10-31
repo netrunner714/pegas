@@ -285,7 +285,8 @@ ${bold("EXAMPLES:")}
       try {
         const updatedPkg = JSON.parse(await fs.readFile(path.join(sandboxDir, "package.json"), "utf-8"));
         const hasDevDep = !!(updatedPkg.devDependencies?.["@netrunner714/pegas"] || updatedPkg.devDependencies?.pegas);
-        const hasDeployScript = updatedPkg.scripts?.deploy === "pegas deploy";
+        const hasDeployScript =
+          typeof updatedPkg.scripts?.deploy === "string" && updatedPkg.scripts.deploy.startsWith("pegas deploy");
         const hasDevWrapped = typeof updatedPkg.scripts?.dev === "string" && updatedPkg.scripts?.dev.startsWith("pegas dev");
 
         if (hasDevDep && hasDeployScript && hasDevWrapped) {
@@ -379,6 +380,9 @@ ${bold("EXAMPLES:")}
     // Write full log file to project .cache/reports/
     await fs.writeFile(logFilePath, logEntries.join("\n"), "utf-8");
     log(`\n📄 Full diagnostic log saved to:\n   ${cyan(logFilePath)}\n`);
+    if (!allChecksPassed) {
+      process.exitCode = 1;
+    }
 
   } finally {
     if (keepSandbox) {

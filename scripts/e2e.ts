@@ -145,6 +145,21 @@ async function ensureDockerImage(imageName: string, tarFilename: string) {
   } catch {}
 }
 
+async function setDockerServiceImages(projectDir: string, image: string) {
+  const contractPath = path.join(projectDir, "pegas.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf-8")) as {
+    runtime?: string;
+    services?: Record<string, { image?: string; build?: unknown }>;
+  };
+  contract.runtime = "docker";
+  for (const service of Object.values(contract.services || {})) {
+    if (!service.image && !service.build) {
+      service.image = image;
+    }
+  }
+  await fs.writeFile(contractPath, JSON.stringify(contract, null, 2));
+}
+
 async function runUnifiedE2E() {
   const startTime = Date.now();
   console.log(bold("================================================================================"));
@@ -200,6 +215,10 @@ async function runUnifiedE2E() {
         null,
         2
       )
+    );
+    await fs.writeFile(
+      path.join(surgeryDir, "pegas.json"),
+      JSON.stringify({ runtime: "host", services: {} }, null, 2)
     );
 
     const rawCompose = `services:
@@ -363,6 +382,7 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8081:80"\n    environment:\n      - WHOAMI_NAME=project-alpha\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pAlphaDir });
+    await setDockerServiceImages(pAlphaDir, "traefik/whoami");
     const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pAlphaDir,
     });
@@ -381,6 +401,7 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8082:80"\n    environment:\n      - WHOAMI_NAME=project-beta\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pBetaDir });
+    await setDockerServiceImages(pBetaDir, "traefik/whoami");
     const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pBetaDir,
     });
@@ -464,12 +485,15 @@ networks:
     // Update contract for dual services
     const multiContract = {
       projectName: "project-multi",
+      runtime: "docker",
       services: {
         web: {
+          image: "traefik/whoami",
           upstream: "web:80",
           domains: { prod: ["multi-app.com"] },
         },
         api: {
+          image: "traefik/whoami",
           upstream: "api:80",
           domains: { prod: ["api-multi-app.com"] },
         },
@@ -517,8 +541,10 @@ networks:
     // Intentionally claim Project Alpha's domain
     const hijackContract = {
       projectName: "project-hijack",
+      runtime: "docker",
       services: {
         web: {
+          image: "traefik/whoami",
           upstream: "web:80",
           domains: { prod: ["project-alpha.com"] }, // VIOLATION: owned by Alpha
         },
@@ -569,8 +595,16 @@ networks:
 
     const brokenContract = {
       projectName: "project-broken",
+      runtime: "docker",
       services: {
         web: {
+          image: "caddy:2-alpine",
+          healthcheck: {
+            test: ["CMD-SHELL", "exit 1"],
+            interval: "1s",
+            timeout: "1s",
+            retries: 1,
+          },
           upstream: "web:80",
           domains: { prod: ["broken-site.com"] },
         },
