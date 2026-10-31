@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { validatePegasContract } from "./contract.js";
@@ -28,9 +29,184 @@ function hashValue(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
 }
 
-function isAppService(service: ServiceContract): boolean {
+const INFRA_IMAGES: Record<string, string> = {
+  postgres: "postgres:17",
+  postgresql: "postgres:17",
+  redis: "redis:8-alpine",
+  mongo: "mongo:8",
+  mongodb: "mongo:8",
+  mysql: "mysql:9",
+  mariadb: "mariadb:11",
+  rabbitmq: "rabbitmq:4-management",
+  memcached: "memcached:1.6-alpine",
+};
+
+interface AppDefaults {
+  image: string;
+  command: string[];
+  dependencyTarget: string;
+  lockHash: string;
+  runtimeVersion: string;
+  packageManager: string;
+  packageManagerVersion: string;
+}
+
+function readJson(file: string): Record<string, any> {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function readText(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function firstVersion(value: string, fallback: string): string {
+  const match = value.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  return match ? [match[1], match[2], match[3]].filter(Boolean).join(".") : fallback;
+}
+
+function shellQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+function resolveAppDefaults(
+  serviceName: string,
+  service: ServiceContract,
+  projectRoot: string
+): AppDefaults {
+  const sourceDir = path.resolve(projectRoot, service.bindMount || service.build?.context || ".");
+  const pkg = readJson(path.join(sourceDir, "package.json"));
+  const packageManagerField = typeof pkg.packageManager === "string" ? pkg.packageManager : "";
+  const hasBunLock = ["bun.lock", "bun.lockb"].some((file) => fs.existsSync(path.join(sourceDir, file)));
+  const hasPnpmLock = fs.existsSync(path.join(sourceDir, "pnpm-lock.yaml"));
+  const hasYarnLock = fs.existsSync(path.join(sourceDir, "yarn.lock"));
+  const hasNpmLock = fs.existsSync(path.join(sourceDir, "package-lock.json"));
+  const pythonProject =
+    fs.existsSync(path.join(sourceDir, "pyproject.toml")) ||
+    fs.existsSync(path.join(sourceDir, "requirements.txt"));
+
+  let stack: "node" | "bun" | "python";
+  let runtimeVersion: string;
+  let packageManager: string;
+  let packageManagerVersion: string;
+  let image: string;
+  let dependencyTarget: string;
+  let installCommand: string;
+  let defaultCommand: string[];
+
+  if (pkg.name || fs.existsSync(path.join(sourceDir, "package.json"))) {
+    stack = packageManagerField.startsWith("bun@") || hasBunLock ? "bun" : "node";
+    if (stack === "bun") {
+      runtimeVersion = firstVersion(
+        packageManagerField.startsWith("bun@") ? packageManagerField : readText(path.join(sourceDir, ".bun-version")),
+        "1"
+      );
+      packageManager = "bun";
+      packageManagerVersion = packageManagerField || `bun@${runtimeVersion}`;
+      image = `oven/bun:${runtimeVersion}`;
+      installCommand = hasBunLock ? "bun install --frozen-lockfile" : "bun install";
+    } else {
+      const engines = typeof pkg.engines?.node === "string" ? pkg.engines.node : "";
+      runtimeVersion = firstVersion(readText(path.join(sourceDir, ".nvmrc")) || engines, "24");
+      if (packageManagerField.startsWith("pnpm@") || hasPnpmLock) packageManager = "pnpm";
+      else if (packageManagerField.startsWith("yarn@") || hasYarnLock) packageManager = "yarn";
+      else packageManager = "npm";
+      packageManagerVersion = packageManagerField || `${packageManager}-bundled`;
+      image = `node:${runtimeVersion}-bookworm`;
+      installCommand = packageManager === "pnpm"
+        ? "corepack enable && pnpm install --frozen-lockfile"
+        : packageManager === "yarn"
+          ? "corepack enable && yarn install --immutable"
+          : hasNpmLock ? "npm ci" : "npm install";
+    }
+    dependencyTarget = "/workspace/node_modules";
+    const scripts = pkg.scripts || {};
+    defaultCommand = service.command || (
+      scripts.dev ? [packageManager, "run", "dev"] :
+      scripts.start ? [packageManager, "run", "start"] : []
+    );
+    if (defaultCommand.length === 0) {
+      throw new Error(`Service "${serviceName}" was detected as ${stack}, but package.json has no "dev" or "start" script. Set services.${serviceName}.command explicitly.`);
+    }
+  } else if (pythonProject) {
+    stack = "python";
+    runtimeVersion = firstVersion(
+      readText(path.join(sourceDir, ".python-version")) ||
+      (typeof pkg.requiresPython === "string" ? pkg.requiresPython : ""),
+      "3.13"
+    );
+    packageManager = fs.existsSync(path.join(sourceDir, "uv.lock")) ? "uv" : "pip";
+    packageManagerVersion = packageManager === "uv" ? "uv-lock" : "pip";
+    image = `python:${runtimeVersion}-slim`;
+    dependencyTarget = "/workspace/.venv";
+    installCommand = packageManager === "uv"
+      ? "pip install uv && uv sync --frozen"
+      : "python -m venv /workspace/.venv && . /workspace/.venv/bin/activate && " +
+        (fs.existsSync(path.join(sourceDir, "requirements.txt"))
+          ? "pip install -r requirements.txt"
+          : "pip install -e .");
+    defaultCommand = service.command || [];
+    if (defaultCommand.length === 0) {
+      throw new Error(`Python service "${serviceName}" needs an explicit services.${serviceName}.command in pegas.json.`);
+    }
+  } else {
+    throw new Error(
+      `Cannot detect the stack for app service "${serviceName}". Add a package.json, pyproject.toml or requirements.txt, or specify image/build in pegas.json.`
+    );
+  }
+
+  const lockFiles = [
+    "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+    "uv.lock", "poetry.lock", "requirements.txt", "pyproject.toml",
+  ];
+  const lockContent = lockFiles
+    .map((file) => {
+      const fullPath = path.join(sourceDir, file);
+      return fs.existsSync(fullPath) ? `${file}\0${fs.readFileSync(fullPath)}` : "";
+    })
+    .filter(Boolean)
+    .join("\0");
+  const lockHash = createHash("sha256")
+    .update([lockContent, packageManager, packageManagerVersion, runtimeVersion].join("\0"))
+    .digest("hex");
+
+  const marker = `${dependencyTarget}/.pegas-deps-hash`;
+  const wrapper = [
+    `mkdir -p ${shellQuote(dependencyTarget)}`,
+    `if [ ! -f ${shellQuote(marker)} ] || [ "$(cat ${shellQuote(marker)})" != ${shellQuote(lockHash)} ]; then`,
+    `  ${installCommand}`,
+    `  printf %s ${shellQuote(lockHash)} > ${shellQuote(marker)}`,
+    "fi",
+    `exec ${defaultCommand.map(shellQuote).join(" ")}`,
+  ].join("\n");
+
+  return {
+    image,
+    command: ["sh", "-lc", wrapper],
+    dependencyTarget,
+    lockHash,
+    runtimeVersion,
+    packageManager,
+    packageManagerVersion,
+  };
+}
+
+function isInfraService(serviceName: string, service: ServiceContract): boolean {
+  if (service.role) return service.role === "infra";
+  return Boolean(INFRA_IMAGES[serviceName.toLowerCase()]);
+}
+
+function isAppService(serviceName: string, service: ServiceContract): boolean {
   if (service.role) return service.role === "app";
-  return Boolean(service.build || service.command);
+  if (INFRA_IMAGES[serviceName.toLowerCase()]) return false;
+  return Boolean(service.build || service.command || service.port || service.domains?.development?.length || service.domains?.dev?.length);
 }
 
 function getVolumeTarget(spec: string): string | undefined {
@@ -65,14 +241,46 @@ export function createRuntimeCompose(
   const serviceHashes: Record<string, string> = {};
 
   for (const [serviceName, service] of Object.entries(contract.services)) {
-    const app = isAppService(service);
+    const app = isAppService(serviceName, service);
+    const infra = isInfraService(serviceName, service);
+    let appDefaults: AppDefaults | undefined;
+    let effectiveImage = service.image;
     if (!service.build && !service.image) {
-      throw new Error(
-        `Service "${serviceName}" has no build or image. Stack-based default images are not available in this runtime stage.`
-      );
+      if (infra) {
+        effectiveImage = INFRA_IMAGES[serviceName.toLowerCase()];
+        if (!effectiveImage) {
+          throw new Error(`Infrastructure service "${serviceName}" needs an explicit image in pegas.json; no built-in profile exists for this service.`);
+        }
+      } else if (app) {
+        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot);
+        effectiveImage = appDefaults.image;
+      } else {
+        throw new Error(`Service "${serviceName}" needs an image, build configuration, or a recognized app/infra profile.`);
+      }
     }
 
-    const serviceHash = hashValue(service);
+    const dockerfilePath = service.build?.dockerfile
+      ? path.resolve(options.projectRoot, service.build.context, service.build.dockerfile)
+      : service.build
+        ? path.resolve(options.projectRoot, service.build.context, "Dockerfile")
+        : "";
+    const dockerfileHash = dockerfilePath && fs.existsSync(dockerfilePath)
+      ? createHash("sha256").update(fs.readFileSync(dockerfilePath)).digest("hex")
+      : "";
+    const watchMode = service.hmr?.fileWatch || (process.platform === "linux" ? "events" : "polling");
+    const serviceHash = hashValue({
+      service,
+      effectiveImage,
+      dockerfileHash,
+      watchMode,
+      defaults: appDefaults ? {
+        image: appDefaults.image,
+        runtimeVersion: appDefaults.runtimeVersion,
+        packageManager: appDefaults.packageManager,
+        packageManagerVersion: appDefaults.packageManagerVersion,
+        lockHash: appDefaults.lockHash,
+      } : undefined,
+    });
     serviceHashes[serviceName] = serviceHash;
 
     const generated: Record<string, unknown> = {
@@ -83,6 +291,17 @@ export function createRuntimeCompose(
         "pegas.service": serviceName,
         "pegas.manifest-hash": serviceHash,
         "pegas.role": service.role || (app ? "app" : "infra"),
+        ...(appDefaults ? { "pegas.dependencies-hash": appDefaults.lockHash } : {}),
+        ...(service.envFile ? {
+          "pegas.env-hash": createHash("sha256")
+            .update(fs.readFileSync(path.resolve(options.projectRoot, service.envFile)))
+            .digest("hex"),
+        } : {}),
+        ...(service.envFile ? {
+          "pegas.env-hash": createHash("sha256")
+            .update(fs.readFileSync(path.resolve(options.projectRoot, service.envFile)))
+            .digest("hex"),
+        } : {}),
       },
       networks: {
         "pegas-network": {
@@ -96,19 +315,32 @@ export function createRuntimeCompose(
         context: path.resolve(options.projectRoot, service.build.context),
         ...(service.build.dockerfile ? { dockerfile: service.build.dockerfile } : {}),
       };
+      generated.image = `pegas/${options.projectId}/${serviceName}:${serviceHash.slice(0, 12)}`;
+    } else if (effectiveImage) {
+      generated.image = effectiveImage;
     }
-    if (service.image) generated.image = service.image;
-    if (service.command) generated.command = service.command;
+    if (appDefaults) generated.command = appDefaults.command;
+    else if (service.command) generated.command = service.command;
     const environment: Record<string, string> = { ...(service.env || {}) };
-    if (service.hmr?.fileWatch === "polling") {
+    if (watchMode === "polling") {
       environment.CHOKIDAR_USEPOLLING ??= "true";
       environment.WATCHPACK_POLLING ??= "true";
-    } else if (service.hmr?.fileWatch === "events") {
+    } else if (watchMode === "events") {
       environment.CHOKIDAR_USEPOLLING ??= "false";
       environment.WATCHPACK_POLLING ??= "false";
     }
     if (Object.keys(environment).length > 0) generated.environment = environment;
     if (service.envFile) generated.env_file = [path.resolve(options.projectRoot, service.envFile)];
+    if (service.dependsOn) generated.depends_on = service.dependsOn;
+    if (service.healthcheck) {
+      generated.healthcheck = {
+        test: service.healthcheck.test,
+        ...(service.healthcheck.interval ? { interval: service.healthcheck.interval } : {}),
+        ...(service.healthcheck.timeout ? { timeout: service.healthcheck.timeout } : {}),
+        ...(service.healthcheck.retries ? { retries: service.healthcheck.retries } : {}),
+        ...(service.healthcheck.startPeriod ? { start_period: service.healthcheck.startPeriod } : {}),
+      };
+    }
     if (service.port !== undefined) generated.expose = [String(service.port)];
 
     const volumes = [...(service.volumes || [])];
@@ -117,9 +349,10 @@ export function createRuntimeCompose(
       volumes.unshift(`${source}:/workspace`);
       generated.working_dir = "/workspace";
 
-      if (!volumes.some((volume) => getVolumeTarget(volume) === "/workspace/node_modules")) {
-        const volumeName = `pegas-${options.projectId}-${serviceName}-node-modules`;
-        volumes.push(`${volumeName}:/workspace/node_modules`);
+      const dependencyTarget = appDefaults?.dependencyTarget || "/workspace/node_modules";
+      if (!volumes.some((volume) => getVolumeTarget(volume) === dependencyTarget)) {
+        const volumeName = `pegas-${options.projectId}-${serviceName}-dependencies`;
+        volumes.push(`${volumeName}:${dependencyTarget}`);
         namedVolumes.add(volumeName);
       }
     }
