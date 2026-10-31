@@ -3,13 +3,14 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId, validatePegasContract } from "../contract.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId, validatePegasContract, normalizeEnvironment } from "../contract.js";
 import { findPegasCompose, setupProjectCompose } from "../compose.js";
 import { PegasContract } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
+import { hasHostNodeModules } from "../runtime-compose.js";
 import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 
@@ -170,7 +171,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const env = options.env;
-  const runtimeEnvironment = env === "dev" ? "development" : env === "prod" ? "production" : env;
+  const runtimeEnvironment = normalizeEnvironment(env);
 
   if (!env) {
     if (isJson) console.log(JSON.stringify({ error: "Environment contour is required for deploy (e.g. 'production' or 'stage')." }));
@@ -234,7 +235,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
 
   const requestedDomains: string[] = [];
   for (const [, serviceConfig] of Object.entries(contract.services || {})) {
-    for (const d of getEnvironmentDomains(serviceConfig, env)) {
+    for (const d of getEnvironmentDomains(serviceConfig, runtimeEnvironment)) {
       const norm = normalizeDomain(d);
       if (norm && norm !== "yourdomain.com") {
         if (!requestedDomains.includes(norm)) requestedDomains.push(norm);
@@ -260,8 +261,40 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     return;
   }
 
-  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, env);
+  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, runtimeEnvironment);
   const currentProjectFileName = path.basename(projectRouteFile);
+
+  // Canonical name of this project's own route files (for any environment).
+  const ownRouteFilePrefix = `${projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
+
+  // Remove stale route files left by alias environment names of this project
+  // (e.g. `project-dev.caddy` after `pegas deploy development` writes `project-development.caddy`).
+  // They are superseded by the canonical file written below.
+  const aliasEnvironmentRouteFiles: string[] = [];
+  try {
+    const existingFiles = await fs.readdir(confDir);
+    for (const file of existingFiles) {
+      if (!file.endsWith(".caddy") || file === currentProjectFileName) continue;
+      if (!file.startsWith(`${ownRouteFilePrefix}-`) || !file.endsWith(".caddy")) continue;
+      if (file.startsWith(`${ownRouteFilePrefix}-${runtimeEnvironment}`)) continue;
+      const otherContent = await fs.readFile(path.join(confDir, file), "utf-8");
+      const otherRoutes = parseCaddyProjectFile(otherContent, file);
+      // The project comment carries the authoritative project name.
+      const isOwn = otherRoutes.every((route) => route.projectName === projectName) && otherRoutes.length > 0;
+      if (!isOwn) continue;
+      // Only clean files whose upstreams point at this checkout's scoped aliases.
+      const checkoutPrefix = `${runtimeId}-`;
+      const ownUpstreams = otherRoutes.every((route) => route.upstream.startsWith(checkoutPrefix));
+      if (!ownUpstreams) continue;
+      await fs.unlink(path.join(confDir, file)).catch(() => {});
+      aliasEnvironmentRouteFiles.push(path.join(confDir, file));
+    }
+  } catch (err: any) {
+    if (err.code !== "ENOENT") {}
+  }
+  if (aliasEnvironmentRouteFiles.length > 0 && !isJson) {
+    console.log(`\n🧹 Removed superseded route file(s) of this project (other environments):\n${aliasEnvironmentRouteFiles.map((f) => `   - ${f}`).join("\n")}`);
+  }
 
   try {
     const existingFiles = await fs.readdir(confDir);
@@ -270,6 +303,8 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       const otherContent = await fs.readFile(path.join(confDir, file), "utf-8");
       const otherRoutes = parseCaddyProjectFile(otherContent, file);
       for (const route of otherRoutes) {
+        // Never treat this project's own (other-environment) routes as conflicts.
+        if (route.projectName === projectName) continue;
         for (const claimedDomain of route.domains) {
           if (requestedDomains.includes(claimedDomain)) {
             const conflictErr = `Domain '${claimedDomain}' is already owned by project '${route.projectName}' (in ${file}).`;
@@ -308,6 +343,14 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       NODE_ENV: contract.runtime === "docker" && runtimeEnvironment === "development" ? "development" : "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
+    // Q6: host-installed dependencies do not update the Docker dependency volume.
+    if (contract.runtime === "docker" && runtimeEnvironment === "development") {
+      const hostNodeModules = hasHostNodeModules(contract, projectRoot);
+      if (hostNodeModules.length > 0 && !isJson) {
+        console.warn("⚠️  Host node_modules detected at: " + hostNodeModules.join(", ") + ".");
+        console.warn("   It is shadowed by the Docker dependency volume: installing on the host does NOT update the container.");
+      }
+    }
     let composeFile: string | null = null;
     let gatewayPrepared = false;
     try {
@@ -343,7 +386,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     if (!skipReadiness) {
       const servicesToCheck: string[] = [];
       for (const [sName, sCfg] of Object.entries(contract.services || {})) {
-        if (getEnvironmentDomains(sCfg, env).length > 0) servicesToCheck.push(sName);
+        if (getEnvironmentDomains(sCfg, runtimeEnvironment).length > 0) servicesToCheck.push(sName);
       }
       if (servicesToCheck.length > 0) {
         if (!isJson) console.log(`\n⏳ Checking container readiness for: ${servicesToCheck.join(", ")}...`);
@@ -377,7 +420,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   const snippets: string[] = [];
   const deployedRoutes: { service: string; domain: string; upstream: string }[] = [];
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
-    const envDomains = getEnvironmentDomains(serviceConfig, env);
+    const envDomains = getEnvironmentDomains(serviceConfig, runtimeEnvironment);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
     const scopedUpstream = resolveScopedUpstream(
