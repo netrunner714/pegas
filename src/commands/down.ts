@@ -6,7 +6,7 @@ import { CONTRACT_FILENAME } from "../contract.js";
 import { findPegasCompose } from "../compose.js";
 import { getProjectRuntimeId } from "../contract.js";
 import { removeProjectContainers } from "../runtime.js";
-import { stopGatewayIfUnused } from "../docker.js";
+import { runCommand, stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 
@@ -86,7 +86,17 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
     if (!isJson) {
       console.log("🔄 Reloading Caddy gateway...");
     }
-    const reloaded = await reloadGateway({
+    let gatewayNeedsReload = true;
+    if (contract?.runtime === "docker") {
+      const runningGateway = await runCommand("docker", ["ps", "-q", "--filter", "label=pegas.gateway=true"]);
+      if (!runningGateway.success) {
+        throw new Error(runningGateway.stderr || "Could not inspect the shared Gateway before removing routes.");
+      }
+      gatewayNeedsReload = Boolean(runningGateway.stdout.trim());
+    }
+    // A stopped Gateway has no in-memory routes to refresh. Removing the
+    // persisted route file is sufficient and lets down recover after a crash.
+    const reloaded = !gatewayNeedsReload || await reloadGateway({
       gatewayDir,
       json: options.json,
       silent: isJson,
