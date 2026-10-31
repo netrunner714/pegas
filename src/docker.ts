@@ -39,12 +39,22 @@ export async function checkDockerCompose(): Promise<boolean> {
 }
 
 export async function ensureDockerNetwork(networkName = "pegas-network"): Promise<boolean> {
-  const inspect = await runCommand("docker", ["network", "inspect", networkName]);
-  if (inspect.success) {
-    return true;
-  }
-  const create = await runCommand("docker", ["network", "create", networkName]);
-  return create.success;
+  const inspectNetwork = async (): Promise<boolean> => {
+    const inspect = await runCommand("docker", ["network", "inspect", networkName]);
+    if (!inspect.success) return false;
+    try {
+      const networks = JSON.parse(inspect.stdout);
+      return Array.isArray(networks) && networks.length > 0 && networks[0].Driver === "bridge" && !networks[0].Internal;
+    } catch {
+      return false;
+    }
+  };
+
+  if (await inspectNetwork()) return true;
+  const create = await runCommand("docker", ["network", "create", "--driver", "bridge", "--label", "pegas.managed=true", networkName]);
+  if (create.success) return true;
+  // Another process may have created the shared network between inspect/create.
+  return await inspectNetwork();
 }
 
 export async function validateCaddyConfig(gatewayDir: string): Promise<CommandResult> {
