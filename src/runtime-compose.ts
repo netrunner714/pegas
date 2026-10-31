@@ -61,7 +61,7 @@ function dockerIgnoreMatcher(contextDir: string): (relativePath: string) => bool
         const close = pattern.indexOf("]", i + 1);
         if (close > i) { regex += pattern.slice(i, close + 1); i = close; }
         else regex += "\\[";
-      } else regex += char.replace(/[\\^$+.()|{}]/g, "\\\\$&");
+      } else regex += char.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&");
     }
     return [{ negated, regex: new RegExp(`${regex}(?:/.*)?$`) }];
   });
