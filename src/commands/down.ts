@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME } from "../contract.js";
+import { CONTRACT_FILENAME, normalizeEnvironment } from "../contract.js";
 import { findPegasCompose } from "../compose.js";
 import { getProjectRuntimeId } from "../contract.js";
 import { removeProjectContainers } from "../runtime.js";
@@ -16,6 +16,7 @@ export interface DownOptions {
   json?: boolean;
   skipComposeDown?: boolean;
   noExit?: boolean;
+  env?: string;
 }
 
 async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
@@ -69,6 +70,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
     }
   }
 
+  const requestedEnvironment = options.env ? normalizeEnvironment(options.env) : undefined;
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const confDir = getConfDir(gatewayDir);
   const sanitizedProject = projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
@@ -78,7 +80,12 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
   try {
     const files = await fs.readdir(confDir);
     for (const f of files) {
-      if (f === `${sanitizedProject}.caddy` || (f.startsWith(`${sanitizedProject}-`) && f.endsWith(".caddy"))) {
+      const isOwnRouteFile = f === `${sanitizedProject}.caddy` || (f.startsWith(`${sanitizedProject}-`) && f.endsWith(".caddy"));
+      const isRequestedEnvironmentFile = requestedEnvironment === undefined
+        ? true
+        : f === `${sanitizedProject}-${requestedEnvironment}.caddy`
+          || (requestedEnvironment === "production" && f === `${sanitizedProject}.caddy`);
+      if (isOwnRouteFile && isRequestedEnvironmentFile) {
         const fullPath = path.join(confDir, f);
         previousRouteFiles.set(fullPath, await fs.readFile(fullPath, "utf-8"));
         await fs.unlink(fullPath);
@@ -139,7 +146,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
     try {
       if (contract?.runtime === "docker") {
         runtimeId ||= getProjectRuntimeId(projectRoot, projectName);
-        await removeProjectContainers(runtimeId);
+        await removeProjectContainers(runtimeId, requestedEnvironment);
         const gatewayResult = await stopGatewayIfUnused(gatewayDir);
         if (!gatewayResult.success) {
           throw new Error(gatewayResult.stderr || "Failed to reconcile shared Gateway lifecycle.");

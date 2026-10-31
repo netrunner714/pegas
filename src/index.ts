@@ -180,9 +180,11 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     }
 
     case "down": {
+      const downEnvPositional = positionals[1] as string | undefined;
       await dispatch.handleDown({
         cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
+        env: downEnvPositional || (values.env as string | undefined),
         json: values.json as boolean | undefined,
       });
       break;

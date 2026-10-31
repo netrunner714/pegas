@@ -144,8 +144,14 @@ export const COMMANDS: CliCommandDef[] = [
         placeholder: "<path>",
         description: "Target project directory",
       },
+      {
+        name: "env",
+        type: "string",
+        placeholder: "<environment>",
+        description: "Remove only this environment (default: all environments of the checkout)",
+      },
     ],
-    examples: ["$ pegas down"],
+    examples: ["$ pegas down", "$ pegas down --env development"],
   },
   {
     name: "uninstall",
