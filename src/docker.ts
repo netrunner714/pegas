@@ -92,10 +92,69 @@ async function findGatewayComposeFile(gatewayDir: string): Promise<string | null
 }
 
 /**
+ * Первый запуск на сервере: создаёт каталог шлюза со стандартным Caddyfile,
+ * Compose-файлом и conf.d. Существующие файлы никогда не перезаписываются.
+ */
+export async function ensureGatewayFiles(gatewayDir: string): Promise<void> {
+  const caddyfilePath = path.join(gatewayDir, "Caddyfile");
+  try {
+    await fs.access(caddyfilePath);
+  } catch {
+    await fs.mkdir(path.join(gatewayDir, "conf.d"), { recursive: true });
+    const caddyfile = [
+      "{",
+      "    admin off",
+      "    email <почта>@<домен>",
+      "}",
+      "",
+      "import /etc/caddy/conf.d/*.caddy",
+      "",
+    ].join("\n");
+    await fs.writeFile(caddyfilePath, caddyfile, "utf-8");
+  }
+
+  const composePath = path.join(gatewayDir, "compose.yml");
+  try {
+    await fs.access(composePath);
+  } catch {
+    const compose = [
+      "services:",
+      "  caddy:",
+      "    image: caddy:2-alpine",
+      "    container_name: pegas-gateway",
+      "    restart: unless-stopped",
+      "    ports:",
+      "      - \"80:80\"",
+      "      - \"443:443\"",
+      "      - \"443:443/udp\"",
+      "    volumes:",
+      "      - ./Caddyfile:/etc/caddy/Caddyfile:ro",
+      "      - ./conf.d:/etc/caddy/conf.d:ro",
+      "      - caddy_data:/data",
+      "      - caddy_config:/config",
+      "    networks:",
+      "      - pegas-network",
+      "",
+      "networks:",
+      "  pegas-network:",
+      "    external: true",
+      "",
+      "volumes:",
+      "  caddy_data:",
+      "  caddy_config:",
+      "",
+    ].join("\n");
+    await fs.writeFile(composePath, compose, "utf-8");
+  }
+}
+
+/**
  * Starts the machine-wide Caddy service and attaches it to the shared network.
  * The Compose override is passed through stdin and never persisted.
  */
 export async function ensureGatewayContainer(gatewayDir: string): Promise<CommandResult> {
+  await ensureGatewayFiles(gatewayDir);
+
   const networkReady = await ensureDockerNetwork("pegas-network");
   if (!networkReady) {
     return { success: false, stdout: "", stderr: "Could not create or inspect the shared Docker network 'pegas-network'." };

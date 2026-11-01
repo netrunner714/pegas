@@ -43,7 +43,7 @@ pegas reload
 * Доступность Docker демона.
 * Доступность Docker Compose.
 * Наличие Docker-сети `pegasas-network`.
-* Статус контейнера `gateway-caddy`.
+* Статус контейнера `pegas-gateway`.
 * Количество зарегистрированных маршрутов в `conf.d/`.
 
 ```bash

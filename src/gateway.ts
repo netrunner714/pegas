@@ -50,14 +50,9 @@ export async function findGatewayDir(explicitDir?: string): Promise<string> {
     return cwd;
   } catch {}
 
-  const homeGateway = path.join(os.homedir(), "gateway");
-  try {
-    await fs.access(path.join(homeGateway, "Caddyfile"));
-    return homeGateway;
-  } catch {}
-
-  // Fallback default
-  return homeGateway;
+  // Единый корень всего, чем владеет Pegas на машине.
+  // Отсутствие каталога — не ошибка: он создаётся автоматически при первом deploy.
+  return path.join(os.homedir(), ".pegas", "gateway");
 }
 
 export function getConfDir(gatewayDir: string): string {

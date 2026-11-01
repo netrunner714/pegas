@@ -70,10 +70,28 @@ describe("shared gateway container management", () => {
     expect(fs.readdirSync(gatewayDir).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml")).length).toBe(1);
   });
 
-  it("fails when the gateway directory has no Compose file", async () => {
+  it("bootstraps Caddyfile, compose.yml and conf.d in an empty gateway directory", async () => {
+    execFileImpl = (cmd, args) => {
+      if (args[0] === "network" && args[1] === "inspect") return '[{"Driver":"bridge","Internal":false}]';
+      return "";
+    };
     const res = await ensureGatewayContainer(gatewayDir);
-    expect(res.success).toBe(false);
-    expect(res.stderr).toContain("No Compose file found");
+    expect(res.success).toBe(true);
+    expect(fs.existsSync(path.join(gatewayDir, "Caddyfile"))).toBe(true);
+    expect(fs.existsSync(path.join(gatewayDir, "compose.yml"))).toBe(true);
+    expect(fs.existsSync(path.join(gatewayDir, "conf.d"))).toBe(true);
+    expect(fs.readFileSync(path.join(gatewayDir, "Caddyfile"), "utf-8")).toContain("import /etc/caddy/conf.d/*.caddy");
+  });
+
+  it("does not overwrite an existing gateway Caddyfile", async () => {
+    fs.writeFileSync(path.join(gatewayDir, "compose.yml"), "services: {}\n");
+    fs.writeFileSync(path.join(gatewayDir, "Caddyfile"), "# custom\n");
+    execFileImpl = (cmd, args) => {
+      if (args[0] === "network" && args[1] === "inspect") return '[{"Driver":"bridge","Internal":false}]';
+      return "";
+    };
+    await ensureGatewayContainer(gatewayDir);
+    expect(fs.readFileSync(path.join(gatewayDir, "Caddyfile"), "utf-8")).toBe("# custom\n");
   });
 
   it("translates docker bind errors into a clear gateway diagnostic", async () => {
