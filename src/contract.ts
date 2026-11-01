@@ -492,7 +492,7 @@ export async function detectComposeWebService(
  *
  * Dev-домены следуют стандарту `[service].[project].localhost` с алиасом
  * `[project].localhost` для основного сервиса. Stage/prod-домены заполняются
- * зарезервированными по RFC 2606 заглушками `*.example.com`: они явно
+ * зарезервированными по RFC 2606 заглушкой `example.com`: она явно
  * показывают, что реальный домен не задан, и не создают вид домысла.
  * Порты dev-шлюза по умолчанию — стандартные 443/80 (чистые URL без `:порт`).
  */
@@ -519,7 +519,7 @@ export function createDefaultContract(
           // example.com (RFC 2606) — зарезервированный домен: явный маркер
           // «домен не заполнен», а не догадка о реальном домене пользователя.
           stage: ["example.com"],
-          production: [`${serviceName}.example.com`],
+          production: ["example.com"],
         },
       },
     },
@@ -622,7 +622,7 @@ export function createContractFromInventory(
         // Stage без имени сервиса: угадать стейдж-домен почти никогда
         // нельзя — единая заглушка читается однозначнее.
         stage: ["example.com"],
-        production: [`${svc.name}.example.com`],
+        production: ["example.com"],
       };
     } else if (svc.kind === "infra") {
       if (svc.image) service.image = svc.image;

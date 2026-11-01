@@ -106,7 +106,7 @@ describe("caddyfile harvest", () => {
     const contract = createDefaultContract("my-app", "site", 3000);
     const harvest = parseCaddyfile("other.com {\n reverse_proxy ghost:3000\n}\n")!;
     applyCaddyHarvest(contract, harvest);
-    expect(contract.services.site.domains.production).toEqual(["site.example.com"]);
+    expect(contract.services.site.domains.production).toEqual(["example.com"]);
   });
 
   it("setupProjectContract применяет харвест: прод-домен из Caddyfile", async () => {
