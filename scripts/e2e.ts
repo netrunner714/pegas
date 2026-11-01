@@ -101,48 +101,14 @@ async function httpGet(
   return { status, body, headers };
 }
 
-const CACHE_DIR = path.join(REPO_ROOT, ".cache", "images");
-
-async function ensureDockerImage(imageName: string, tarFilename: string) {
-  const tarPath = path.join(CACHE_DIR, tarFilename);
-
-  // 1. Check if already in Docker daemon
-  const inspectRes = await execAsync("docker", ["image", "inspect", imageName]);
-  if (inspectRes.code === 0) {
-    // Already in docker. If tarball missing in project cache, save it for future offline runs
-    try {
-      await fs.access(tarPath);
-    } catch {
-      await fs.mkdir(CACHE_DIR, { recursive: true });
-      await execAsync("docker", ["save", imageName, "-o", tarPath]);
-    }
-    return;
-  }
-
-  // 2. Not in docker daemon: check if offline tarball exists
-  try {
-    await fs.access(tarPath);
-    console.log(`  ${cyan("ℹ")} Loading '${imageName}' from offline cache: ${tarFilename}...`);
-    const loadRes = await execAsync("docker", ["load", "-i", tarPath]);
-    if (loadRes.code === 0) {
-      logSuccess(`Loaded '${imageName}' from offline cache (.cache/images/${tarFilename})`);
-      return;
-    }
-  } catch {}
-
-  // 3. Fallback: pull from registry and cache it
-  console.log(`  ${yellow("ℹ")} Pulling '${imageName}' from registry...`);
+async function ensureDockerImage(imageName: string) {
+  // Pull via Docker itself: if the image is already in the local daemon
+  // storage, docker reuses it without downloading; otherwise it fetches it.
   const pullRes = await execAsync("docker", ["pull", imageName]);
   if (pullRes.code !== 0) {
     throw new Error(`Failed to pull '${imageName}': ${pullRes.stderr}`);
   }
-  logSuccess(`Pulled '${imageName}' from registry`);
-
-  try {
-    await fs.mkdir(CACHE_DIR, { recursive: true });
-    await execAsync("docker", ["save", imageName, "-o", tarPath]);
-    logSuccess(`Cached '${imageName}' to .cache/images/${tarFilename} for offline runs`);
-  } catch {}
+  logSuccess(`Image '${imageName}' available in local Docker storage`);
 }
 
 async function setDockerServiceImages(projectDir: string, image: string) {
@@ -192,9 +158,9 @@ async function runUnifiedE2E() {
     }
     logSuccess(`Docker Compose verified: ${dockerCheck.stdout.split("\n")[0]}`);
 
-    await ensureDockerImage("caddy:2-alpine", "caddy-2-alpine.tar");
-    await ensureDockerImage("traefik/whoami", "traefik-whoami.tar");
-    logSuccess("Offline test container images verified & cached in .cache/images/");
+    await ensureDockerImage("caddy:2-alpine");
+    await ensureDockerImage("traefik/whoami");
+    logSuccess("Test container images verified in local Docker storage");
 
     // =========================================================================
     // Phase 1: Local CLI Mechanics & Compose Surgery
