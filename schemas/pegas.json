@@ -124,6 +124,10 @@
             "dockerfile": {
               "type": "string",
               "description": "Путь к Dockerfile относительно контекста."
+            },
+            "target": {
+              "type": "string",
+              "description": "Build stage (multi-target Dockerfile); передаётся в compose как есть."
             }
           },
           "required": [

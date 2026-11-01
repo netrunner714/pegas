@@ -48,6 +48,8 @@ export interface RouteInfo {
 export interface ServiceBuildContract {
   context: string;
   dockerfile?: string;
+  /** Build stage (multi-target Dockerfile); forwarded to compose as-is. */
+  target?: string;
 }
 
 export type ServiceRole = "app" | "infra";

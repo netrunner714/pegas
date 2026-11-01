@@ -37,7 +37,7 @@
 |---|---|---|---|
 | `port` | number \| string | — | Порт, который сервис слушает внутри сети |
 | `upstream` | string | — | `<сервис>:<порт>` — цель проксирования во внутренней сети (host-runtime) |
-| `build` | object | — | Сборка образа из контекста проекта: `{ context, dockerfile? }`. Взаимоисключимо с `image` |
+| `build` | object | — | Сборка образа из контекста проекта: `{ context, dockerfile?, target? }` (`target` — stage multi-target Dockerfile). Взаимоисключимо с `image` |
 | `image` | string | — | Готовый образ вместо сборки |
 | `command` | string[] | default образа | Команда запуска контейнера |
 | `env` | Record<string, string> | — | **Несекретные** переменные окружения |

@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
+import { ComposeServiceInfo, ComposeInventory, detectComposeInventory } from "./compose-inventory.js";
 import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
@@ -112,6 +113,9 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
             path.win32.normalize(build.dockerfile).split(/[\\/]/).includes("..")) {
             add(`${base}.build.dockerfile`, "Dockerfile path must stay inside its build context.");
           }
+        if (build.target !== undefined && (typeof build.target !== "string" || !build.target.trim())) {
+          add(`${base}.build.target`, "Expected a non-empty build stage name.");
+        }
         }
       }
     }
@@ -521,6 +525,96 @@ export function createDefaultContract(
 }
 
 /**
+ * Строит контракт из полной инвентаризации compose-файла: ВСЕ сервисы
+ * без profiles попадают в контракт (app — с build/port/env и доменами,
+ * infra — с image/volumes). Сервисы под profiles пропускаются: их
+ * активность не выводима из файла — это явная ручная зона.
+ *
+ * Канонический dev-алиас `<slug>.localhost` достаётся главному сервису
+ * (прежняя эвристика выбора: стандартное имя → порт → первый).
+ */
+export function createContractFromInventory(
+  slug: string,
+  inventory: ComposeInventory
+): PegasContract {
+  const contract = createDefaultContract(slug);
+  contract.services = {};
+
+  const eligible = inventory.services.filter((s) => s.kind !== "profile");
+  // Главный сервис: стандартное имя → порт → первый app.
+  const preferredNames = ["web", "app", "site", "frontend", "server", "backend", "api"];
+  const apps = eligible.filter((s) => s.kind === "app");
+  const primary =
+    apps.find((s) => preferredNames.includes(s.name.toLowerCase())) ||
+    apps.find((s) => s.ports.length > 0) ||
+    apps[0];
+
+  for (const svc of eligible) {
+    if (svc.kind === "proxy") continue; // собственный caddy/nginx будет заменён общим шлюзом
+    const service: any = {};
+
+    if (svc.kind === "app") {
+      if (svc.build?.context) {
+        service.build = { context: svc.build.context };
+        if (svc.build.dockerfile) service.build.dockerfile = svc.build.dockerfile;
+        if (svc.build.target) service.build.target = svc.build.target;
+      } else if (svc.image) {
+        service.image = svc.image;
+      }
+      if (svc.ports.length > 0) service.port = svc.ports[0];
+      else if (svc.env.PORT) service.port = parseInt(svc.env.PORT, 10) || 3000;
+      if (svc.envFile) service.envFile = svc.envFile;
+      if (Object.keys(svc.env).length > 0) {
+        // только несекретные, значения без подстановок уже отфильтрованы
+        service.env = { ...svc.env };
+        delete service.env.PORT; // порт вынесен в поле port
+      }
+      service.domains = {
+        development:
+          svc.name === primary?.name
+            ? [`${svc.name}.${slug}.localhost`, `${slug}.localhost`]
+            : [`${svc.name}.${slug}.localhost`],
+        // example.com (RFC 2606): явный маркер «домен не заполнен».
+        stage: [`${svc.name}.stage.example.com`],
+        production: [`${svc.name}.example.com`],
+      };
+    } else if (svc.kind === "infra") {
+      if (svc.image) service.image = svc.image;
+      else if (svc.build?.context) {
+        service.build = { context: svc.build.context };
+        if (svc.build.dockerfile) service.build.dockerfile = svc.build.dockerfile;
+      }
+      if (svc.ports.length > 0) service.port = svc.ports[0];
+      if (svc.volumes.length > 0) {
+        // только named volumes (без bind-путей ./..)
+        service.volumes = svc.volumes.filter((v) => !v.startsWith(".") && !v.startsWith("/"));
+      }
+      if (svc.dependsOn.length > 0) service.dependsOn = [...svc.dependsOn];
+      service.role = "infra";
+    }
+
+    if (Object.keys(service).length > 0) {
+      contract.services[svc.name] = service;
+    }
+  }
+
+  // dependsOn для app-сервисов (после того, как все имена известны)
+  for (const svc of eligible.filter((s) => s.kind === "app")) {
+    if (svc.dependsOn.length > 0 && contract.services[svc.name]) {
+      const deps = svc.dependsOn.filter((d) => contract.services[d]);
+      if (deps.length > 0) contract.services[svc.name].dependsOn = deps;
+    }
+  }
+
+  if (Object.keys(contract.services).length === 0) {
+    // compose есть, но всё под profiles/proxy — откат к дефолтному сервису
+    return createDefaultContract(slug);
+  }
+
+  return contract;
+}
+
+/**
  * Safely reconciles an existing contract with default contract schema,
  * filling in missing standard blocks (e.g. devGateway) without overwriting
  * or modifying user-configured domains, ports, services, or custom fields.
@@ -614,7 +708,11 @@ export async function setupProjectContract(
   const serviceName = detected?.name || "web";
   const port = detected?.port || "3000";
   const runtime = await detectContractRuntime(projectDir);
-  const defaultContract = createDefaultContract(slug, serviceName, port);
+  // Полная инвентаризация compose: контракт собирается из всех сервисов.
+  const inventory = await detectComposeInventory(projectDir);
+  const defaultContract = inventory
+    ? createContractFromInventory(slug, inventory)
+    : createDefaultContract(slug, serviceName, port);
   if (runtime === "docker") {
     defaultContract.runtime = "docker";
   }

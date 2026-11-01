@@ -519,6 +519,7 @@ export function createRuntimeCompose(
       generated.build = {
         context: path.resolve(options.projectRoot, service.build.context),
         ...(service.build.dockerfile ? { dockerfile: service.build.dockerfile } : {}),
+        ...(service.build.target ? { target: service.build.target } : {}),
       };
       generated.image = `pegas/${options.projectId}/${serviceName.toLowerCase()}:${serviceHash.slice(0, 12)}`;
     } else if (appDefaults) {

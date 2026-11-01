@@ -5,6 +5,19 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [1.7.0] — 2026-11-01
+
+### Added
+- `pegas init` собирает контракт из всей секции `services` docker-compose-файла, а не только главного веб-сервиса:
+  - app-сервисы — с `build` (`context`, `dockerfile`, `target`), `image`, `port`, `env`, `envFile`, `dependsOn` и доменами по каждому окружению;
+  - infra-сервисы — с `image`, named `volumes` и `role: "infra"`;
+  - сервисы под `profiles` и собственные прокси (caddy/nginx) пропускаются: их активность и замена общим шлюзом не выводимы из файла.
+- Поле `services.<name>.build.target` в контракте и JSON Schema: stage multi-target Dockerfile передаётся в генерируемый compose как есть.
+- Главный сервис для dev-алиаса `<project>.localhost` выбирается прежней эвристикой (стандартное имя → порт → первый).
+
+### Changed
+- Значения compose с подстановками `${VAR}` не попадают в контракт как литералы: неразрешённые значения пропускаются.
+
 ## [1.6.0] — 2026-11-01
 
 ### Changed
