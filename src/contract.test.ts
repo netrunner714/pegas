@@ -15,6 +15,7 @@ import {
   detectComposeWebService,
   createDefaultContract,
   CONTRACT_FILENAME,
+  CONTRACT_SCHEMA_URL,
   validatePegasContract,
   getProjectRuntimeId,
 } from "./contract.js";
@@ -117,6 +118,7 @@ describe("contract & package.json integration", () => {
     expect(res.slug).toBe("my-awesome-site");
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
+    expect(content.$schema).toBe(CONTRACT_SCHEMA_URL);
     expect(content.projectName).toBe("my-awesome-site");
     expect(content.devGateway).toEqual({
       httpPort: 80,
@@ -185,6 +187,8 @@ describe("contract & package.json integration", () => {
     const { contract, addedFields } = reconcileContract(existing, defaultContract);
 
     expect(addedFields).toContain("devGateway");
+    expect(addedFields).toContain("$schema");
+    expect(contract.$schema).toBe(CONTRACT_SCHEMA_URL);
     expect(contract.projectName).toBe("custom-app");
     expect(contract.services.api.port).toBe(8000);
     expect(contract.services.api.domains.development).toEqual(["api.localhost"]);

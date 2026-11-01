@@ -82,6 +82,7 @@ npm run deploy                 # деплой на VPS: контейнеры + �
 
 ```jsonc
 {
+  "$schema": "https://netrunner714.ru/schemas/pegas.json",
   "projectName": "my-cool-app",
   "runtime": "docker",              // опциональный вход в Docker-рантайм
   "services": {

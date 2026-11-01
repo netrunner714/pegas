@@ -140,6 +140,8 @@ export interface DeployConfig {
 }
 
 export interface PegasContract {
+  /** JSON Schema URL; enables editor hints for pegas.json. */
+  $schema?: string;
   projectName?: string;
   /** Opt in to the declarative Docker runtime; absent/"host" preserves legacy behavior. */
   runtime?: "host" | "docker";

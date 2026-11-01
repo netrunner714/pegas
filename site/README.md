@@ -26,3 +26,37 @@
 - Внутренний раздел (`docs/internal/`) в навигацию не включён.
 - `docs/reference/cli.md` на сайте всегда свежий: он генерируется в CI
   репозитория на каждый билд.
+
+## Отдача JSON Schema (`/schemas/pegas.json`)
+
+Той же схемой — файл из репозитория, сайт только проксирует. Добавьте в
+Next.js route handler `app/schemas/pegas/route.ts`:
+
+```ts
+// app/schemas/pegas/route.ts
+// Отдаёт JSON Schema контракта pegas прямо из GitHub (репозиторий —
+// единственный источник истины). Устаревание невозможно: контент
+// обновляется в момент мержа в main.
+
+export const dynamic = "force-dynamic";
+
+const SCHEMA_URL =
+  "https://raw.githubusercontent.com/netrunner714/pegas/main/schemas/pegas.json";
+
+export async function GET() {
+  const res = await fetch(SCHEMA_URL, { cache: "no-store" });
+  if (!res.ok) {
+    return new Response("pegas schema unavailable", { status: 502 });
+  }
+  const body = await res.text();
+  return new Response(body, {
+    headers: {
+      "content-type": "application/schema+json",
+      "cache-control": "public, max-age=300",
+    },
+  });
+}
+```
+
+После этого `$schema: "https://netrunner714.ru/schemas/pegas.json"` в
+`pegas.json` включит автодополнение и валидацию в VS Code/WebStorm.

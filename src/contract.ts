@@ -7,6 +7,9 @@ import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
+/** Публичный URL JSON Schema контракта: включает IDE-подсказки в pegas.json. */
+export const CONTRACT_SCHEMA_URL = "https://netrunner714.ru/schemas/pegas.json";
+
 /**
  * Canonical environment name: `dev` -> `development`, `prod` -> `production`,
  * anything else is lowercased as-is. One shared definition keeps Docker labels,
@@ -492,6 +495,7 @@ export function createDefaultContract(
 ): PegasContract {
   const portNum = typeof port === "string" ? parseInt(port, 10) || 3000 : port;
   return {
+    $schema: CONTRACT_SCHEMA_URL,
     projectName: slug,
     devGateway: {
       httpPort: 80,
@@ -523,6 +527,11 @@ export function reconcileContract(
 ): { contract: PegasContract; addedFields: string[] } {
   const addedFields: string[] = [];
   const result: any = { ...existing };
+
+  if (!result.$schema && defaultContract.$schema) {
+    result.$schema = defaultContract.$schema;
+    addedFields.push("$schema");
+  }
 
   if (!result.projectName && defaultContract.projectName) {
     result.projectName = defaultContract.projectName;

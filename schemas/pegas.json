@@ -1,0 +1,267 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://netrunner714.ru/schemas/pegas.json",
+  "title": "Pegas contract",
+  "description": "Декларативный контракт окружения проекта для pegas — единственный источник истины. Подробности: https://github.com/netrunner714/pegas",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL JSON Schema (подсказки редактора)."
+    },
+    "projectName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$",
+      "description": "Slug проекта: скоуп сетевых алиасов и имя route-файла conf.d/<projectName>.caddy. По умолчанию вычисляется из package.json или имени каталога."
+    },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "host",
+        "docker"
+      ],
+      "description": "Режим ранта. 'docker' — опциональный вход в декларативный Docker-рантайм; отсутствует или 'host' — прежнее поведение.",
+      "default": "host"
+    },
+    "bootInfra": {
+      "type": "boolean",
+      "description": "При true pegas dev автоматически поднимает инфраструктурные сервисы из docker-compose.yml (host-runtime).",
+      "default": false
+    },
+    "deploy": {
+      "type": "object",
+      "description": "Настройки деплоя.",
+      "additionalProperties": false,
+      "properties": {
+        "strictDns": {
+          "type": "boolean",
+          "description": "Прервать деплой, если DNS-записи не соответствуют IP сервера."
+        },
+        "skipDnsCheck": {
+          "type": "boolean",
+          "description": "Пропустить DNS pre-flight проверку."
+        },
+        "skipReadiness": {
+          "type": "boolean",
+          "description": "Пропустить проверку readiness контейнеров."
+        }
+      }
+    },
+    "devGateway": {
+      "type": "object",
+      "description": "Настройки локального dev-шлюза (host-runtime).",
+      "additionalProperties": false,
+      "properties": {
+        "httpPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Порт локального HTTP (по умолчанию 80)."
+        },
+        "httpsPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Порт локального HTTPS (по умолчанию 443; fallback 8443+)."
+        },
+        "skipInstallTrust": {
+          "type": "boolean",
+          "description": "Не устанавливать CA в системное хранилище доверия."
+        },
+        "admin": {
+          "type": "boolean",
+          "description": "Включить admin-интерфейс Caddy.",
+          "default": false
+        },
+        "systemCaddy": {
+          "type": "boolean",
+          "description": "Использовать системный Caddy вместо закешированного бинарника."
+        },
+        "caddyPath": {
+          "type": "string",
+          "description": "Явный путь к бинарнику Caddy."
+        }
+      }
+    },
+    "services": {
+      "type": "object",
+      "description": "Сервисы проекта; ключ — имя сервиса.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/definitions/service"
+      }
+    }
+  },
+  "required": [
+    "services"
+  ],
+  "definitions": {
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Порт, который сервис слушает внутри сети (1–65535)."
+        },
+        "upstream": {
+          "type": "string",
+          "description": "<сервис>:<порт> — цель проксирования во внутренней сети (host-runtime)."
+        },
+        "build": {
+          "type": "object",
+          "description": "Сборка образа из контекста проекта. Взаимоисключимо с image.",
+          "additionalProperties": false,
+          "properties": {
+            "context": {
+              "type": "string",
+              "description": "Путь build-контекста относительно проекта (без .. и абсолютных путей)."
+            },
+            "dockerfile": {
+              "type": "string",
+              "description": "Путь к Dockerfile относительно контекста."
+            }
+          },
+          "required": [
+            "context"
+          ]
+        },
+        "image": {
+          "type": "string",
+          "description": "Готовый образ вместо сборки (взаимоисключимо с build)."
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Команда запуска контейнера (по умолчанию — команда образа)."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Несекретные переменные окружения. Секреты — через envFile."
+        },
+        "envFile": {
+          "type": "string",
+          "description": "Путь к gitignored env-файлу; содержимое передаётся Docker напрямую и не попадает в манифесты и логи."
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Дополнительные тома (Docker Compose short syntax: volume:container-path)."
+        },
+        "bindMount": {
+          "type": "string",
+          "description": "Путь исходников для монтирования в контейнер (по умолчанию — корень проекта)."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "app",
+            "infra"
+          ],
+          "description": "Классификация сервиса вместо авто-детекции."
+        },
+        "hmr": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fileWatch": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "events",
+                "polling"
+              ],
+              "description": "Режим отслеживания файлов (актуально для контейнерного dev).",
+              "default": "auto"
+            }
+          }
+        },
+        "dependsOn": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Сервисы, которые должны подняться раньше."
+            },
+            {
+              "type": "object",
+              "description": "Сервис → условие готовности.",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "condition": {
+                    "type": "string",
+                    "enum": [
+                      "service_started",
+                      "service_healthy",
+                      "service_completed_successfully"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "healthcheck": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "test": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "Команда проверки."
+            },
+            "interval": {
+              "type": "string",
+              "description": "Интервал, напр. '10s'."
+            },
+            "timeout": {
+              "type": "string",
+              "description": "Таймаут, напр. '3s'."
+            },
+            "retries": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Число повторов."
+            },
+            "startPeriod": {
+              "type": "string",
+              "description": "Отсрочка старта, напр. '30s'."
+            }
+          },
+          "required": [
+            "test"
+          ]
+        },
+        "domains": {
+          "type": "object",
+          "description": "Домены по окружениям (development/stage/production; алиасы dev/prod нормализуются). IDN-домены поддерживаются.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

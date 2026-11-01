@@ -21,6 +21,7 @@
 
 | Поле | Тип | Default | Описание |
 |---|---|---|---|
+| `$schema` | string | `"https://netrunner714.ru/schemas/pegas.json"` | URL JSON Schema: включает автодополнение и валидацию в редакторе. Записывается при `pegas init`, доступен в [schemas/pegas.json](https://github.com/netrunner714/pegas/blob/main/schemas/pegas.json) |
 | `projectName` | string | slug из package.json или имени каталога | Идентификатор проекта: скоуп сетевых алиасов и имя route-файла `conf.d/<projectName>.caddy` |
 | `runtime` | "host" \| "docker" | "host" | Опциональный вход в декларативный Docker-рантайм. Отсутствие или `"host"` — прежнее поведение (semver-major не меняется) |
 | `bootInfra` | boolean | false | При `true` `pegas dev` автоматически поднимает инфраструктурные сервисы из docker-compose.yml |
