@@ -12,6 +12,7 @@
   - app-сервисы — с `build` (`context`, `dockerfile`, `target`), `image`, `port`, `env`, `envFile`, `dependsOn` и доменами по каждому окружению;
   - infra-сервисы — с `image`, named `volumes` и `role: "infra"`;
   - сервисы под `profiles` и собственные прокси (caddy/nginx) пропускаются: их активность и замена общим шлюзом не выводимы из файла.
+- Харвест доменов из `Caddyfile` проекта: домены блоков `домен { reverse_proxy <сервис>:<порт> }` копируются в `domains.production` литералами вместо example.com-заглушек. Чистые redirect-блоки (www) не копируются — pegas строит www-redirect сам; сплит-роутинг и сервисы вне контракта пропускаются без домыслов.
 - Поле `services.<name>.build.target` в контракте и JSON Schema: stage multi-target Dockerfile передаётся в генерируемый compose как есть.
 - Главный сервис для dev-алиаса `<project>.localhost` выбирается прежней эвристикой (стандартное имя → порт → первый).
 

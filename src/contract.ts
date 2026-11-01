@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
 import { ComposeServiceInfo, ComposeInventory, detectComposeInventory } from "./compose-inventory.js";
+import { CaddyHarvest, detectCaddyHarvest } from "./caddyfile-harvest.js";
 import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
@@ -525,6 +526,23 @@ export function createDefaultContract(
 }
 
 /**
+ * Применяет харвест Caddyfile к контракту: домены из блоков
+ * `домен { reverse_proxy svc:port }` заменяют example.com-заглушки в
+ * production соответствующего сервиса. Сервис, отсутствующий в контракте,
+ * пропускается (его домен не записывается — без домыслов).
+ */
+export function applyCaddyHarvest(contract: PegasContract, harvest: CaddyHarvest): void {
+  for (const [serviceName, domains] of harvest.serviceToDomains) {
+    const service = (contract.services as Record<string, any>)[serviceName];
+    if (!service || !service.domains) continue;
+    const prod = domains.filter((d) => !d.startsWith("www."));
+    if (prod.length > 0) {
+      service.domains.production = [...new Set([...prod, ...domains.filter((d) => d.startsWith("www."))])];
+    }
+  }
+}
+
+/**
  * Строит контракт из полной инвентаризации compose-файла: ВСЕ сервисы
  * без profiles попадают в контракт (app — с build/port/env и доменами,
  * infra — с image/volumes). Сервисы под profiles пропускаются: их
@@ -713,6 +731,10 @@ export async function setupProjectContract(
   const defaultContract = inventory
     ? createContractFromInventory(slug, inventory)
     : createDefaultContract(slug, serviceName, port);
+  // Харвест доменов из Caddyfile: прод-домены копируются литералами
+  // вместо example.com-заглушек. Источник после init не читается.
+  const caddyHarvest = await detectCaddyHarvest(projectDir);
+  if (caddyHarvest) applyCaddyHarvest(defaultContract, caddyHarvest);
   if (runtime === "docker") {
     defaultContract.runtime = "docker";
   }
