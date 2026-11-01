@@ -41,6 +41,9 @@ jobs:
       - name: Run unit tests
         run: bun run test
 
+      - name: Check documentation
+        run: bun run docs:check
+
       - name: Build bundle
         run: bun run build
 

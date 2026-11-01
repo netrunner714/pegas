@@ -11,7 +11,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun scripts/gen-llms.ts && bun build src/index.ts --target=node --outfile=dist/index.js && chmod +x dist/index.js",
+    "build": "bun scripts/gen-docs.ts && bun build src/index.ts --target=node --outfile=dist/index.js && chmod +x dist/index.js",
     "link:global": "bun run build && bun link",
     "unlink:global": "bun unlink",
     "test": "bun scripts/test-runner.ts",
@@ -21,7 +21,8 @@
     "test:e2e": "bun scripts/e2e.ts",
     "test:e2e:init": "bun scripts/e2e-init.ts",
     "test:e2e:dev": "bun scripts/e2e-dev.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "docs:check": "bun scripts/docs-check.ts"
   },
   "keywords": [
     "docker",
