@@ -8,7 +8,11 @@
 
 - `app/docs-index-page.tsx` → `app/pegas/docs/page.tsx` — редирект на первую страницу;
 - `app/docs-slug-page.tsx` → `app/pegas/docs/[slug]/page.tsx` — страница документации с навигацией;
+- `app/schema-route.ts` → `app/schemas/pegas.json/route.ts` — отдача JSON Schema с `/schemas/pegas.json`;
 - `pegas-docs.ts` → `lib/pegas-docs.ts` — слой данных: **контент и навигация** из raw.githubusercontent.com.
+
+Файлы синхронизированы с реальным деплоем сайта (коммит 1b13454 в репо
+netrunner714) и проверены локальной сборкой и smoke-тестами.
 
 ## Как подключить
 
@@ -31,10 +35,10 @@
 ## Отдача JSON Schema (`/schemas/pegas.json`)
 
 Той же схемой — файл из репозитория, сайт только проксирует. Добавьте
-route handler `app/schemas/pegas/route.ts`:
+route handler `app/schemas/pegas.json/route.ts`:
 
 ```ts
-// app/schemas/pegas/route.ts
+// app/schemas/pegas.json/route.ts
 // Отдаёт JSON Schema контракта pegas прямо из GitHub (репозиторий —
 // единственный источник истины). Устаревание невозможно: контент
 // обновляется в момент мержа в main.

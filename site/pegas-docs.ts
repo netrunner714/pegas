@@ -17,9 +17,14 @@ const INDEX_FILE = "docs/README.md";
 
 const BASE = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}`;
 
+import { connection } from "next/server";
+
 const fetchCache = new Map<string, string>();
 
 async function fetchRaw(file: string): Promise<string> {
+  // Документация живёт в GitHub: рендер ждёт пользовательского запроса,
+  // чтобы контент всегда был актуальным после мержа в main.
+  await connection();
   const cached = fetchCache.get(file);
   if (cached !== undefined) return cached;
 
