@@ -15,7 +15,7 @@ const dim = (text: string) => `\x1b[2m${text}\x1b[0m`;
 
 const REPO_ROOT = path.resolve(import.meta.dir, "..");
 const BIN_PATH = path.join(REPO_ROOT, "dist", "index.js");
-const REPORTS_DIR = path.join(REPO_ROOT, ".cache", "reports");
+const REPORTS_DIR = path.join(REPO_ROOT, ".tmp", "reports");
 
 function execAsync(
   cmd: string,
@@ -57,6 +57,7 @@ async function copyDirClean(src: string, dest: string) {
     ".git",
     ".next",
     ".cache",
+    ".tmp",
     ".turbo",
     "dist",
     "build",
@@ -377,7 +378,7 @@ ${bold("EXAMPLES:")}
     }
     log(`================================================================================`);
 
-    // Write full log file to project .cache/reports/
+    // Write full log file to .tmp/reports/
     await fs.writeFile(logFilePath, logEntries.join("\n"), "utf-8");
     log(`\n📄 Full diagnostic log saved to:\n   ${cyan(logFilePath)}\n`);
     if (!allChecksPassed) {

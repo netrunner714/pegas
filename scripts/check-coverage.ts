@@ -63,13 +63,13 @@ async function findSourceFiles(dir: string, repoRoot: string): Promise<string[]>
 
 export async function runCoverageCheck(opts?: { minTotal?: number; minFile?: number }) {
   const repoRoot = path.resolve(import.meta.dir, "..");
-  const lcovPath = path.join(repoRoot, "coverage/lcov.info");
+  const lcovPath = path.join(repoRoot, ".tmp", "coverage", "lcov.info");
 
   let lcovContent = "";
   try {
     lcovContent = await fs.readFile(lcovPath, "utf-8");
   } catch {
-    console.error(red("❌ Error: 'coverage/lcov.info' not found. Run 'bun test' first."));
+    console.error(red("❌ Error: '.tmp/coverage/lcov.info' not found. Run 'bun test' first."));
     process.exit(1);
   }
 
