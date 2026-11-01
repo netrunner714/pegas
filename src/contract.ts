@@ -5,6 +5,7 @@ import { PegasContract, ServiceContract } from "./types.js";
 import { isProxyService, isInfraService } from "./compose.js";
 import { ComposeServiceInfo, ComposeInventory, detectComposeInventory } from "./compose-inventory.js";
 import { CaddyHarvest, detectCaddyHarvest } from "./caddyfile-harvest.js";
+import { StructureHarvest, detectStructureHarvest } from "./structure-harvest.js";
 import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
@@ -543,6 +544,25 @@ export function applyCaddyHarvest(contract: PegasContract, harvest: CaddyHarvest
 }
 
 /**
+ * Применяет структурный харвест к контракту:
+ * - сервису без порта (compose молчит) — порт из EXPOSE его apps/<name>/Dockerfile;
+ * - каталоги apps/* БЕЗ Dockerfile в контракт не добавляются: это кандидаты
+ *   (UI-артефакты, расширения), а не подтверждённые сервисы.
+ */
+export function applyStructureHarvest(contract: PegasContract, structure: StructureHarvest): void {
+  const byName = new Map(structure.candidates.map((c) => [c.name, c]));
+  const services = contract.services as Record<string, any>;
+
+  for (const [name, service] of Object.entries(services)) {
+    if (service.role === "infra") continue;
+    if (service.port === undefined) {
+      const cand = byName.get(name);
+      if (cand?.exposePort) service.port = cand.exposePort;
+    }
+  }
+}
+
+/**
  * Строит контракт из полной инвентаризации compose-файла: ВСЕ сервисы
  * без profiles попадают в контракт (app — с build/port/env и доменами,
  * infra — с image/volumes). Сервисы под profiles пропускаются: их
@@ -735,6 +755,10 @@ export async function setupProjectContract(
   // вместо example.com-заглушек. Источник после init не читается.
   const caddyHarvest = await detectCaddyHarvest(projectDir);
   if (caddyHarvest) applyCaddyHarvest(defaultContract, caddyHarvest);
+  // Структурный харвест: порт из EXPOSE apps/<name>/Dockerfile для сервисов,
+  // у которых compose порт не раскрыл. Источник после init не читается.
+  const structure = await detectStructureHarvest(projectDir);
+  applyStructureHarvest(defaultContract, structure);
   if (runtime === "docker") {
     defaultContract.runtime = "docker";
   }
