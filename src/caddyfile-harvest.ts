@@ -16,7 +16,23 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export const CADDYFILE_NAMES = ["Caddyfile", "caddyfile", "Caddyfile.prod", "Caddyfile.production"] as const;
+/**
+ * Пути поиска Caddyfile в порядке приоритета: корень — конвенция «caddy —
+ * главный шлюз», затем типовые директории сервисного caddy (практика
+ * ~2/3 репозиториев: caddy/, config/, docker/, deploy/, configs/).
+ * Не рекурсия: экзотика (src/caddy/, caddy-data/, Example-шаблоны) — ручная зона.
+ */
+export const CADDYFILE_PATHS = [
+  "Caddyfile",
+  "caddyfile",
+  "Caddyfile.prod",
+  "Caddyfile.production",
+  "caddy/Caddyfile",
+  "config/Caddyfile",
+  "docker/Caddyfile",
+  "deploy/Caddyfile",
+  "configs/Caddyfile",
+] as const;
 
 export interface CaddyHarvest {
   /** домен → имя сервиса (из reverse_proxy upstream) */
@@ -156,7 +172,7 @@ function parseUpstream(raw: string): { service: string; port?: number } {
  * возвращает харвест-данные. null — файла нет или полезных блоков нет.
  */
 export async function detectCaddyHarvest(projectDir: string): Promise<CaddyHarvest | null> {
-  for (const f of CADDYFILE_NAMES) {
+  for (const f of CADDYFILE_PATHS) {
     try {
       const content = await fs.readFile(path.join(projectDir, f), "utf-8");
       const harvest = parseCaddyfile(content);

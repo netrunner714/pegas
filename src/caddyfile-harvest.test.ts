@@ -72,6 +72,21 @@ describe("caddyfile harvest", () => {
     await fs.rm(tmp, { recursive: true, force: true });
   });
 
+  it("находит Caddyfile в типовых поддиректориях (caddy/, config/, deploy/); корень приоритетнее", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "caddy-"));
+    // только поддиректория
+    await fs.mkdir(path.join(tmp, "caddy"), { recursive: true });
+    await fs.writeFile(path.join(tmp, "caddy", "Caddyfile"), "sub.com {\n reverse_proxy web:3000\n}\n");
+    const h = await detectCaddyHarvest(tmp);
+    expect(h?.serviceToDomains.get("web")).toEqual(["sub.com"]);
+
+    // корень побеждает при обоих вариантах
+    await fs.writeFile(path.join(tmp, "Caddyfile"), "root.com {\n reverse_proxy web:3000\n}\n");
+    const h2 = await detectCaddyHarvest(tmp);
+    expect(h2?.serviceToDomains.get("web")).toEqual(["root.com"]);
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
   it("applyCaddyHarvest заменяет example.com-заглушки на реальные домены", () => {
     const contract = createDefaultContract("my-app", "site", 3000);
     const harvest = parseCaddyfile("my-app.ru {\n reverse_proxy site:3000\n}\n")!;
