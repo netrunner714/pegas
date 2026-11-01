@@ -19,6 +19,7 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`domains.development\`: локальные домены разработки (\`[service].[project].localhost\`, например: \`web.my-app.localhost\`)
 - \`domains.stage\`: домены стейджинга (заглушка \`example.com\` — стейдж-домен угадать нельзя, вписать вручную)
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
+- \`env\` (глобально): переносимый конфиг проекта (строка или карта development/stage/production); профиль выбирает запуск. Секреты — только в \`envFile\`
 
 ## Команды
 * Локальная разработка: \`npm run dev\` (запускает \`pegas dev\`)

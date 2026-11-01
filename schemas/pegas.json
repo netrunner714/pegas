@@ -91,6 +91,13 @@
       "additionalProperties": {
         "$ref": "#/definitions/service"
       }
+    },
+    "env": {
+      "type": "object",
+      "description": "Глобальный конфиг проекта (переносится между окружениями, коммитится). Секреты — только в envFile.",
+      "additionalProperties": {
+        "$ref": "#/definitions/envProfileValue"
+      }
     }
   },
   "required": [
@@ -266,6 +273,38 @@
           }
         }
       }
+    },
+    "envProfileValue": {
+      "description": "Значение env-ключа: строка (одинаково во всех профилях) или карта профилей development/stage/production.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "required": [
+            "development",
+            "stage",
+            "production"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "development": {
+              "type": "string",
+              "minLength": 1
+            },
+            "stage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "production": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
     }
   }
 }

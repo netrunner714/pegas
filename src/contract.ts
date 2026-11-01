@@ -48,6 +48,40 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     add("runtime", 'Expected "host" or "docker".');
   }
 
+  // Глобальный env: строка (одинаково везде) или карта профилей.
+  // Карта обязана содержать ВСЕ три профиля: частичная карта — ошибка
+  // (нельзя молча получить пустое значение на недостающем профиле).
+  if (contract.env !== undefined) {
+    if (!contract.env || typeof contract.env !== "object" || Array.isArray(contract.env)) {
+      add("env", "Expected an object of env keys (string or profile map).");
+    } else {
+      for (const [key, val] of Object.entries(contract.env as Record<string, unknown>)) {
+        const base = `env.${key}`;
+        if (typeof val === "string") {
+          if (!val.trim()) add(base, "Expected a non-empty string or a full profile map.");
+          continue;
+        }
+        if (!val || typeof val !== "object" || Array.isArray(val)) {
+          add(base, "Expected a string (same for all profiles) or an object with development/stage/production.");
+          continue;
+        }
+        const profiles = val as Record<string, unknown>;
+        for (const p of ["development", "stage", "production"] as const) {
+          if (!(p in profiles)) {
+            add(base, `Profile map must include "${p}" — partial maps are invalid.`);
+          } else if (typeof profiles[p] !== "string" || !(profiles[p] as string).trim()) {
+            add(`${base}.${p}`, "Expected a non-empty string.");
+          }
+        }
+        for (const p of Object.keys(profiles)) {
+          if (p !== "development" && p !== "stage" && p !== "production") {
+            add(base, `Unknown profile "${p}": expected development, stage or production.`);
+          }
+        }
+      }
+    }
+  }
+
   if (!contract.services || typeof contract.services !== "object" || Array.isArray(contract.services)) {
     add("services", "Expected an object containing service definitions.");
     return issues;
@@ -511,6 +545,10 @@ export function createDefaultContract(
       skipInstallTrust: false,
       admin: false,
     },
+    // Глобальный переносимый конфиг: ключ = строка (одинаково везде) или
+    // карта development/stage/production (все три обязательны). Секреты —
+    // в envFile, никогда здесь.
+    env: {},
     services: {
       [serviceName]: {
         port: portNum,

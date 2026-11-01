@@ -141,6 +141,16 @@ export interface DeployConfig {
   skipReadiness?: boolean;
 }
 
+/** Допустимые профили контракта. */
+export type EnvironmentProfile = "development" | "stage" | "production";
+/**
+ * Значение глобального env-ключа: либо одинаковое для всех профилей
+ * (строка), либо явная карта — в ней обязаны быть ВСЕ три профиля.
+ * Секреты сюда не пишутся: им место в envFile (не переносится между
+ * окружениями и не коммитится).
+ */
+export type EnvProfileValue = string | Record<EnvironmentProfile, string>;
+
 export interface PegasContract {
   /** JSON Schema URL; enables editor hints for pegas.json. */
   $schema?: string;
@@ -150,5 +160,13 @@ export interface PegasContract {
   bootInfra?: boolean;
   deploy?: DeployConfig;
   devGateway?: DevGatewayConfig;
+  /**
+   * Глобальный конфиг проекта (env-профили): переносится между
+   * окружениями и коммитится. Значение — либо строка (одинаково для всех
+   * профилей), либо карта development/stage/production со ВСЕМИ тремя
+   * ключами. Инъектируется каждому сервису при deploy/dev; сервисный env
+   * перекрывает глобальный. Секреты — только в envFile.
+   */
+  env?: Record<string, EnvProfileValue>;
   services: Record<string, ServiceContract>;
 }

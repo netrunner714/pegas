@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
-import { PegasContract, ServiceContract } from "./types.js";
+import { EnvProfileValue, PegasContract, ServiceContract } from "./types.js";
 import { validatePegasContract, normalizeEnvironment } from "./contract.js";
 
 export interface RuntimeComposeOptions {
@@ -400,6 +400,30 @@ export function hasHostNodeModules(
  * JSON is valid YAML, which lets us avoid a runtime YAML dependency and safely
  * pass the document to `docker compose -f -` through stdin.
  */
+/**
+ * Разворачивает глобальный env-блок контракта в плоские строки для
+ * выбранного профиля: строка — как есть, карта профилей — значение
+ * текущего профиля. Валидация гарантирует полноту карты (все три
+ * профиля), поэтому здесь отсутствие ключа — неожиданность, а не
+ * нормальный путь: возвращаем undefined и валидация покажет ошибку.
+ */
+function resolveGlobalEnv(
+  envBlock: Record<string, EnvProfileValue> | undefined,
+  environmentName: string
+): Record<string, string> {
+  if (!envBlock) return {};
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(envBlock)) {
+    if (typeof value === "string") {
+      resolved[key] = value;
+    } else if (value && typeof value === "object") {
+      const v = (value as Record<string, string>)[environmentName];
+      if (v !== undefined) resolved[key] = v;
+    }
+  }
+  return resolved;
+}
+
 export function createRuntimeCompose(
   contract: PegasContract,
   options: RuntimeComposeOptions
@@ -533,7 +557,10 @@ export function createRuntimeCompose(
     }
     if (appDefaults) generated.command = appDefaults.command;
     else if (service.command) generated.command = service.command;
-    const environment: Record<string, string> = { ...(service.env || {}) };
+    // Глобальный env контракта: база для всех сервисов; сервисный env
+    // перекрывает глобальный (сервис — более специфичная настройка).
+    const globalEnv = resolveGlobalEnv(contract.env, environmentName);
+    const environment: Record<string, string> = { ...globalEnv, ...(service.env || {}) };
     if (app) {
       environment.NODE_ENV ??= environmentName === "development" ? "development" : "production";
       environment.PEGAS_ENV ??= environmentName;

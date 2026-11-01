@@ -27,7 +27,22 @@
 | `bootInfra` | boolean | false | При `true` `pegas dev` автоматически поднимает инфраструктурные сервисы из docker-compose.yml |
 | `deploy` | object | — | См. [Секция deploy](#секция-deploy) |
 | `devGateway` | object | — | См. [Секция devGateway](#секция-devgateway-host-runtime) |
+| `env` | object | `{}` | **Глобальный конфиг проекта**: env-ключи, переносимые между окружениями и коммитимые в git. Значение — строка (одинаково во всех профилях) или карта `{ development, stage, production }` со **всеми тремя** ключами (частичные карты невалидны). Инжектится каждому сервису при `pegas dev`/`deploy`; сервисный `env` перекрывает глобальный. Секреты — только в `envFile` |
 | `services` | object | **обязательно** | Сервисы проекта; ключ — имя сервиса |
+
+### Пример глобального env
+
+```jsonc
+{
+  "env": {
+    "PUBLIC_PORT": { "development": "5432", "stage": "5432", "production": "5432" },
+    "FEATURE_X": { "development": "true", "stage": "false", "production": "false" },
+    "STATIC_KEY": "value"  // одинаковая во всех профилях
+  }
+}
+```
+
+Профиль выбирает сам запуск: `pegas deploy production` подставляет значения `production`, `pegas dev` — `development`. В коде проекта не нужны ключи типа `APP_ENV`/`NODE_ENV` и ветвления по ним: окружение уже разрешено деплоем (плюс каждому app-сервису инжектится `PEGAS_ENV=development|stage|production`).
 
 ## Секция services
 
