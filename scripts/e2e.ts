@@ -111,6 +111,20 @@ async function ensureDockerImage(imageName: string) {
   logSuccess(`Image '${imageName}' available in local Docker storage`);
 }
 
+/** Вписывает тестовый прод-домен всем сервисам с доменами (заглушка example.com не должна дойти до деплоя). */
+async function setContractDomains(projectDir: string, domain: string) {
+  const contractPath = path.join(projectDir, "pegas.json");
+  const contract = JSON.parse(await fs.readFile(contractPath, "utf-8")) as {
+    services?: Record<string, { domains?: Record<string, string[]> }>;
+  };
+  for (const service of Object.values(contract.services || {})) {
+    if (service.domains?.production?.length) {
+      service.domains.production = [domain];
+    }
+  }
+  await fs.writeFile(contractPath, JSON.stringify(contract, null, 2) + "\n", "utf-8");
+}
+
 async function setDockerServiceImages(projectDir: string, image: string) {
   const contractPath = path.join(projectDir, "pegas.json");
   const contract = JSON.parse(await fs.readFile(contractPath, "utf-8")) as {
@@ -348,6 +362,9 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8081:80"\n    environment:\n      - WHOAMI_NAME=project-alpha\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pAlphaDir });
+    // Единая заглушка example.com: тест-домены проекта уникальны
+    // (заглушки не должны дойти до деплоя — так же, как в реальном проекте).
+    await setContractDomains(pAlphaDir, "project-alpha.com");
     await setDockerServiceImages(pAlphaDir, "traefik/whoami");
     const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pAlphaDir,
@@ -367,6 +384,7 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8082:80"\n    environment:\n      - WHOAMI_NAME=project-beta\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pBetaDir });
+    await setContractDomains(pBetaDir, "project-beta.com");
     await setDockerServiceImages(pBetaDir, "traefik/whoami");
     const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
       cwd: pBetaDir,
