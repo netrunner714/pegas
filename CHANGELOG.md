@@ -5,6 +5,23 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [1.6.0] — 2026-11-01
+
+### Added
+- `$schema` в `pegas.json`: `pegas init` записывает ссылку на JSON Schema,
+  `reconcile` бэкфиллит её в существующие контракты. Публичная схема —
+  `schemas/pegas.json` в репозитории.
+- Документация: Diataxis-структура (`tutorials`/`how-to`/`reference`/`explanation`),
+  генерируемый справочник CLI (`docs/reference/cli.md` из `src/help.ts`),
+  справочник контракта, CHANGELOG, гвард целостности `docs:check` в CI.
+- Разделение публичной и внутренней документации (`docs/internal/`).
+
+### Changed
+- README переведён на русский язык.
+
+### Removed
+- Устаревший `llms-full.txt` (ручная копия старой архитектуры, не перегенерировался).
+
 ## [1.5.0] — 2026-11-01
 
 ### Added
