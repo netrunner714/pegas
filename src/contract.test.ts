@@ -131,7 +131,7 @@ describe("contract & package.json integration", () => {
       "web.my-awesome-site.localhost",
       "my-awesome-site.localhost",
     ]);
-    expect(content.services.web.domains.stage).toEqual(["web.stage.example.com"]);
+    expect(content.services.web.domains.stage).toEqual(["example.com"]);
     expect(content.services.web.domains.production).toEqual(["web.example.com"]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });

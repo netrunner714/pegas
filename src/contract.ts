@@ -518,7 +518,7 @@ export function createDefaultContract(
           development: [`${serviceName}.${slug}.localhost`, `${slug}.localhost`],
           // example.com (RFC 2606) — зарезервированный домен: явный маркер
           // «домен не заполнен», а не догадка о реальном домене пользователя.
-          stage: [`${serviceName}.stage.example.com`],
+          stage: ["example.com"],
           production: [`${serviceName}.example.com`],
         },
       },
@@ -619,7 +619,9 @@ export function createContractFromInventory(
             ? [`${svc.name}.${slug}.localhost`, `${slug}.localhost`]
             : [`${svc.name}.${slug}.localhost`],
         // example.com (RFC 2606): явный маркер «домен не заполнен».
-        stage: [`${svc.name}.stage.example.com`],
+        // Stage без имени сервиса: угадать стейдж-домен почти никогда
+        // нельзя — единая заглушка читается однозначнее.
+        stage: ["example.com"],
         production: [`${svc.name}.example.com`],
       };
     } else if (svc.kind === "infra") {

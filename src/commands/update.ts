@@ -17,7 +17,7 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`port\`: порт приложения внутри контейнера (по умолчанию 3000)
 - \`devGateway\`: параметры локального шлюза дева (по умолчанию \`httpsPort: 443\`, \`httpPort: 80\` — чистые URL без порта)
 - \`domains.development\`: локальные домены разработки (\`[service].[project].localhost\`, например: \`web.my-app.localhost\`)
-- \`domains.stage\`: домены стейджинга (создаются заглушками \`[service].stage.example.com\` — реальный домен вписать вручную)
+- \`domains.stage\`: домены стейджинга (заглушка \`example.com\` — стейдж-домен угадать нельзя, вписать вручную)
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
 ## Команды
