@@ -56,12 +56,6 @@ export async function findGatewayDir(explicitDir?: string): Promise<string> {
     return homeGateway;
   } catch {}
 
-  const homePegas = path.join(os.homedir(), "pegas-server");
-  try {
-    await fs.access(path.join(homePegas, "Caddyfile"));
-    return homePegas;
-  } catch {}
-
   // Fallback default
   return homeGateway;
 }
