@@ -124,46 +124,12 @@ async function runE2EDev() {
     logSuccess("Built fresh dist/index.js bundle");
 
     // =========================================================================
-    // Phase 1: Native Caddy Binary Resolution & Repository Cache (.cache/bin)
+    // Phase 1: Native Caddy Binary Resolution (~/.pegas/bin)
     // =========================================================================
-    logPhase(1, "Native Caddy Binary Discovery & Repository Cache (.cache/bin)");
-    const binaryName = process.platform === "win32" ? "caddy.exe" : "caddy";
-    const repoBinCacheDir = path.join(REPO_ROOT, ".cache", "bin");
-    const repoCachedCaddy = path.join(repoBinCacheDir, binaryName);
-    const homeCachedCaddy = path.join(os.homedir(), ".pegas", "bin", binaryName);
-
-    await fs.mkdir(repoBinCacheDir, { recursive: true });
-
-    let caddyPath = "";
-    if (await fs.access(repoCachedCaddy).then(() => true).catch(() => false)) {
-      caddyPath = repoCachedCaddy;
-      logSuccess(`Found cached Caddy in repository cache: ${cyan(repoCachedCaddy)}`);
-    } else if (await fs.access(homeCachedCaddy).then(() => true).catch(() => false)) {
-      await fs.copyFile(homeCachedCaddy, repoCachedCaddy);
-      await fs.chmod(repoCachedCaddy, 0o755);
-      caddyPath = repoCachedCaddy;
-      logSuccess(`Mirrored Caddy from ~/.pegas/bin to repository cache: ${cyan(repoCachedCaddy)}`);
-    } else {
-      const whichCmd = process.platform === "win32" ? "where" : "which";
-      const whichRes = await execAsync(whichCmd, [binaryName]);
-      if (whichRes.code === 0 && whichRes.stdout) {
-        const sysCaddy = whichRes.stdout.split("\n")[0].trim();
-        await fs.copyFile(sysCaddy, repoCachedCaddy);
-        await fs.chmod(repoCachedCaddy, 0o755);
-        caddyPath = repoCachedCaddy;
-        logSuccess(`Mirrored system Caddy to repository cache: ${cyan(repoCachedCaddy)}`);
-      } else {
-        console.log(`  ${yellow("⬇")} Caddy not found in cache or system. Downloading to .cache/bin...`);
-        const { findOrDownloadCaddy } = await import("../src/binary.js");
-        caddyPath = await findOrDownloadCaddy({ cacheDir: repoBinCacheDir });
-        if (caddyPath !== repoCachedCaddy) {
-          await fs.copyFile(caddyPath, repoCachedCaddy);
-          await fs.chmod(repoCachedCaddy, 0o755);
-          caddyPath = repoCachedCaddy;
-        }
-        logSuccess(`Downloaded and cached Caddy into: ${cyan(repoCachedCaddy)}`);
-      }
-    }
+    logPhase(1, "Native Caddy Binary Discovery (~/.pegas/bin)");
+    const { findOrDownloadCaddy } = await import("../src/binary.js");
+    // Managed cache in ~/.pegas/bin: reuse if present, download once if missing
+    const caddyPath = await findOrDownloadCaddy({ skipMirror: true });
 
     const caddyVer = await execAsync(caddyPath, ["version"]);
     logSuccess(`Caddy version: ${caddyVer.stdout.split("\n")[0]}`);

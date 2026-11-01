@@ -177,31 +177,7 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
       }
     } catch {}
 
-    // 5. Check local repository .cache/bin/ in current or parent directories
-    let searchDir = process.cwd();
-    for (let i = 0; i < 4; i++) {
-      const repoDir = path.join(searchDir, ".cache", "bin");
-      const repoVersioned = path.join(repoDir, versionedName);
-      const repoPlain = path.join(repoDir, plainName);
-
-      try {
-        await fs.access(repoVersioned);
-        if (checkCaddyVersion(repoVersioned)) {
-          return repoVersioned;
-        }
-      } catch {}
-
-      try {
-        await fs.access(repoPlain);
-        if (checkCaddyVersion(repoPlain)) {
-          return repoPlain;
-        }
-      } catch {}
-
-      const parent = path.dirname(searchDir);
-      if (parent === searchDir) break;
-      searchDir = parent;
-    }
+    // 5. Репо-кэш .cache/bin больше не используется (см. docs/dev.md)
   }
 
   // 6. Download official Caddy release into ~/.pegas/bin/
@@ -256,35 +232,6 @@ export async function findOrDownloadCaddy(options: FindCaddyOptions = {}): Promi
         await fs.chmod(homePlainBinary, 0o755);
       }
     } catch {}
-  }
-
-  // Mirror to repo .cache/bin/ if .cache exists in cwd or parent
-  if (!options.skipMirror) {
-    let repoSearchDir = process.cwd();
-    for (let i = 0; i < 4; i++) {
-      const repoCacheDir = path.join(repoSearchDir, ".cache");
-      const repoCacheBin = path.join(repoCacheDir, "bin");
-      try {
-        const stat = await fs.stat(repoCacheDir);
-        if (stat.isDirectory()) {
-          await fs.mkdir(repoCacheBin, { recursive: true });
-          const repoVersioned = path.join(repoCacheBin, versionedName);
-          const repoPlain = path.join(repoCacheBin, plainName);
-          if (repoVersioned !== targetVersionedBinary) {
-            await fs.copyFile(targetVersionedBinary, repoVersioned);
-            await fs.copyFile(targetPlainBinary, repoPlain);
-            if (!isWin) {
-              await fs.chmod(repoVersioned, 0o755);
-              await fs.chmod(repoPlain, 0o755);
-            }
-          }
-          break;
-        }
-      } catch {}
-      const parent = path.dirname(repoSearchDir);
-      if (parent === repoSearchDir) break;
-      repoSearchDir = parent;
-    }
   }
 
   if (!options.silent) {

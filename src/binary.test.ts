@@ -124,16 +124,11 @@ describe("caddy binary resolution", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("finds existing binary in repository .cache/bin", async () => {
-    const repoCacheBin = path.join(process.cwd(), ".cache", "bin");
-    const binaryName = process.platform === "win32" ? "caddy.exe" : "caddy";
-    const cachedFile = path.join(repoCacheBin, binaryName);
-
-    if (await fs.access(cachedFile).then(() => true).catch(() => false)) {
-      const found = await findOrDownloadCaddy({ silent: true });
-      expect(found).toBeDefined();
-      expect(await fs.access(found).then(() => true).catch(() => false)).toBe(true);
-    }
+  it("resolves binary via managed home cache or download", async () => {
+    // Repository .cache/bin removed: resolution goes through ~/.pegas/bin or download
+    const found = await findOrDownloadCaddy({ silent: true });
+    expect(found).toBeDefined();
+    expect(await fs.access(found).then(() => true).catch(() => false)).toBe(true);
   });
 
   it("handles download failure when remote returns non-200", async () => {
@@ -263,7 +258,7 @@ describe("caddy binary resolution", () => {
     const origAccess = fs.access;
 
     try {
-      // Mock that ~/.pegas/bin and .cache/bin don't exist
+      // Mock that ~/.pegas/bin doesn't exist
       fs.access = (async (p: any, mode: any) => {
         if (String(p).includes(".pegas") || String(p).includes(".cache")) {
           throw new Error("ENOENT");

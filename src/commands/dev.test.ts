@@ -144,7 +144,7 @@ describe("pegas dev", () => {
     expect(exists).toBe(true);
   });
 
-  it("finds Caddy from custom cacheDir or repository .cache/bin", async () => {
+  it("finds Caddy from custom cacheDir", async () => {
     const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dev-caddy-cache-"));
     const { versionedName } = getCaddyBinaryNames();
     const cachedCaddy = path.join(cacheDir, versionedName);
