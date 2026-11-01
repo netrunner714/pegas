@@ -23,6 +23,8 @@ export interface CaddyHarvest {
   domainToService: Map<string, string>;
   /** домены, привязанные к сервису */
   serviceToDomains: Map<string, string[]>;
+  /** сервис → порт из upstream "svc:port" (последний встреченный) */
+  serviceToPort: Map<string, number>;
   /** блоки со сплит-роутингом (несколько разных upstream в одном блоке) — не скопированы */
   splitRoutingBlocks: string[];
 }
@@ -99,6 +101,7 @@ export function parseCaddyfile(content: string): CaddyHarvest | null {
 
   const domainToService = new Map<string, string>();
   const serviceToDomains = new Map<string, string[]>();
+  const serviceToPort = new Map<string, number>();
   const splitRoutingBlocks: string[] = [];
 
   for (const block of blocks) {
@@ -122,6 +125,9 @@ export function parseCaddyfile(content: string): CaddyHarvest | null {
 
     const target = parsed[parsed.length - 1];
     if (!target) continue;
+    if (target.port !== undefined && !serviceToPort.has(target.service)) {
+      serviceToPort.set(target.service, target.port);
+    }
 
     for (const d of domains) {
       if (domainToService.has(d)) continue;
@@ -133,7 +139,7 @@ export function parseCaddyfile(content: string): CaddyHarvest | null {
   }
 
   if (domainToService.size === 0) return null;
-  return { domainToService, serviceToDomains, splitRoutingBlocks };
+  return { domainToService, serviceToDomains, serviceToPort, splitRoutingBlocks };
 }
 
 /** "svc:3000" → { service: "svc", port: 3000 }; "svc" → port undefined. */

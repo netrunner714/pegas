@@ -79,6 +79,14 @@ describe("caddyfile harvest", () => {
     expect(contract.services.site.domains.production).toEqual(["my-app.ru"]);
   });
 
+  it("applyCaddyHarvest заполняет порт сервиса из upstream svc:port", () => {
+    const contract = createDefaultContract("my-app", "site", 3000);
+    delete (contract.services.site as any).port;
+    const harvest = parseCaddyfile("my-app.ru {\n reverse_proxy site:3000\n}\n")!;
+    applyCaddyHarvest(contract, harvest);
+    expect((contract.services.site as any).port).toBe(3000);
+  });
+
   it("applyCaddyHarvest пропускает сервис, которого нет в контракте", () => {
     const contract = createDefaultContract("my-app", "site", 3000);
     const harvest = parseCaddyfile("other.com {\n reverse_proxy ghost:3000\n}\n")!;

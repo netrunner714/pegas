@@ -540,6 +540,12 @@ export function applyCaddyHarvest(contract: PegasContract, harvest: CaddyHarvest
     if (prod.length > 0) {
       service.domains.production = [...new Set([...prod, ...domains.filter((d) => d.startsWith("www."))])];
     }
+    // Порт из reverse_proxy upstream "svc:port": литеральный факт
+    // о сервисе, который compose мог не раскрыть.
+    if (service.port === undefined) {
+      const port = harvest.serviceToPort.get(serviceName);
+      if (port !== undefined) service.port = port;
+    }
   }
 }
 
