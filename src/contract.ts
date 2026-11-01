@@ -485,8 +485,10 @@ export async function detectComposeWebService(
  * Generates the standard default Pegas contract for a given project slug.
  *
  * Dev-домены следуют стандарту `[service].[project].localhost` с алиасом
- * `[project].localhost` для основного сервиса. Порты dev-шлюза по умолчанию —
- * стандартные 443/80 (чистые URL без `:порт` в браузере).
+ * `[project].localhost` для основного сервиса. Stage/prod-домены заполняются
+ * зарезервированными по RFC 2606 заглушками `*.example.com`: они явно
+ * показывают, что реальный домен не задан, и не создают вид домысла.
+ * Порты dev-шлюза по умолчанию — стандартные 443/80 (чистые URL без `:порт`).
  */
 export function createDefaultContract(
   slug: string,
@@ -508,8 +510,10 @@ export function createDefaultContract(
         port: portNum,
         domains: {
           development: [`${serviceName}.${slug}.localhost`, `${slug}.localhost`],
-          stage: [`stage.${slug}.com`],
-          production: [`${slug}.com`],
+          // example.com (RFC 2606) — зарезервированный домен: явный маркер
+          // «домен не заполнен», а не догадка о реальном домене пользователя.
+          stage: [`${serviceName}.stage.example.com`],
+          production: [`${serviceName}.example.com`],
         },
       },
     },

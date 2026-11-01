@@ -131,7 +131,8 @@ describe("contract & package.json integration", () => {
       "web.my-awesome-site.localhost",
       "my-awesome-site.localhost",
     ]);
-    expect(content.services.web.domains.production).toEqual(["my-awesome-site.com"]);
+    expect(content.services.web.domains.stage).toEqual(["web.stage.example.com"]);
+    expect(content.services.web.domains.production).toEqual(["web.example.com"]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
@@ -167,7 +168,7 @@ describe("contract & package.json integration", () => {
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe(slug);
     expect(content.services.web.domains.development).toEqual([`web.${slug}.localhost`, `${slug}.localhost`]);
-    expect(content.services.web.domains.production).toEqual([`${slug}.com`]);
+    expect(content.services.web.domains.production).toEqual(["web.example.com"]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
