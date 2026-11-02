@@ -130,4 +130,33 @@ describe("declarative runtime Compose generation", () => {
     expect(parsed.services.web.build.dockerfile_inline).toContain("FROM node:");
     expect(parsed.services.web.labels["pegas.role"]).toBe("app");
   });
+
+  it("declares custom named volumes from service.volumes in top-level volumes", () => {
+    const customContract: PegasContract = {
+      runtime: "docker",
+      services: {
+        db: {
+          role: "infra",
+          image: "postgres:18-alpine",
+          volumes: [
+            "pg_data:/var/lib/postgresql",
+            "pg_tls:/var/lib/postgresql/tls",
+            "./local_data:/mounted_dir",
+            "/host_path:/container_path",
+          ],
+        },
+      },
+    };
+    const result = createRuntimeCompose(customContract, {
+      projectRoot,
+      projectId: "db-app",
+      environment: "production",
+    });
+    const parsed = JSON.parse(result.content);
+    expect(parsed.volumes).toBeDefined();
+    expect(parsed.volumes.pg_data).toEqual({});
+    expect(parsed.volumes.pg_tls).toEqual({});
+    expect(parsed.volumes["./local_data"]).toBeUndefined();
+    expect(parsed.volumes["/host_path"]).toBeUndefined();
+  });
 });

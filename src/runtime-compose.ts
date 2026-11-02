@@ -375,6 +375,28 @@ function getVolumeTarget(spec: string | { target?: string }): string | undefined
   return parts.length >= 2 ? parts[1] : spec;
 }
 
+function getNamedVolumeSource(spec: unknown): string | undefined {
+  if (typeof spec !== "string") {
+    if (spec && typeof spec === "object") {
+      const obj = spec as { type?: string; source?: string };
+      if (obj.type === "volume" && obj.source) {
+        return obj.source;
+      }
+    }
+    return undefined;
+  }
+  // Windows absolute path "C:\..." or "D:/..." is a host path, not a named volume
+  if (/^[A-Za-z]:[\\/]/.test(spec)) return undefined;
+  const parts = spec.split(":");
+  if (parts.length >= 2) {
+    const source = parts[0]?.trim();
+    if (source && !source.startsWith(".") && !source.startsWith("/") && !source.startsWith("~")) {
+      return source;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Q6: a host-installed node_modules directory sits directly under the bind mount
  * and is silently shadowed by the Docker dependency volume — the host copy never
@@ -587,6 +609,12 @@ export function createRuntimeCompose(
     if (service.port !== undefined) generated.expose = [String(service.port)];
 
     const volumes: Array<string | { type?: string; source?: string; target?: string; bind?: unknown }> = [...(service.volumes || [])];
+    for (const volume of service.volumes || []) {
+      const namedSource = getNamedVolumeSource(volume);
+      if (namedSource) {
+        namedVolumes.add(namedSource);
+      }
+    }
     if (app && environmentName === "development") {
       const source = resolveProjectDirectory(
         options.projectRoot,
