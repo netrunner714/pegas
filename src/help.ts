@@ -198,8 +198,13 @@ export const COMMANDS: CliCommandDef[] = [
         placeholder: "<path>",
         description: "Target project directory",
       },
+      {
+        name: "fix",
+        type: "boolean",
+        description: "Automatically repair common issues (.gitignore, .env.example sync, starter .env)",
+      },
     ],
-    examples: ["$ pegas check", "$ pegas check --json"],
+    examples: ["$ pegas check", "$ pegas check --fix", "$ pegas check --json"],
   },
   {
     name: "status",

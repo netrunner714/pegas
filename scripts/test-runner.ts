@@ -16,8 +16,10 @@ async function main() {
   const { NO_COLOR: _ignored, ...baseEnv } = process.env;
   const hasIsolate = forwardedArgs.some((a) => a.startsWith("--isolate") || a.startsWith("--no-isolate") || a.startsWith("--parallel"));
   const hasPreload = forwardedArgs.some((a) => a.startsWith("--preload"));
+  const hasTimeout = forwardedArgs.some((a) => a.startsWith("--timeout"));
   const args = [
     "test",
+    ...(hasTimeout ? [] : ["--timeout", "15000"]),
     ...(hasIsolate ? [] : ["--isolate"]),
     "--bail=1",
     ...(hasPreload ? [] : ["--preload", "./src/test-silence.ts"]),

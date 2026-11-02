@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { validatePegasContract, type ContractValidationIssue } from "../contract.js";
 import { verifySecrets, formatSecretsDiagnostic, syncEnvExample, isIgnoredByGit } from "../secrets.js";
+import { setupGitignore } from "./init.js";
 import type { CheckOptions, PegasContract } from "../types.js";
 
 export interface RepoAuditResult {
@@ -15,6 +16,7 @@ export interface RepoAuditResult {
   secretsCheck?: import("../secrets.js").SecretsCheckResult;
   gitignoreIssues: string[];
   legacyFiles: { path: string; reason: string; severity: "warn" | "info" }[];
+  fixesApplied: string[];
   errors: string[];
   warnings: string[];
 }
@@ -42,12 +44,26 @@ const LEGACY_PATTERNS: { pattern: RegExp; reason: string; severity: "warn" | "in
   },
 ];
 
-export async function auditRepository(cwd = process.cwd(), options?: { envFile?: string }): Promise<RepoAuditResult> {
+export async function auditRepository(
+  cwd = process.cwd(),
+  options?: { envFile?: string; fix?: boolean }
+): Promise<RepoAuditResult> {
   const projectRoot = path.resolve(cwd);
   const errors: string[] = [];
   const warnings: string[] = [];
   const gitignoreIssues: string[] = [];
   const legacyFiles: { path: string; reason: string; severity: "warn" | "info" }[] = [];
+  const fixesApplied: string[] = [];
+
+  // Automated repair mode (--fix)
+  if (options?.fix) {
+    if (!isIgnoredByGit(projectRoot, ".pegas") || !isIgnoredByGit(projectRoot, ".env")) {
+      const gitignoreFix = await setupGitignore(projectRoot);
+      if (gitignoreFix) {
+        fixesApplied.push(gitignoreFix);
+      }
+    }
+  }
 
   // 1. Contract existence and validation
   const contractPath = path.join(projectRoot, "pegas.json");
@@ -73,6 +89,43 @@ export async function auditRepository(cwd = process.cwd(), options?: { envFile?:
     errors.push("pegas.json contract file does not exist. Run 'pegas init' to create one.");
   }
 
+  // If fix is requested and contract exists, sync .env.example and create starter .env if missing
+  if (options?.fix && contract) {
+    if (contract.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
+      const syncRes = await syncEnvExample(projectRoot, contract);
+      if (syncRes.updated) {
+        fixesApplied.push(`Синхронизирован .env.example с contract.secrets (${syncRes.added.join(", ")})`);
+      }
+    }
+
+    const envFileName = options?.envFile || ".env";
+    const envPath = path.join(projectRoot, envFileName);
+    const examplePath = path.join(projectRoot, ".env.example");
+    let hasEnv = false;
+    try {
+      await fs.access(envPath);
+      hasEnv = true;
+    } catch {}
+
+    if (!hasEnv) {
+      let hasExample = false;
+      try {
+        await fs.access(examplePath);
+        hasExample = true;
+      } catch {}
+
+      if (hasExample) {
+        await fs.copyFile(examplePath, envPath);
+        fixesApplied.push(`Создан стартовый ${envFileName} из .env.example`);
+      } else if (contract.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
+        const starter = "# Local environment secrets (not committed to git)\n" +
+          contract.secrets.map((s) => `${s}=\n`).join("");
+        await fs.writeFile(envPath, starter, "utf-8");
+        fixesApplied.push(`Создан стартовый ${envFileName}`);
+      }
+    }
+  }
+
   // 2. Secrets parity and gitignore protection
   const secretsCheck = await verifySecrets(projectRoot, contract, { envFile: options?.envFile });
   if (!secretsCheck.valid) {
@@ -92,7 +145,7 @@ export async function auditRepository(cwd = process.cwd(), options?: { envFile?:
     try {
       await fs.access(examplePath);
     } catch {
-      warnings.push("Missing .env.example schema file mirroring contract.secrets. Run 'pegas check --sync' or create it.");
+      warnings.push("Missing .env.example schema file mirroring contract.secrets. Run 'pegas check --fix' or create it.");
     }
   }
 
@@ -149,6 +202,7 @@ export async function auditRepository(cwd = process.cwd(), options?: { envFile?:
     secretsCheck,
     gitignoreIssues,
     legacyFiles,
+    fixesApplied,
     errors,
     warnings,
   };
@@ -158,7 +212,7 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
   const cwd = options.cwd || process.cwd();
   const isJson = options.json ?? false;
 
-  const result = await auditRepository(cwd);
+  const result = await auditRepository(cwd, { fix: options.fix });
 
   if (isJson) {
     console.log(JSON.stringify(result, null, 2));
@@ -169,6 +223,15 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
   }
 
   console.log(`\n🔍 Pegas Repository Audit — ${result.projectRoot}\n`);
+
+  // Fixes section
+  if (result.fixesApplied.length > 0) {
+    console.log(`  🔧 Fixes Applied (${result.fixesApplied.length}):`);
+    for (const fix of result.fixesApplied) {
+      console.log(`     ✔ ${fix}`);
+    }
+    console.log("");
+  }
 
   // 1. Contract section
   if (result.contractExists && result.contractIssues.length === 0) {

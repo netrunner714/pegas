@@ -4,6 +4,8 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import {
   setupGitignore,
+  setupStarterDockerfile,
+  setupStarterEnvFiles,
   setupAgentsMd,
   setupDevBinary,
   checkInstalledVersion,
@@ -66,30 +68,71 @@ describe("pegas init (unit)", () => {
     ).toBe(true);
   });
 
-  it("setupGitignore adds .pegas if missing and is idempotent", async () => {
+  it("setupGitignore adds .pegas and .env if missing and is idempotent", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-git-"));
 
-    // 1. Missing file: creates .gitignore
+    // 1. Missing file: creates .gitignore with .pegas and .env
     const res1 = await setupGitignore(tmpProj);
-    expect(res1).toBe("Создан .gitignore с записью .pegas");
+    expect(res1).toContain(".gitignore");
     const content1 = await fs.readFile(path.join(tmpProj, ".gitignore"), "utf-8");
     expect(content1).toContain(".pegas");
+    expect(content1).toContain(".env");
 
-    // 2. Existing file with .pegas: returns null (no-op)
+    // 2. Existing file with both: returns null (no-op)
     const res2 = await setupGitignore(tmpProj);
     expect(res2).toBeNull();
 
-    // 3. Existing file without .pegas: appends .pegas
-    await fs.writeFile(path.join(tmpProj, ".gitignore"), "node_modules/\ndist/\n", "utf-8");
+    // 3. Existing file with only one: appends missing
+    await fs.writeFile(path.join(tmpProj, ".gitignore"), "node_modules/\n.pegas\n", "utf-8");
     const res3 = await setupGitignore(tmpProj);
-    expect(res3).toBe("Добавлена запись .pegas в .gitignore");
+    expect(res3).toContain(".env");
     const content3 = await fs.readFile(path.join(tmpProj, ".gitignore"), "utf-8");
-    expect(content3).toContain("node_modules/\ndist/\n.pegas");
+    expect(content3).toContain(".pegas");
+    expect(content3).toContain(".env");
 
     await fs.rm(tmpProj, { recursive: true, force: true });
   });
 
-  it("handleProjectInit initializes project contract, package.json, docs, and compose", async () => {
+  it("setupStarterDockerfile creates Dockerfile adapted to package manager and never overwrites", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-df-"));
+
+    // 1. Bun lockfile detected
+    await fs.writeFile(path.join(tmpProj, "bun.lock"), "");
+    const resBun = await setupStarterDockerfile(tmpProj);
+    expect(resBun).toBe("Создан стартовый Dockerfile");
+    const contentBun = await fs.readFile(path.join(tmpProj, "Dockerfile"), "utf-8");
+    expect(contentBun).toContain("oven/bun");
+    expect(contentBun).toContain("EXPOSE 3000");
+
+    // 2. Overwrite protection: calling again returns null
+    const resNoop = await setupStarterDockerfile(tmpProj);
+    expect(resNoop).toBeNull();
+
+    await fs.rm(tmpProj, { recursive: true, force: true });
+  });
+
+  it("setupStarterEnvFiles creates .env.example and .env reflecting contract secrets", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-env-"));
+
+    const actions = await setupStarterEnvFiles(tmpProj, {
+      projectName: "app",
+      services: {},
+      secrets: ["API_KEY", "DATABASE_URL"],
+    });
+
+    expect(actions.length).toBe(2);
+    const example = await fs.readFile(path.join(tmpProj, ".env.example"), "utf-8");
+    expect(example).toContain("API_KEY=");
+    expect(example).toContain("DATABASE_URL=");
+
+    const env = await fs.readFile(path.join(tmpProj, ".env"), "utf-8");
+    expect(env).toContain("API_KEY=");
+    expect(env).toContain("DATABASE_URL=");
+
+    await fs.rm(tmpProj, { recursive: true, force: true });
+  });
+
+  it("handleProjectInit initializes project contract, package.json, docs, and starter docker/env", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-init-proj-"));
     await fs.writeFile(
       path.join(tmpProj, "package.json"),
@@ -114,11 +157,18 @@ describe("pegas init (unit)", () => {
     expect(await fs.access(path.join(tmpProj, "pegas.json")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, "docs", "pegas.md")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, "AGENTS.md")).then(() => true).catch(() => false)).toBe(true);
-    expect(await fs.access(path.join(tmpProj, ".pegas", "docker-compose.yml")).then(() => true).catch(() => false)).toBe(true);
+    expect(await fs.access(path.join(tmpProj, "Dockerfile")).then(() => true).catch(() => false)).toBe(true);
+    expect(await fs.access(path.join(tmpProj, ".env.example")).then(() => true).catch(() => false)).toBe(true);
+    expect(await fs.access(path.join(tmpProj, ".env")).then(() => true).catch(() => false)).toBe(true);
     expect(await fs.access(path.join(tmpProj, ".gitignore")).then(() => true).catch(() => false)).toBe(true);
+
+    // Verify .pegas/docker-compose.yml is NOT created
+    expect(await fs.access(path.join(tmpProj, ".pegas", "docker-compose.yml")).then(() => true).catch(() => false)).toBe(false);
 
     const contract = JSON.parse(await fs.readFile(path.join(tmpProj, "pegas.json"), "utf-8"));
     expect(contract.projectName).toBe("my-microservice");
+    expect(contract.runtime).toBe("docker");
+    expect(contract.services.web.build.dockerfile).toBe("Dockerfile");
 
     await fs.rm(tmpProj, { recursive: true, force: true });
   });

@@ -6,6 +6,7 @@ import { isProxyService, isInfraService } from "./compose.js";
 import { ComposeServiceInfo, ComposeInventory, detectComposeInventory } from "./compose-inventory.js";
 import { CaddyHarvest, detectCaddyHarvest } from "./caddyfile-harvest.js";
 import { StructureHarvest, detectStructureHarvest } from "./structure-harvest.js";
+import { parseEnvContent } from "./secrets.js";
 import { VERSION, compareSemver } from "./version.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
@@ -574,12 +575,14 @@ export async function detectComposeWebService(
 export function createDefaultContract(
   slug: string,
   serviceName = "web",
-  port: number | string = 3000
+  port: number | string = 3000,
+  options?: { secrets?: string[]; runtime?: "docker" | "host" }
 ): PegasContract {
   const portNum = typeof port === "string" ? parseInt(port, 10) || 3000 : port;
-  return {
+  const contract: PegasContract = {
     $schema: CONTRACT_SCHEMA_URL,
     projectName: slug,
+    runtime: options?.runtime ?? "docker",
     devGateway: {
       httpPort: 80,
       httpsPort: 443,
@@ -592,7 +595,12 @@ export function createDefaultContract(
     env: {},
     services: {
       [serviceName]: {
+        build: {
+          context: ".",
+          dockerfile: "Dockerfile",
+        },
         port: portNum,
+        envFile: ".env",
         domains: {
           development: [`${serviceName}.${slug}.localhost`, `${slug}.localhost`],
           // example.com (RFC 2606) — зарезервированный домен: явный маркер
@@ -603,6 +611,10 @@ export function createDefaultContract(
       },
     },
   };
+  if (options?.secrets && options.secrets.length > 0) {
+    contract.secrets = options.secrets;
+  }
+  return contract;
 }
 
 /**
@@ -788,27 +800,17 @@ export function reconcileContract(
 export const DEFAULT_CONTRACT: PegasContract = createDefaultContract("app", "web", 3000);
 
 /**
- * Detects the runtime for a NEW contract from the project itself: a project
- * that already ships Docker artifacts (Dockerfile or a Compose file) is treated
- * as a Docker project; everything else keeps the legacy host flow. The user
- * never passes flags for this - pegas reads the project, pegas decides.
+ * Detects the runtime for a contract. Docker is the standard modern runtime
+ * for Pegas projects. Legacy host mode is preserved only if explicitly declared
+ * in an existing pegas.json.
  */
 export async function detectContractRuntime(projectDir: string): Promise<"host" | "docker"> {
-  const dockerMarkers = [
-    "Dockerfile",
-    "Dockerfile.dev",
-    "docker-compose.yml",
-    "docker-compose.yaml",
-    "compose.yml",
-    "compose.yaml",
-  ];
-  for (const marker of dockerMarkers) {
-    try {
-      await fs.access(path.join(projectDir, marker));
-      return "docker";
-    } catch {}
-  }
-  return "host";
+  try {
+    const raw = await fs.readFile(path.join(projectDir, CONTRACT_FILENAME), "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed.runtime === "host") return "host";
+  } catch {}
+  return "docker";
 }
 
 export async function setupProjectContract(
@@ -837,7 +839,7 @@ export async function setupProjectContract(
   const inventory = await detectComposeInventory(projectDir);
   const defaultContract = inventory
     ? createContractFromInventory(slug, inventory)
-    : createDefaultContract(slug, serviceName, port);
+    : createDefaultContract(slug, serviceName, port, { runtime });
   // Харвест доменов из Caddyfile: прод-домены копируются литералами
   // вместо example.com-заглушек. Источник после init не читается.
   const caddyHarvest = await detectCaddyHarvest(projectDir);
@@ -848,6 +850,26 @@ export async function setupProjectContract(
   applyStructureHarvest(defaultContract, structure);
   if (runtime === "docker") {
     defaultContract.runtime = "docker";
+  }
+
+  // Auto-detect secrets from existing .env or .env.example if not already populated
+  if (!defaultContract.secrets || defaultContract.secrets.length === 0) {
+    let existingSecrets: string[] = [];
+    try {
+      const envRaw = await fs.readFile(path.join(projectDir, ".env"), "utf-8");
+      existingSecrets = Array.from(parseEnvContent(envRaw).keys());
+    } catch {
+      try {
+        const exRaw = await fs.readFile(path.join(projectDir, ".env.example"), "utf-8");
+        existingSecrets = Array.from(parseEnvContent(exRaw).keys());
+      } catch {}
+    }
+    const valid = existingSecrets.filter(
+      (k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && k !== "PORT" && k !== "NODE_ENV"
+    );
+    if (valid.length > 0) {
+      defaultContract.secrets = valid;
+    }
   }
 
   let existingContent: string | null = null;

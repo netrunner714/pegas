@@ -154,4 +154,46 @@ describe("pegas check command", () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it("auditRepository and handleCheck support --fix to automatically repair gitignore, .env.example, and .env", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-fix-"));
+    try {
+      const contract = {
+        projectName: "fix-test",
+        runtime: "docker",
+        secrets: ["API_SECRET", "DB_PASS"],
+        services: { web: { port: 80 } },
+      };
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract), "utf-8");
+
+      // Initially no .gitignore, no .env, no .env.example
+      const result = await auditRepository(tmp, { fix: true });
+      expect(result.fixesApplied.length).toBeGreaterThan(0);
+
+      // Verify repaired files
+      const gitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf-8");
+      expect(gitignore).toContain(".pegas");
+      expect(gitignore).toContain(".env");
+
+      const example = await fs.readFile(path.join(tmp, ".env.example"), "utf-8");
+      expect(example).toContain("API_SECRET=");
+      expect(example).toContain("DB_PASS=");
+
+      const env = await fs.readFile(path.join(tmp, ".env"), "utf-8");
+      expect(env).toContain("API_SECRET=");
+      expect(env).toContain("DB_PASS=");
+
+      // Terminal run with fix
+      const logs: string[] = [];
+      const spyLog = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
+      try {
+        await handleCheck({ cwd: tmp, fix: true, noExit: true });
+      } finally {
+        spyLog.mockRestore();
+      }
+      expect(logs.some((l) => l.includes("Pegas Repository Audit"))).toBe(true);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });

@@ -211,6 +211,23 @@ describe("contract & package.json integration", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it("setupProjectContract auto-detects secrets from existing .env into contract.secrets", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-sec-detect-"));
+    await fs.writeFile(
+      path.join(tmpDir, ".env"),
+      "DATABASE_URL=postgres://...\nJWT_SECRET=xyz\nPORT=8080\nNODE_ENV=production\n",
+      "utf-8"
+    );
+
+    const res = await setupProjectContract(tmpDir);
+    expect(res.created).toBe(true);
+    expect(res.contract?.secrets).toEqual(["DATABASE_URL", "JWT_SECRET"]);
+    expect(res.contract?.runtime).toBe("docker");
+    expect(res.contract?.services.web.build).toEqual({ context: ".", dockerfile: "Dockerfile" });
+
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
   it("reconcileContract fills in missing blocks like devGateway while preserving custom fields and services", () => {
     const existing = {
       projectName: "custom-app",

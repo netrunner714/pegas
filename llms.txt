@@ -26,7 +26,7 @@
 - `npx pegas uninstall [options]` (--dry-run, --cwd) — Remove Pegas from the project and clean the package (mirror of init).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
-- `npx pegas check [options]` (--cwd) — Audit repository hygiene against Pegas 2-file standard (pegas.json + .env), secrets parity, and legacy clutter.
+- `npx pegas check [options]` (--cwd, --fix) — Audit repository hygiene against Pegas 2-file standard (pegas.json + .env), secrets parity, and legacy clutter.
 - `npx pegas status [options]` — Check gateway health and active project routes.
 - `npx pegas llms [options]` — Print machine-readable LLM context.
 

@@ -243,6 +243,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       await dispatch.handleCheck({
         cwd: values.cwd as string | undefined,
         json: values.json as boolean | undefined,
+        ...(values.fix ? { fix: true } : {}),
         noExit: options.noExit,
       });
       break;

@@ -140,12 +140,14 @@ pegas ca remove
 
 ```text
 --cwd <path>          Целевой каталог проекта
+--fix                 Automatically repair common issues (.gitignore, .env.example sync, starter .env)
 ```
 
 Примеры:
 
 ```bash
 pegas check
+pegas check --fix
 pegas check --json
 ```
 
