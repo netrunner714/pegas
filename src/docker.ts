@@ -103,8 +103,7 @@ export async function ensureGatewayFiles(gatewayDir: string): Promise<void> {
     await fs.mkdir(path.join(gatewayDir, "conf.d"), { recursive: true });
     const caddyfile = [
       "{",
-      "    admin off",
-      "    email <почта>@<домен>",
+      "    email admin@netrunner714.ru",
       "}",
       "",
       "import /etc/caddy/conf.d/*.caddy",
