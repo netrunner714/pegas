@@ -417,6 +417,8 @@ describe("main CLI command routing", () => {
     );
 
     expect(calls.deploy).toEqual({
+      scenario: "production",
+      target: "production",
       env: "production",
       cwd: undefined,
       gatewayDir: "/var/caddy",
@@ -425,6 +427,15 @@ describe("main CLI command routing", () => {
 
     await main(["deploy", "stage", "--json"], { dispatchers });
     expect(calls.deploy.env).toBe("stage");
+
+    // Test pegas -s development and pegas -t development root dispatch
+    await main(["-s", "development", "--json"], { dispatchers });
+    expect(calls.deploy.scenario).toBe("development");
+    expect(calls.deploy.env).toBe("development");
+
+    await main(["-t", "staging", "--json"], { dispatchers });
+    expect(calls.deploy.target).toBe("staging");
+    expect(calls.deploy.env).toBe("staging");
   });
 
   it("dispatches 'down' command with options", async () => {

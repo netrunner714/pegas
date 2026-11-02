@@ -22,7 +22,7 @@
 - `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
-- `npx pegas deploy <env> [options]` (-e, --cwd, --dry-run, --skip-dns-check, --strict-dns, --skip-up) — Deploy an environment (development/production): network, shared Gateway, containers, routes.
+- `npx pegas deploy [options]` (-s, -t, -e, --cwd, --dry-run, --skip-dns-check, --strict-dns, --skip-up) — Deploy a scenario from pegas.json: network, shared Gateway, containers, routes.
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas uninstall [options]` (--dry-run, --cwd) — Remove Pegas from the project and clean the package (mirror of init).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
@@ -32,6 +32,8 @@
 - `npx pegas llms [options]` — Print machine-readable LLM context.
 
 ## Global Options
+- `-s, --scenario` <name> — Scenario from pegas.json to deploy.
+- `-t, --target` <name> — Alias for --scenario.
 - `--gateway-dir` <path> — Override path to gateway directory.
 - `--json` — Output machine-readable JSON (ideal for AI agents and scripts).
 - `-h, --help` — Show this help message.

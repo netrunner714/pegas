@@ -153,6 +153,26 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
   const command = positionals[0]?.toLowerCase();
 
+  const explicitScenario = (values.scenario as string | undefined) ||
+    (values.target as string | undefined);
+
+  if (!command && explicitScenario) {
+    await dispatch.handleDeploy({
+      cwd: values.cwd as string | undefined,
+      scenario: explicitScenario,
+      target: explicitScenario,
+      env: explicitScenario,
+      gatewayDir: values["gateway-dir"] as string | undefined,
+      ...(values["dry-run"] ? { dryRun: true } : {}),
+      ...(values["skip-dns-check"] ? { skipDnsCheck: true } : {}),
+      ...(values["strict-dns"] ? { strictDns: true } : {}),
+      ...(values["skip-up"] ? { skipUp: true } : {}),
+      json: values.json as boolean | undefined,
+      ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
+    });
+    return;
+  }
+
   if (command === "help" || values.help || pegasArgs.includes("-h") || pegasArgs.includes("--help")) {
     const targetCommand = command === "help" ? positionals[1]?.toLowerCase() : command;
     console.log(generateHelpText(targetCommand));
@@ -182,7 +202,9 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
     case "logs": {
       const knownEnvs = new Set(["development", "dev", "stage", "staging", "production", "prod", "test"]);
-      let targetEnv = values.env as string | undefined;
+      let targetEnv = (values.env as string | undefined) ||
+        (values.scenario as string | undefined) ||
+        (values.target as string | undefined);
       let targetService: string | undefined;
 
       const pos1 = positionals[1] as string | undefined;
@@ -233,10 +255,15 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     }
 
     case "deploy": {
-      const targetEnv = (positionals[1] as string | undefined) || (values.env as string | undefined);
+      const targetScenario = (values.scenario as string | undefined) ||
+        (values.target as string | undefined) ||
+        (values.env as string | undefined) ||
+        (positionals[1] as string | undefined);
       await dispatch.handleDeploy({
         cwd: values.cwd as string | undefined,
-        env: targetEnv,
+        scenario: targetScenario,
+        target: targetScenario,
+        env: targetScenario,
         gatewayDir: values["gateway-dir"] as string | undefined,
         ...(values["dry-run"] ? { dryRun: true } : {}),
         ...(values["skip-dns-check"] ? { skipDnsCheck: true } : {}),
@@ -250,10 +277,14 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
 
     case "down": {
       const downEnvPositional = positionals[1] as string | undefined;
+      const targetEnv = (values.scenario as string | undefined) ||
+        (values.target as string | undefined) ||
+        (values.env as string | undefined) ||
+        downEnvPositional;
       await dispatch.handleDown({
         cwd: values.cwd as string | undefined,
         gatewayDir: values["gateway-dir"] as string | undefined,
-        env: downEnvPositional || (values.env as string | undefined),
+        env: targetEnv,
         json: values.json as boolean | undefined,
       });
       break;

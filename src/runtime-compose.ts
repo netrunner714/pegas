@@ -476,11 +476,9 @@ export function createRuntimeCompose(
         if (!effectiveImage) {
           throw new Error(`Infrastructure service "${serviceName}" needs an explicit image in pegas.json; no built-in profile exists for this service.`);
         }
-      } else if (app && environmentName === "development") {
-        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, "development");
-        effectiveImage = appDefaults.image;
       } else if (app) {
-        throw new Error(`Production service "${serviceName}" must declare build or image in pegas.json. Automatic stack images are for development only.`);
+        appDefaults = resolveAppDefaults(serviceName, service, options.projectRoot, environmentName);
+        effectiveImage = appDefaults.image;
       } else {
         throw new Error(`Service "${serviceName}" needs an image, build configuration, or a recognized app/infra profile.`);
       }
@@ -502,11 +500,10 @@ export function createRuntimeCompose(
         throw new Error(`services.${serviceName}.build.dockerfile must resolve to a file inside its build context.`);
       }
     }
-    // In development the source tree is bind-mounted into the container: a source
-    // edit must not trigger an image rebuild. Only the build recipe (Dockerfile,
-    // .dockerignore, dependencies) participates in the fingerprint. In other
-    // environments the full build context is baked into the image and is hashed.
-    const hashBuildInputs = service.build && environmentName !== "development";
+    const explicitBindMount = Boolean(service.bindMount);
+    const isDevBuild = Boolean(service.build?.dockerfile && /dev/i.test(service.build.dockerfile));
+    const shouldBindMount = Boolean(appDefaults || explicitBindMount || isDevBuild);
+    const hashBuildInputs = Boolean(service.build && !shouldBindMount);
     const dockerfileHash = createHash("sha256")
       .update(dockerfilePath && fs.existsSync(dockerfilePath) ? fs.readFileSync(dockerfilePath) : "")
       .update(fs.existsSync(dockerIgnorePath) ? fs.readFileSync(dockerIgnorePath) : "")
@@ -619,13 +616,8 @@ export function createRuntimeCompose(
         namedVolumes.add(namedSource);
       }
     }
-    if (app && environmentName === "development") {
-      const explicitBindMount = Boolean(service.bindMount);
-      const isDevBuild = Boolean(service.build?.dockerfile && /dev/i.test(service.build.dockerfile));
-      const shouldBindMount = Boolean(appDefaults || explicitBindMount || isDevBuild);
-
-      if (shouldBindMount) {
-        const source = resolveProjectDirectory(
+    if (app && shouldBindMount) {
+      const source = resolveProjectDirectory(
           options.projectRoot,
           service.bindMount || service.build?.context || ".",
           `services.${serviceName}.bindMount`
@@ -645,7 +637,6 @@ export function createRuntimeCompose(
           namedVolumes.add(volumeName);
         }
       }
-    }
     if (volumes.length > 0) generated.volumes = volumes;
 
     services[serviceName] = generated;

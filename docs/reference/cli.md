@@ -68,32 +68,35 @@ pegas logs development api -f
 pegas logs -n 50
 ```
 
-### `pegas deploy <env> [options]`
+### `pegas deploy [options]`
 
-Разворачивает окружение (development/production): сеть, общий Gateway, контейнеры, маршруты
+Разворачивает проект по сценарию из pegas.json: сеть, общий Gateway, контейнеры, маршруты
 
 Флаги:
 
 ```text
--e, --env <name>      Целевое окружение (например, production, stage)
---cwd <path>          Целевой каталог проекта
---dry-run             Показать план изменений без записи на диск
---skip-dns-check      Skip DNS pre-flight verification
---strict-dns          Abort deployment if DNS does not resolve to this host
---skip-up             Configure routes without bringing up containers
+-s, --scenario <name>  Целевой сценарий из pegas.json (например, development, production, stage)
+-t, --target <name>    Алиас для --scenario
+-e, --env <name>       Целевое окружение (например, production, stage)
+--cwd <path>           Целевой каталог проекта
+--dry-run              Показать план изменений без записи на диск
+--skip-dns-check       Skip DNS pre-flight verification
+--strict-dns           Abort deployment if DNS does not resolve to this host
+--skip-up              Configure routes without bringing up containers
 ```
 
 Примеры:
 
 ```bash
-pegas deploy production
-pegas deploy stage
-pegas deploy production --dry-run
+pegas -s development
+pegas -s production
+pegas deploy -s production
+pegas deploy -t stage --dry-run
 ```
 
 ### `pegas down [options]`
 
-Удаляет контейнеры проекта и его маршруты из Caddy (все окружения или одно через --env)
+Удаляет контейнеры проекта и его маршруты из Caddy
 
 Флаги:
 
@@ -188,8 +191,10 @@ pegas llms --json
 ## Глобальные флаги
 
 ```text
---gateway-dir <path>  Переопределить каталог шлюза
---json                Машиночитаемый JSON-вывод (для агентов и скриптов)
--h, --help            Показать справку
--v, --version         Показать версию
+-s, --scenario <name>  Целевой сценарий из pegas.json (например, development, production, stage)
+-t, --target <name>    Алиас для --scenario
+--gateway-dir <path>   Переопределить каталог шлюза
+--json                 Машиночитаемый JSON-вывод (для агентов и скриптов)
+-h, --help             Показать справку
+-v, --version          Показать версию
 ```

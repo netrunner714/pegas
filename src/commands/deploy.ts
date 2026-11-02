@@ -16,6 +16,8 @@ import { withRuntimeLock } from "../runtime-lock.js";
 import { verifySecrets } from "../secrets.js";
 
 export interface DeployOptions {
+  scenario?: string;
+  target?: string;
   env?: string;
   gatewayDir?: string;
   dryRun?: boolean;
@@ -171,18 +173,20 @@ export function resolveScopedUpstream(upstream: string, projectName: string): st
 async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
-  const env = options.env;
-  const runtimeEnvironment = normalizeEnvironment(env);
-
-  if (!env) {
-    if (isJson) console.log(JSON.stringify({ error: "Environment contour is required for deploy (e.g. 'production' or 'stage')." }));
+  const rawScenario = options.scenario || options.target || options.env;
+  if (!rawScenario) {
+    const errorMsg = "Environment contour is required for deploy. Option --scenario (-s) or --target (-t) is missing.";
+    if (isJson) console.log(JSON.stringify({ error: errorMsg }));
     else {
-      console.error("❌ Error: Environment contour is required for deploy.");
-      console.error("   Usage: pegas deploy <environment> (e.g. 'pegas deploy production' or 'pegas deploy stage')");
+      console.error(`❌ Error: ${errorMsg}`);
+      console.error("   Usage: pegas -s <scenario> (e.g. 'pegas -s development')");
     }
     if (!options.noExit) process.exit(1);
     return;
   }
+
+  const env = rawScenario;
+  const runtimeEnvironment = normalizeEnvironment(env);
 
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
   const contractPath = path.join(projectRoot, CONTRACT_FILENAME);
