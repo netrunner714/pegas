@@ -51,6 +51,8 @@ export interface ServiceBuildContract {
   dockerfile?: string;
   /** Build stage (multi-target Dockerfile); forwarded to compose as-is. */
   target?: string;
+  /** Build arguments; forwarded to compose build as-is. */
+  args?: Record<string, string>;
 }
 
 export type ServiceRole = "app" | "infra";
