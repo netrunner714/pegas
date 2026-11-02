@@ -64,6 +64,8 @@ export type ServiceRouteTarget = string | { to: string; websocket?: boolean };
 
 export interface ServiceContract {
   port?: number | string;
+  /** Host port publish mappings (e.g. ["5432:5432"]). Used for non-HTTP services like databases or daemons. */
+  ports?: string[];
   upstream?: string;
   /** L7 path routing for this service's domains: e.g. { "/api/*": "api:3000", "/socket.io/*": "api:3000" } */
   routes?: Record<string, ServiceRouteTarget>;

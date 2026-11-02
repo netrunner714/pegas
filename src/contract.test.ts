@@ -71,13 +71,14 @@ describe("contract & package.json integration", () => {
     expect(paths).toContain("services.web.hmr.fileWatch");
   });
 
-  it("validates contract.secrets and service.routes correctly", () => {
+  it("validates contract.secrets, service.routes, and service.ports correctly", () => {
     const valid = {
       runtime: "docker",
       secrets: ["DATABASE_URL", "JWT_SECRET"],
       services: {
         web: {
           port: 80,
+          ports: ["8080:80"],
           upstream: "web:80",
           routes: {
             "/api/*": "api:3000",
@@ -93,6 +94,7 @@ describe("contract & package.json integration", () => {
       secrets: ["DATABASE_URL", "invalid key!", 123],
       services: {
         web: {
+          ports: ["", 123 as any],
           routes: {
             "api/*": "",
             "/bad": { to: "", websocket: "yes" },
@@ -104,6 +106,7 @@ describe("contract & package.json integration", () => {
     const paths = issues.map((i) => i.path);
     expect(paths).toContain("secrets[1]");
     expect(paths).toContain("secrets[2]");
+    expect(paths).toContain("services.web.ports");
     expect(paths).toContain("services.web.routes.api/*");
     expect(paths).toContain("services.web.routes./bad.to");
     expect(paths).toContain("services.web.routes./bad.websocket");

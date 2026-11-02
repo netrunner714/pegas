@@ -606,6 +606,9 @@ export function createRuntimeCompose(
         ...(service.healthcheck.startPeriod ? { start_period: service.healthcheck.startPeriod } : {}),
       };
     }
+    if (service.ports && service.ports.length > 0) {
+      generated.ports = [...service.ports];
+    }
     if (service.port !== undefined) generated.expose = [String(service.port)];
 
     const volumes: Array<string | { type?: string; source?: string; target?: string; bind?: unknown }> = [...(service.volumes || [])];

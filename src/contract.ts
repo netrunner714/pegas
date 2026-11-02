@@ -136,6 +136,11 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
         add(`${base}.port`, "Expected a TCP port number between 1 and 65535.");
       }
     }
+    if (service.ports !== undefined) {
+      if (!Array.isArray(service.ports) || service.ports.length === 0 || (service.ports as unknown[]).some((p) => typeof p !== "string" || !p.trim())) {
+        add(`${base}.ports`, "Expected an array of non-empty port mappings.");
+      }
+    }
     if (service.upstream !== undefined && (typeof service.upstream !== "string" || !service.upstream.trim())) {
       add(`${base}.upstream`, "Expected a non-empty upstream target.");
     }

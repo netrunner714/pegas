@@ -138,6 +138,7 @@ describe("declarative runtime Compose generation", () => {
         db: {
           role: "infra",
           image: "postgres:18-alpine",
+          ports: ["5432:5432"],
           volumes: [
             "pg_data:/var/lib/postgresql",
             "pg_tls:/var/lib/postgresql/tls",
@@ -153,6 +154,7 @@ describe("declarative runtime Compose generation", () => {
       environment: "production",
     });
     const parsed = JSON.parse(result.content);
+    expect(parsed.services.db.ports).toEqual(["5432:5432"]);
     expect(parsed.volumes).toBeDefined();
     expect(parsed.volumes.pg_data).toEqual({});
     expect(parsed.volumes.pg_tls).toEqual({});

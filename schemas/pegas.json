@@ -115,6 +115,13 @@
           ],
           "description": "Порт, который сервис слушает внутри сети (1–65535)."
         },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Публикация портов на хост (Docker Compose short syntax: '5432:5432'). Для прямого внешнего доступа к СУБД, брокерам или сокетам."
+        },
         "upstream": {
           "type": "string",
           "description": "<сервис>:<порт> — цель проксирования во внутренней сети (host-runtime)."
