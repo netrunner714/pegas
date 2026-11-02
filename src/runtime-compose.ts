@@ -619,24 +619,30 @@ export function createRuntimeCompose(
       }
     }
     if (app && environmentName === "development") {
-      const source = resolveProjectDirectory(
-        options.projectRoot,
-        service.bindMount || service.build?.context || ".",
-        `services.${serviceName}.bindMount`
-      );
-      volumes.unshift({
-        type: "bind",
-        source,
-        target: "/workspace",
-        bind: { create_host_path: true },
-      });
-      generated.working_dir = "/workspace";
+      const explicitBindMount = Boolean(service.bindMount);
+      const isDevBuild = Boolean(service.build?.dockerfile && /dev/i.test(service.build.dockerfile));
+      const shouldBindMount = Boolean(appDefaults || explicitBindMount || isDevBuild);
 
-      const dependencyTarget = appDefaults?.dependencyTarget || "/workspace/node_modules";
-      if (!volumes.some((volume) => getVolumeTarget(volume) === dependencyTarget)) {
-        const volumeName = `pegas-${options.projectId}-${serviceName}-${environmentName}-dependencies`;
-        volumes.push(`${volumeName}:${dependencyTarget}`);
-        namedVolumes.add(volumeName);
+      if (shouldBindMount) {
+        const source = resolveProjectDirectory(
+          options.projectRoot,
+          service.bindMount || service.build?.context || ".",
+          `services.${serviceName}.bindMount`
+        );
+        volumes.unshift({
+          type: "bind",
+          source,
+          target: "/workspace",
+          bind: { create_host_path: true },
+        });
+        generated.working_dir = "/workspace";
+
+        const dependencyTarget = appDefaults?.dependencyTarget || "/workspace/node_modules";
+        if (!volumes.some((volume) => getVolumeTarget(volume) === dependencyTarget)) {
+          const volumeName = `pegas-${options.projectId}-${serviceName}-${environmentName}-dependencies`;
+          volumes.push(`${volumeName}:${dependencyTarget}`);
+          namedVolumes.add(volumeName);
+        }
       }
     }
     if (volumes.length > 0) generated.volumes = volumes;
