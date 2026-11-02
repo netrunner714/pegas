@@ -39,10 +39,17 @@ export function tryLocalDelegation(args = process.argv.slice(2)): void {
     return;
   }
 
-  // Never delegate `init` or `update` to local node_modules.
-  // Running `pegas init` or `pegas update` is intended to initialize or update the project
+  // Never delegate `init`, `update`, or `check` to local node_modules.
+  // Running `pegas init`, `pegas update`, or `pegas check` is intended to audit or update the project
   // using the currently invoked CLI, avoiding entrapment in outdated node_modules.
-  if (args[0] === "init" || args.includes("init") || args[0] === "update" || args.includes("update")) {
+  if (
+    args[0] === "init" ||
+    args.includes("init") ||
+    args[0] === "update" ||
+    args.includes("update") ||
+    args[0] === "check" ||
+    args.includes("check")
+  ) {
     return;
   }
 
@@ -177,7 +184,12 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         cwd: values.cwd as string | undefined,
         env: targetEnv,
         gatewayDir: values["gateway-dir"] as string | undefined,
+        ...(values["dry-run"] ? { dryRun: true } : {}),
+        ...(values["skip-dns-check"] ? { skipDnsCheck: true } : {}),
+        ...(values["strict-dns"] ? { strictDns: true } : {}),
+        ...(values["skip-up"] ? { skipUp: true } : {}),
         json: values.json as boolean | undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
       });
       break;
     }

@@ -472,4 +472,20 @@ describe("main CLI command routing", () => {
       json: true,
     });
   });
+
+  it("dispatches 'check' command with options", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleCheck: async (opts) => {
+        calls.check = opts;
+      },
+    };
+
+    await main(["check", "--cwd", "/tmp/chk", "--json"], { dispatchers, noExit: true });
+    expect(calls.check).toEqual({
+      cwd: "/tmp/chk",
+      json: true,
+      noExit: true,
+    });
+  });
 });
