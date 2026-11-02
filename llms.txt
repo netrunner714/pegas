@@ -13,14 +13,15 @@
 - Each project gets an isolated declarative route file `conf.d/<projectName>.caddy` (per environment); hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
 - Dev containers bind-mount sources and keep dependencies in named volumes; apps run their real dev commands inside containers.
-- `pegas dev` never manages lifecycle: it verifies the environment matches the contract and attaches to logs; Ctrl+C only detaches.
+- View and stream container logs: `pegas logs [env] [service] [-f] [--tail N]`; Ctrl+C only detaches without stopping containers.
 - Local dev HTTPS: `pegas ca install` (one-time), clean URLs on port 443 (`[service].[project].localhost`).
 
 ## CLI Usage for Agents
 - `npx @netrunner714/pegas init [options]` (--force, --dry-run, --cwd) — Create the pegas.json contract (runtime auto-detected from the project), docs and scripts.
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update @netrunner714/pegas to latest version.
-- `npx pegas dev -- <command>` (--cwd) — Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app.
-- `npx pegas dev` (--cwd) — Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app.
+- `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
+- `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
+- `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas deploy <env> [options]` (-e, --cwd, --dry-run, --skip-dns-check, --strict-dns, --skip-up) — Deploy an environment (development/production): network, shared Gateway, containers, routes.
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas uninstall [options]` (--dry-run, --cwd) — Remove Pegas from the project and clean the package (mirror of init).

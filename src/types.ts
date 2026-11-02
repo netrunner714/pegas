@@ -110,6 +110,7 @@ export interface UninstallOptions {
 export interface CheckOptions {
   cwd?: string;
   json?: boolean;
+  fix?: boolean;
   noExit?: boolean;
 }
 

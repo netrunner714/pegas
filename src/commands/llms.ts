@@ -19,7 +19,7 @@ const CORE_CONCEPTS = `## Core Concepts
 - Each project gets an isolated declarative route file \`conf.d/<projectName>.caddy\` (per environment); hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
 - Dev containers bind-mount sources and keep dependencies in named volumes; apps run their real dev commands inside containers.
-- \`pegas dev\` never manages lifecycle: it verifies the environment matches the contract and attaches to logs; Ctrl+C only detaches.
+- View and stream container logs: \`pegas logs [env] [service] [-f] [--tail N]\`; Ctrl+C only detaches without stopping containers.
 - Local dev HTTPS: \`pegas ca install\` (one-time), clean URLs on port 443 (\`[service].[project].localhost\`).`;
 
 const CONTRACT_EXAMPLE = `## Example pegas.json (docker runtime)
@@ -81,9 +81,10 @@ export function buildLlmsText(): string {
     const hints = formatOptionHints(cmd.options || []);
     const invocations: string[] = [];
 
-    if (cmd.name === "dev") {
-      invocations.push("npx pegas dev -- <command>");
-      invocations.push("npx pegas dev");
+    if (cmd.name === "logs") {
+      invocations.push("npx pegas logs -f");
+      invocations.push("npx pegas logs production");
+      invocations.push("npx pegas logs api -f");
     } else if (cmd.name === "ca") {
       invocations.push("npx pegas ca install");
       invocations.push("npx pegas ca remove");

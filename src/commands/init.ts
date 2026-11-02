@@ -21,7 +21,8 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
 ## Команды
-* Локальная разработка: \`npm run dev\` (запускает \`pegas dev\`)
+* Развернуть development: \`pegas deploy development\`
+* Подключиться к логам: \`pegas logs -f\`
 * Деплой на продакшен: \`npm run deploy\` (запускает \`pegas deploy production\`)
 * Деплой на стейджинг: \`pegas deploy stage\`
 * Остановка проекта: \`pegas down\`
@@ -389,7 +390,7 @@ export async function handleProjectInit(
 
   // 4. Create docs/pegas.md
   const docsContent = runtime === "docker"
-    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Развернуть development: `pegas deploy development`\n- Подключиться к логам: `pegas dev` (Ctrl+C только отключает логи)\n- Деплой production: `pegas deploy production`\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
+    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Развернуть development: `pegas deploy development`\n- Подключиться к логам: `pegas logs -f` (Ctrl+C только отключает логи)\n- Деплой production: `pegas deploy production`\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
     : DOCS_PEGAS_MD;
   const docsDir = path.join(cwd, "docs");
   const docsPath = path.join(docsDir, "pegas.md");
@@ -492,7 +493,7 @@ export async function handleProjectInit(
   if (runtime === "docker") {
     console.log("  2. Заполните секреты в файле .env (если требуются)");
     console.log("  3. Разверните окружение: pegas deploy development");
-    console.log("  4. Подключитесь к логам: pegas dev (Ctrl+C не останавливает контейнеры)\n");
+    console.log("  4. Подключитесь к логам: pegas logs -f (Ctrl+C не останавливает контейнеры)\n");
   } else {
     console.log("  2. Запустите локальную разработку: npm run dev\n");
   }

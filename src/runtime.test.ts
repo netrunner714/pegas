@@ -99,4 +99,22 @@ describe("runtime compose execution", () => {
     // nothing destructive was spawned
     expect(calls.some((c) => c.startsWith("rm") || c.includes(" down"))).toBe(false);
   });
+
+  it("supports follow=false, custom tail, and service targeting", async () => {
+    fs.rmSync(logFile, { force: true });
+    await followRuntimeLogs(
+      contract,
+      projectRoot,
+      "rt-abc123",
+      { service: "web", follow: false, tail: 42 },
+      { ...process.env, PEGAS_ENV: "production" }
+    );
+    const calls = dockerCalls();
+    const logsCall = calls.find((c) => c.startsWith("compose") && c.includes("logs"));
+    expect(logsCall).toBeDefined();
+    expect(logsCall).not.toContain("--follow");
+    expect(logsCall).toContain("--tail 42");
+    expect(logsCall).toContain("web");
+    expect(logsCall).toContain("rt-abc123-production");
+  });
 });

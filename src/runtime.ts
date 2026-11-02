@@ -4,28 +4,65 @@ import { createRuntimeCompose } from "./runtime-compose.js";
 import { normalizeEnvironment } from "./contract.js";
 import { ensureDockerNetwork } from "./docker.js";
 
+export interface RuntimeLogOptions {
+  service?: string;
+  follow?: boolean;
+  tail?: string | number;
+}
+
 /**
  * Follows service logs via an ephemeral Compose invocation. Ctrl+C (SIGINT) is
  * forwarded to Compose, which stops following but never touches the containers:
- * `logs --follow` is read-only. Pegas itself exits cleanly afterwards.
+ * `logs` is read-only. Pegas itself exits cleanly afterwards.
  */
 export async function followRuntimeLogs(
   contract: PegasContract,
   projectRoot: string,
   projectId: string,
-  env: NodeJS.ProcessEnv = process.env
+  optionsOrEnv: RuntimeLogOptions | NodeJS.ProcessEnv = {},
+  envArg: NodeJS.ProcessEnv = process.env
 ): Promise<void> {
-  const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: env.PEGAS_ENV });
-  const environmentName = normalizeEnvironment(env.PEGAS_ENV).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const isEnv = (obj: any): obj is NodeJS.ProcessEnv =>
+    obj &&
+    (typeof obj.PATH === "string" || typeof obj.PEGAS_ENV === "string" || typeof obj.NODE_ENV === "string") &&
+    !("follow" in obj) &&
+    !("tail" in obj) &&
+    !("service" in obj);
+
+  const options: RuntimeLogOptions = isEnv(optionsOrEnv) ? {} : optionsOrEnv;
+  const env: NodeJS.ProcessEnv = isEnv(optionsOrEnv) ? optionsOrEnv : envArg;
+
+  const targetEnv = normalizeEnvironment(env.PEGAS_ENV || "development");
+  const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: targetEnv });
+  const environmentName = targetEnv.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
   const composeProjectName = `${projectId}-${environmentName}`;
+  const tailArg = options.tail !== undefined ? String(options.tail) : "100";
+
   const args = [
-    "compose", "--project-name", composeProjectName, "--project-directory", projectRoot,
-    "-f", "-", "logs", "--follow", "--tail", "100",
+    "compose",
+    "--project-name",
+    composeProjectName,
+    "--project-directory",
+    projectRoot,
+    "-f",
+    "-",
+    "logs",
   ];
+
+  if (options.follow !== false) {
+    args.push("--follow");
+  }
+
+  args.push("--tail", tailArg);
+
+  if (options.service) {
+    args.push(options.service);
+  }
+
   await new Promise<void>((resolve, reject) => {
     const child = child_process.spawn("docker", args, {
       cwd: projectRoot,
-      env,
+      env: { ...env, PEGAS_ENV: targetEnv },
       stdio: ["pipe", "inherit", "inherit"],
     });
     child.stdin.on("error", () => {});

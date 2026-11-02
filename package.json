@@ -20,7 +20,6 @@
     "test:gate": "bun scripts/check-coverage.ts",
     "test:e2e": "bun scripts/e2e.ts",
     "test:e2e:init": "bun scripts/e2e-init.ts",
-    "test:e2e:dev": "bun scripts/e2e-dev.ts",
     "typecheck": "tsc --noEmit",
     "docs:check": "bun scripts/docs-check.ts"
   },

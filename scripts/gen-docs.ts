@@ -27,7 +27,7 @@ const LLMS_PATH = path.join(REPO_ROOT, "llms.txt");
 const RU_COMMANDS: Record<string, string> = {
   init: "Инициализирует проект: создаёт контракт pegas.json, документацию и скрипты (runtime определяется автоматически)",
   update: "Обновляет @netrunner714/pegas до актуальной версии",
-  dev: "Docker-runtime: сверяет контейнер с контрактом и подключается к логам; host-runtime: поднимает локальный HTTPS-прокси и приложение",
+  logs: "Просмотр и стриминг логов контейнеров любого окружения (development, stage, production)",
   deploy: "Разворачивает окружение (development/production): сеть, общий Gateway, контейнеры, маршруты",
   down: "Удаляет контейнеры проекта и его маршруты из Caddy (все окружения или одно через --env)",
   uninstall: "Удаляет Pegas из проекта и вычищает пакет (зеркально init)",
@@ -48,6 +48,8 @@ const RU_FLAGS: Record<string, string> = {
   cwd: "Целевой каталог проекта",
   latest: "Обновляться между мажорными версиями (например, 1.x -> 2.x)",
   env: "Целевое окружение (например, production, stage)",
+  follow: "Стримить логи в реальном времени (отслеживать вывод)",
+  tail: "Количество последних строк логов (по умолчанию: 100)",
 };
 
 function ruCommandSummary(cmd: { name: string; summary: string }): string {

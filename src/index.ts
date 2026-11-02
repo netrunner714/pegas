@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import { handleInit } from "./commands/init.js";
 import { handleDeploy } from "./commands/deploy.js";
 import { handleDown } from "./commands/down.js";
-import { handleDev } from "./commands/dev.js";
+import { handleLogs } from "./commands/logs.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
@@ -97,7 +97,8 @@ export interface MainDispatchers {
   handleInit?: typeof handleInit;
   handleDeploy?: typeof handleDeploy;
   handleDown?: typeof handleDown;
-  handleDev?: typeof handleDev;
+  handleLogs?: typeof handleLogs;
+  handleDev?: (options?: any) => Promise<void>;
   handleStatus?: typeof handleStatus;
   handleLlms?: typeof handleLlms;
   handleUpdate?: typeof handleUpdate;
@@ -119,7 +120,8 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleInit: options.dispatchers?.handleInit || handleInit,
     handleDeploy: options.dispatchers?.handleDeploy || handleDeploy,
     handleDown: options.dispatchers?.handleDown || handleDown,
-    handleDev: options.dispatchers?.handleDev || handleDev,
+    handleLogs: options.dispatchers?.handleLogs || handleLogs,
+    handleDev: options.dispatchers?.handleDev,
     handleStatus: options.dispatchers?.handleStatus || handleStatus,
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
@@ -178,12 +180,55 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       break;
     }
 
-    case "dev": {
-      const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : positionals.slice(1);
-      await dispatch.handleDev({
+    case "logs": {
+      const knownEnvs = new Set(["development", "dev", "stage", "staging", "production", "prod", "test"]);
+      let targetEnv = values.env as string | undefined;
+      let targetService: string | undefined;
+
+      const pos1 = positionals[1] as string | undefined;
+      const pos2 = positionals[2] as string | undefined;
+
+      if (targetEnv) {
+        targetService = pos1;
+      } else if (pos1 && knownEnvs.has(pos1.toLowerCase())) {
+        targetEnv = pos1;
+        targetService = pos2;
+      } else if (pos2 && knownEnvs.has(pos2.toLowerCase())) {
+        targetEnv = pos2;
+        targetService = pos1;
+      } else {
+        targetService = pos1;
+      }
+
+      await dispatch.handleLogs({
         cwd: values.cwd as string | undefined,
-        command: userCmd,
+        env: targetEnv,
+        service: targetService,
+        follow: values.follow as boolean | undefined,
+        tail: values.tail as string | number | undefined,
+        json: values.json as boolean | undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
       });
+      break;
+    }
+
+    case "dev": {
+      if (dispatch.handleDev) {
+        const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : positionals.slice(1);
+        await dispatch.handleDev({
+          cwd: values.cwd as string | undefined,
+          command: userCmd,
+        });
+        break;
+      }
+      console.error(
+        "❌ 'pegas dev' has been removed in favor of 'pegas deploy development' and 'pegas logs'.\n\n" +
+        "   To start containers: pegas deploy development\n" +
+        "   To stream logs:      pegas logs -f\n"
+      );
+      if (!options.noExit) {
+        process.exit(1);
+      }
       break;
     }
 

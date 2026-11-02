@@ -19,10 +19,11 @@ describe("dynamic help text generation", () => {
   });
 
   it("generates command-specific help for subcommands", () => {
-    const devHelp = generateHelpText("dev");
-    expect(devHelp).toContain("pegas dev");
-    expect(devHelp).toContain("--cwd");
-    expect(devHelp).toContain("GLOBAL OPTIONS:");
+    const logsHelp = generateHelpText("logs");
+    expect(logsHelp).toContain("pegas logs");
+    expect(logsHelp).toContain("--cwd");
+    expect(logsHelp).toContain("--follow");
+    expect(logsHelp).toContain("GLOBAL OPTIONS:");
 
     const initHelp = generateHelpText("init");
     expect(initHelp).toContain("pegas init");

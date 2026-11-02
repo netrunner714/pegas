@@ -93,10 +93,31 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas update", "$ pegas update --latest"],
   },
   {
-    name: "dev",
-    summary: "Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app",
-    usage: "dev [options] [-- <command...>]",
+    name: "logs",
+    summary: "Stream or view container logs for any environment (development, stage, production)",
+    usage: "logs [env] [service] [options]",
     options: [
+      {
+        name: "env",
+        type: "string",
+        short: "e",
+        placeholder: "<name>",
+        description: "Target environment contour (default: development)",
+      },
+      {
+        name: "follow",
+        type: "boolean",
+        short: "f",
+        default: false,
+        description: "Follow log output (stream real-time changes)",
+      },
+      {
+        name: "tail",
+        type: "string",
+        short: "n",
+        placeholder: "<lines>",
+        description: "Number of lines to show from the end of the logs (default: 100)",
+      },
       {
         name: "cwd",
         type: "string",
@@ -105,8 +126,12 @@ export const COMMANDS: CliCommandDef[] = [
       },
     ],
     examples: [
-      "$ pegas dev",
-      "$ pegas dev -- next dev",
+      "$ pegas logs",
+      "$ pegas logs -f",
+      "$ pegas logs production",
+      "$ pegas logs production -f",
+      "$ pegas logs development api -f",
+      "$ pegas logs -n 50",
     ],
   },
   {
@@ -394,9 +419,11 @@ export function generateHelpText(commandName?: string): string {
 
   lines.push(`EXAMPLES:`);
   lines.push(`  $ pegas init`);
-  lines.push(`  $ pegas dev`);
-  lines.push(`  $ pegas deploy`);
+  lines.push(`  $ pegas deploy development`);
+  lines.push(`  $ pegas logs -f`);
+  lines.push(`  $ pegas deploy production`);
   lines.push(`  $ pegas status`);
+  lines.push(`  $ pegas down`);
   lines.push("");
 
   return lines.join("\n");

@@ -10,7 +10,7 @@ describe("pegas llms", () => {
   it("exports LLMS_TXT_CONTENT containing core Pegas concepts", () => {
     expect(LLMS_TXT_CONTENT).toContain("# pegas");
     expect(LLMS_TXT_CONTENT).toContain("pegas-network");
-    expect(LLMS_TXT_CONTENT).toContain("pegas dev");
+    expect(LLMS_TXT_CONTENT).toContain("pegas logs");
     expect(LLMS_TXT_CONTENT).toContain("pegas deploy");
     expect(LLMS_TXT_CONTENT).toContain("pegas init");
   });

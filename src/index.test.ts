@@ -247,14 +247,14 @@ describe("main CLI command routing", () => {
     console.log = (...args) => logs.push(args.join(" "));
 
     try {
-      await main(["dev", "--help"]);
+      await main(["logs", "--help"]);
       await main(["help", "init"]);
       await main(["update", "-h"]);
     } finally {
       console.log = origLog;
     }
 
-    expect(logs[0]).toContain("pegas dev");
+    expect(logs[0]).toContain("pegas logs");
     expect(logs[0]).toContain("--cwd");
     expect(logs[1]).toContain("pegas init");
     expect(logs[1]).toContain("--force");
@@ -340,27 +340,61 @@ describe("main CLI command routing", () => {
     });
   });
 
-  it("dispatches 'dev' command with positional and double-dash arguments", async () => {
+  it("dispatches 'logs' command with env, service, follow, and tail options", async () => {
     const calls: Record<string, any> = {};
     const dispatchers: MainDispatchers = {
-      handleDev: async (opts) => {
-        calls.dev = opts;
+      handleLogs: async (opts) => {
+        calls.logs = opts;
       },
     };
 
-    // With double-dash
-    await main(["dev", "--", "next", "dev", "--port", "3000"], { dispatchers });
-    expect(calls.dev).toEqual({
-      command: ["next", "dev", "--port", "3000"],
+    // Default logs
+    await main(["logs"], { dispatchers });
+    expect(calls.logs).toEqual({
       cwd: undefined,
+      env: undefined,
+      service: undefined,
+      follow: false,
+      tail: undefined,
+      json: false,
     });
 
-    // Without double-dash
-    await main(["dev", "vite"], { dispatchers });
-    expect(calls.dev).toEqual({
-      command: ["vite"],
+    // With env, service, and flags
+    await main(["logs", "production", "web", "-f", "-n", "50"], { dispatchers });
+    expect(calls.logs).toEqual({
       cwd: undefined,
+      env: "production",
+      service: "web",
+      follow: true,
+      tail: "50",
+      json: false,
     });
+
+    // Service only with -f
+    await main(["logs", "api", "-f"], { dispatchers });
+    expect(calls.logs).toEqual({
+      cwd: undefined,
+      env: undefined,
+      service: "api",
+      follow: true,
+      tail: undefined,
+      json: false,
+    });
+  });
+
+  it("handles removed 'dev' command with guidance", async () => {
+    const errors: string[] = [];
+    console.error = (...args) => errors.push(args.join(" "));
+
+    try {
+      await main(["dev"], { noExit: true });
+    } finally {
+      console.error = origError;
+    }
+
+    expect(errors.join(" ")).toContain("'pegas dev' has been removed");
+    expect(errors.join(" ")).toContain("pegas deploy development");
+    expect(errors.join(" ")).toContain("pegas logs -f");
   });
 
   it("dispatches 'deploy' command with parsed options", async () => {

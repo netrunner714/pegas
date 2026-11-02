@@ -44,21 +44,28 @@ pegas update
 pegas update --latest
 ```
 
-### `pegas dev [options] [-- <command...>]`
+### `pegas logs [env] [service] [options]`
 
-Docker-runtime: сверяет контейнер с контрактом и подключается к логам; host-runtime: поднимает локальный HTTPS-прокси и приложение
+Просмотр и стриминг логов контейнеров любого окружения (development, stage, production)
 
 Флаги:
 
 ```text
+-e, --env <name>      Целевое окружение (например, production, stage)
+-f, --follow          Стримить логи в реальном времени (отслеживать вывод)
+-n, --tail <lines>    Количество последних строк логов (по умолчанию: 100)
 --cwd <path>          Целевой каталог проекта
 ```
 
 Примеры:
 
 ```bash
-pegas dev
-pegas dev -- next dev
+pegas logs
+pegas logs -f
+pegas logs production
+pegas logs production -f
+pegas logs development api -f
+pegas logs -n 50
 ```
 
 ### `pegas deploy <env> [options]`
