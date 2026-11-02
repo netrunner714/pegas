@@ -71,6 +71,44 @@ describe("contract & package.json integration", () => {
     expect(paths).toContain("services.web.hmr.fileWatch");
   });
 
+  it("validates contract.secrets and service.routes correctly", () => {
+    const valid = {
+      runtime: "docker",
+      secrets: ["DATABASE_URL", "JWT_SECRET"],
+      services: {
+        web: {
+          port: 80,
+          upstream: "web:80",
+          routes: {
+            "/api/*": "api:3000",
+            "/ws/*": { to: "ws:4000", websocket: true },
+          },
+        },
+      },
+    };
+    expect(validatePegasContract(valid)).toEqual([]);
+
+    const invalid = {
+      runtime: "docker",
+      secrets: ["DATABASE_URL", "invalid key!", 123],
+      services: {
+        web: {
+          routes: {
+            "api/*": "",
+            "/bad": { to: "", websocket: "yes" },
+          },
+        },
+      },
+    };
+    const issues = validatePegasContract(invalid);
+    const paths = issues.map((i) => i.path);
+    expect(paths).toContain("secrets[1]");
+    expect(paths).toContain("secrets[2]");
+    expect(paths).toContain("services.web.routes.api/*");
+    expect(paths).toContain("services.web.routes./bad.to");
+    expect(paths).toContain("services.web.routes./bad.websocket");
+  });
+
   it("creates stable checkout-specific runtime identities", () => {
     const first = getProjectRuntimeId("/work/apps/shop", "shop");
     expect(getProjectRuntimeId("/work/apps/shop", "shop")).toBe(first);

@@ -51,4 +51,23 @@ describe("Caddyfile snippet generator", () => {
 
     expect(snippet).not.toContain("www.example.com {");
   });
+
+  it("generates multi-path route handlers when routes are specified", () => {
+    const snippet = generateCaddyfileSnippet({
+      domain: "hub.example.com",
+      upstream: "frontend:80",
+      routes: {
+        "/api/*": "backend:3000",
+        "/socket.io/*": { to: "ws:4000", websocket: true },
+      },
+    });
+
+    expect(snippet).toContain("hub.example.com {");
+    expect(snippet).toContain("handle /api/* {");
+    expect(snippet).toContain("reverse_proxy backend:3000");
+    expect(snippet).toContain("handle /socket.io/* {");
+    expect(snippet).toContain("reverse_proxy ws:4000");
+    expect(snippet).toContain("handle {");
+    expect(snippet).toContain("reverse_proxy frontend:80");
+  });
 });

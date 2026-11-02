@@ -23,6 +23,7 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
     apiPrefix = "/api/*",
     noWww = false,
     security = true,
+    routes,
   } = options;
 
   const lines: string[] = [];
@@ -39,7 +40,20 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
   lines.push(`${domain} {`);
 
   // Upstream routing
-  if (spa && apiUpstream) {
+  if (routes && Object.keys(routes).length > 0) {
+    lines.push(`    encode gzip zstd`);
+    lines.push(``);
+    for (const [pathPrefix, target] of Object.entries(routes)) {
+      const targetUpstream = typeof target === "string" ? target : target.to;
+      lines.push(`    handle ${pathPrefix} {`);
+      lines.push(`        reverse_proxy ${targetUpstream}`);
+      lines.push(`    }`);
+      lines.push(``);
+    }
+    lines.push(`    handle {`);
+    lines.push(`        reverse_proxy ${upstream || "app:80"}`);
+    lines.push(`    }`);
+  } else if (spa && apiUpstream) {
     lines.push(`    encode gzip zstd`);
     lines.push(``);
     lines.push(`    handle ${apiPrefix} {`);

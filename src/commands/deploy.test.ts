@@ -537,4 +537,99 @@ describe("pegas deploy", () => {
 
     expect(errors.some((e) => e.includes("Environment contour is required for deploy"))).toBe(true);
   });
+
+  it("resolves scoped routes and passes them to caddy generator during deploy", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-routes-"));
+    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-routes-"));
+
+    const contract = {
+      projectName: "route-test",
+      runtime: "docker",
+      services: {
+        frontend: {
+          upstream: "web:80",
+          routes: {
+            "/api/*": "backend:3000",
+          },
+          domains: {
+            production: ["site.ru"],
+          },
+        },
+        backend: {
+          upstream: "backend:3000",
+        },
+      },
+    };
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+
+    let dryRunOutput: any = null;
+    const origLog = console.log;
+    console.log = (msg: any) => {
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed.status === "dry-run") dryRunOutput = parsed;
+      } catch {}
+    };
+
+    try {
+      await handleDeploy({
+        cwd: tmpProj,
+        env: "production",
+        gatewayDir: tmpGateway,
+        dryRun: true,
+        skipUp: true,
+        json: true,
+      });
+      expect(dryRunOutput).not.toBeNull();
+      expect(dryRunOutput.routes[0].routes["/api/*"]).toContain("backend:3000");
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+      await fs.rm(tmpGateway, { recursive: true, force: true });
+    }
+  });
+
+  it("aborts deploy when required secrets are missing in non-dry-run", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-sec-deploy-"));
+    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-sec-"));
+
+    const contract = {
+      projectName: "sec-test",
+      runtime: "docker",
+      secrets: ["REQUIRED_KEY"],
+      services: {
+        web: {
+          upstream: "web:80",
+          domains: { production: ["sec.ru"] },
+        },
+      },
+    };
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract), "utf-8");
+
+    let errorOutput: any = null;
+    const origLog = console.log;
+    console.log = (msg: any) => {
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed.error) errorOutput = parsed;
+      } catch {}
+    };
+
+    try {
+      await handleDeploy({
+        cwd: tmpProj,
+        env: "production",
+        gatewayDir: tmpGateway,
+        skipUp: true,
+        noExit: true,
+        json: true,
+      });
+      expect(errorOutput).not.toBeNull();
+      expect(errorOutput.error).toBe("Secrets verification failed");
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpProj, { recursive: true, force: true });
+      await fs.rm(tmpGateway, { recursive: true, force: true });
+    }
+  });
 });

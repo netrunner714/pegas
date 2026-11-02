@@ -132,6 +132,23 @@ pegas ca install
 pegas ca remove
 ```
 
+### `pegas check [options]`
+
+Проверяет контракт pegas.json, паритет секретов в .env и наличие устаревших файлов конфигурации
+
+Флаги:
+
+```text
+--cwd <path>          Целевой каталог проекта
+```
+
+Примеры:
+
+```bash
+pegas check
+pegas check --json
+```
+
 ### `pegas status [options]`
 
 Проверяет здоровье шлюза и активные маршруты проекта

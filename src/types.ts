@@ -11,6 +11,7 @@ export interface RouteSnippetOptions {
   apiPrefix?: string;
   noWww?: boolean;
   security?: boolean;
+  routes?: Record<string, string | { to: string; websocket?: boolean }>;
   force?: boolean;
   dryRun?: boolean;
   gatewayDir?: string;
@@ -59,9 +60,13 @@ export interface ServiceHmrContract {
   fileWatch?: FileWatchMode;
 }
 
+export type ServiceRouteTarget = string | { to: string; websocket?: boolean };
+
 export interface ServiceContract {
   port?: number | string;
   upstream?: string;
+  /** L7 path routing for this service's domains: e.g. { "/api/*": "api:3000", "/socket.io/*": "api:3000" } */
+  routes?: Record<string, ServiceRouteTarget>;
   /** Build an image from a project-relative context. Mutually exclusive with image. */
   build?: ServiceBuildContract;
   /** Use a prebuilt image instead of building one. */
@@ -97,6 +102,12 @@ export interface UninstallOptions {
   cwd?: string;
   json?: boolean;
   dryRun?: boolean;
+  noExit?: boolean;
+}
+
+export interface CheckOptions {
+  cwd?: string;
+  json?: boolean;
   noExit?: boolean;
 }
 
@@ -160,6 +171,11 @@ export interface PegasContract {
   bootInfra?: boolean;
   deploy?: DeployConfig;
   devGateway?: DevGatewayConfig;
+  /**
+   * Список обязательных секретных переменных (.env), требуемых контрактом.
+   * Валидируется перед запуском/деплоем, зеркалируется в .env.example.
+   */
+  secrets?: string[];
   /**
    * Глобальный конфиг проекта (env-профили): переносится между
    * окружениями и коммитится. Значение — либо строка (одинаково для всех

@@ -13,6 +13,7 @@ import { runRuntimeCompose } from "../runtime.js";
 import { hasHostNodeModules } from "../runtime-compose.js";
 import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
+import { verifySecrets } from "../secrets.js";
 
 export interface DeployOptions {
   env?: string;
@@ -223,6 +224,24 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     return;
   }
 
+  const secretsCheck = await verifySecrets(projectRoot, contract);
+  if (!secretsCheck.valid) {
+    if (options.dryRun) {
+      if (!isJson) {
+        console.warn(`⚠️  Warning: Secrets check failed (dry-run):`);
+        for (const err of secretsCheck.errors) console.warn(`   - ${err}`);
+      }
+    } else {
+      if (isJson) console.log(JSON.stringify({ error: "Secrets verification failed", details: secretsCheck.errors }));
+      else {
+        console.error("❌ Secrets verification failed:");
+        for (const err of secretsCheck.errors) console.error(`  - ${err}`);
+      }
+      if (!options.noExit) process.exit(1);
+      return;
+    }
+  }
+
   const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
   const runtimeId = getProjectRuntimeId(projectRoot, projectName);
   const gatewayDir = await findGatewayDir(options.gatewayDir);
@@ -418,27 +437,59 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   const snippets: string[] = [];
-  const deployedRoutes: { service: string; domain: string; upstream: string }[] = [];
+  const deployedRoutes: { service: string; domain: string; upstream: string; routes?: Record<string, string | { to: string; websocket?: boolean }> }[] = [];
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
     const envDomains = getEnvironmentDomains(serviceConfig, runtimeEnvironment);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
+    const prefix = contract.runtime === "docker" ? `${runtimeId}-${runtimeEnvironment}` : projectName;
     const scopedUpstream = resolveScopedUpstream(
       upstream,
-      contract.runtime === "docker" ? `${runtimeId}-${runtimeEnvironment}` : projectName
+      prefix
     );
+    let scopedRoutes: Record<string, string | { to: string; websocket?: boolean }> | undefined;
+    if (serviceConfig.routes && Object.keys(serviceConfig.routes).length > 0) {
+      scopedRoutes = {};
+      for (const [routePath, target] of Object.entries(serviceConfig.routes)) {
+        if (typeof target === "string") {
+          scopedRoutes[routePath] = resolveScopedUpstream(target, prefix);
+        } else {
+          scopedRoutes[routePath] = {
+            ...target,
+            to: resolveScopedUpstream(target.to, prefix),
+          };
+        }
+      }
+    }
     for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
       if (!normDomain || normDomain === "yourdomain.com") continue;
-      snippets.push(generateCaddyfileSnippet({ domain: normDomain, upstream: scopedUpstream }));
-      deployedRoutes.push({ service: serviceName, domain: normDomain, upstream: scopedUpstream });
+      snippets.push(generateCaddyfileSnippet({
+        domain: normDomain,
+        upstream: scopedUpstream,
+        routes: scopedRoutes,
+      }));
+      deployedRoutes.push({
+        service: serviceName,
+        domain: normDomain,
+        upstream: scopedUpstream,
+        ...(scopedRoutes ? { routes: scopedRoutes } : {}),
+      });
     }
   }
 
   if (options.dryRun) {
     if (!isJson) {
       console.log(`\n📋 [dry-run] Target project route file: ${projectRouteFile}`);
-      for (const route of deployedRoutes) console.log(`  - Route: https://${route.domain} -> ${route.upstream}`);
+      for (const route of deployedRoutes) {
+        console.log(`  - Route: https://${route.domain} -> ${route.upstream}`);
+        if (route.routes) {
+          for (const [p, t] of Object.entries(route.routes)) {
+            const targetStr = typeof t === "string" ? t : t.to;
+            console.log(`    ↳ ${p} -> ${targetStr}`);
+          }
+        }
+      }
       if (snippets.length === 0) console.log(`  (No ${env} domains to configure)`);
     } else console.log(JSON.stringify({ status: "dry-run", env, project: projectName, file: projectRouteFile, routes: deployedRoutes }));
     return;

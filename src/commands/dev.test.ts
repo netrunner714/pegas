@@ -116,6 +116,30 @@ describe("pegas dev", () => {
     expect(caddyfile).not.toContain("worker.localhost");
   });
 
+  it("generates handle blocks for service.routes in generateDevCaddyfile", () => {
+    const contract: PegasContract = {
+      services: {
+        frontend: {
+          port: 5173,
+          domains: { development: ["app.localhost"] },
+          routes: {
+            "/api/*": "api:3000",
+          },
+        },
+        api: {
+          port: 3000,
+        },
+      },
+    };
+
+    const caddyfile = generateDevCaddyfile(contract);
+    expect(caddyfile).toContain("app.localhost {");
+    expect(caddyfile).toContain("handle /api/* {");
+    expect(caddyfile).toContain("reverse_proxy localhost:3000");
+    expect(caddyfile).toContain("handle {");
+    expect(caddyfile).toContain("reverse_proxy localhost:5173");
+  });
+
   it("dynamically finds available port and skips occupied port", async () => {
     // Occupy a temporary port
     const server = net.createServer();

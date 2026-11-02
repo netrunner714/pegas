@@ -188,6 +188,20 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas ca install", "$ pegas ca remove"],
   },
   {
+    name: "check",
+    summary: "Audit repository hygiene against Pegas 2-file standard (pegas.json + .env), secrets parity, and legacy clutter",
+    usage: "check [options]",
+    options: [
+      {
+        name: "cwd",
+        type: "string",
+        placeholder: "<path>",
+        description: "Target project directory",
+      },
+    ],
+    examples: ["$ pegas check", "$ pegas check --json"],
+  },
+  {
     name: "status",
     summary: "Check gateway health and active project routes",
     usage: "status [options]",

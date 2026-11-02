@@ -13,6 +13,7 @@ import { findOrDownloadCaddy } from "../binary.js";
 import { findAvailablePort, isPortAvailable } from "../ports.js";
 import { findRootCompose, detectInfraServices } from "../compose.js";
 import { getCaddyHomeEnv, canBindLowPorts, isCaTrusted, getCaPaths } from "../ca.js";
+import { verifySecrets } from "../secrets.js";
 
 export interface DevOptions {
   cwd?: string;
@@ -76,7 +77,29 @@ export function generateDevCaddyfile(
       .join(", ");
     if (!domainList) continue;
 
-    blocks.push(`${domainList} {\n    reverse_proxy localhost:${port}\n}`);
+    if (serviceConfig.routes && Object.keys(serviceConfig.routes).length > 0) {
+      const routeLines: string[] = [];
+      for (const [pathPrefix, target] of Object.entries(serviceConfig.routes)) {
+        const rawTarget = typeof target === "string" ? target : target.to;
+        let resolvedTarget = rawTarget;
+        const [targetService, targetPort] = rawTarget.split(":");
+        if (services[targetService]) {
+          const devPort = getServicePort(services[targetService]);
+          resolvedTarget = `localhost:${devPort}`;
+        } else if (targetPort) {
+          resolvedTarget = `localhost:${targetPort}`;
+        }
+        routeLines.push(`    handle ${pathPrefix} {`);
+        routeLines.push(`        reverse_proxy ${resolvedTarget}`);
+        routeLines.push(`    }`);
+      }
+      routeLines.push(`    handle {`);
+      routeLines.push(`        reverse_proxy localhost:${port}`);
+      routeLines.push(`    }`);
+      blocks.push(`${domainList} {\n${routeLines.join("\n")}\n}`);
+    } else {
+      blocks.push(`${domainList} {\n    reverse_proxy localhost:${port}\n}`);
+    }
   }
 
   if (blocks.length === 1) {
@@ -237,6 +260,14 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
       process.exit(1);
     }
     return;
+  }
+
+  const secretsCheck = await verifySecrets(projectRoot, contract);
+  if (!secretsCheck.valid) {
+    console.warn(`⚠️  Notice: Secrets verification warning in development:`);
+    for (const err of secretsCheck.errors) {
+      console.warn(`   - ${err}`);
+    }
   }
 
   if (contract.runtime === "docker") {

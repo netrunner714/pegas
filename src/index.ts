@@ -12,6 +12,7 @@ import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
 import { handleCa } from "./commands/ca.js";
 import { handleUninstall } from "./commands/uninstall.js";
+import { handleCheck } from "./commands/check.js";
 
 import { VERSION } from "./version.js";
 import { generateHelpText, getParseArgsOptions } from "./help.js";
@@ -86,6 +87,7 @@ export interface MainDispatchers {
   handleUpdate?: typeof handleUpdate;
   handleCa?: typeof handleCa;
   handleUninstall?: typeof handleUninstall;
+  handleCheck?: typeof handleCheck;
 }
 
 export interface MainOptions {
@@ -107,6 +109,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
     handleCa: options.dispatchers?.handleCa || handleCa,
     handleUninstall: options.dispatchers?.handleUninstall || handleUninstall,
+    handleCheck: options.dispatchers?.handleCheck || handleCheck,
   };
 
   const rawArgs = argv;
@@ -220,6 +223,15 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         cwd: values.cwd as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
+      });
+      break;
+    }
+
+    case "check": {
+      await dispatch.handleCheck({
+        cwd: values.cwd as string | undefined,
+        json: values.json as boolean | undefined,
+        noExit: options.noExit,
       });
       break;
     }

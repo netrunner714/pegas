@@ -82,6 +82,20 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     }
   }
 
+  if (contract.secrets !== undefined) {
+    if (!Array.isArray(contract.secrets)) {
+      add("secrets", "Expected an array of secret variable names.");
+    } else {
+      contract.secrets.forEach((sec, idx) => {
+        if (typeof sec !== "string" || !sec.trim()) {
+          add(`secrets[${idx}]`, "Secret variable name must be a non-empty string.");
+        } else if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(sec.trim())) {
+          add(`secrets[${idx}]`, `Invalid environment variable name "${sec}".`);
+        }
+      });
+    }
+  }
+
   if (!contract.services || typeof contract.services !== "object" || Array.isArray(contract.services)) {
     add("services", "Expected an object containing service definitions.");
     return issues;
@@ -123,6 +137,33 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     }
     if (service.upstream !== undefined && (typeof service.upstream !== "string" || !service.upstream.trim())) {
       add(`${base}.upstream`, "Expected a non-empty upstream target.");
+    }
+
+    if (service.routes !== undefined) {
+      if (!service.routes || typeof service.routes !== "object" || Array.isArray(service.routes)) {
+        add(`${base}.routes`, "Expected an object mapping route paths to target upstreams.");
+      } else {
+        for (const [routePath, target] of Object.entries(service.routes as Record<string, unknown>)) {
+          if (!routePath.startsWith("/")) {
+            add(`${base}.routes.${routePath}`, `Route path must start with "/" (got "${routePath}").`);
+          }
+          if (typeof target === "string") {
+            if (!target.trim()) {
+              add(`${base}.routes.${routePath}`, "Target must be a non-empty upstream string.");
+            }
+          } else if (target && typeof target === "object" && !Array.isArray(target)) {
+            const targetObj = target as Record<string, unknown>;
+            if (typeof targetObj.to !== "string" || !targetObj.to.trim()) {
+              add(`${base}.routes.${routePath}.to`, "Expected a non-empty target upstream string in 'to'.");
+            }
+            if (targetObj.websocket !== undefined && typeof targetObj.websocket !== "boolean") {
+              add(`${base}.routes.${routePath}.websocket`, "Expected a boolean value for websocket.");
+            }
+          } else {
+            add(`${base}.routes.${routePath}`, "Route target must be an upstream string (e.g. 'api:3000') or an object with 'to'.");
+          }
+        }
+      }
     }
 
     if (service.build !== undefined && service.image !== undefined) {
