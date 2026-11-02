@@ -14,7 +14,7 @@ import { handleCa } from "./commands/ca.js";
 import { handleUninstall } from "./commands/uninstall.js";
 import { handleCheck } from "./commands/check.js";
 
-import { VERSION } from "./version.js";
+import { VERSION, compareSemver } from "./version.js";
 import { generateHelpText, getParseArgsOptions } from "./help.js";
 export { VERSION, generateHelpText, getParseArgsOptions };
 
@@ -65,6 +65,15 @@ export function tryLocalDelegation(args = process.argv.slice(2)): void {
     const currentScript = fs.realpathSync(process.argv[1] || "");
     const targetScript = fs.realpathSync(localPegas);
     if (currentScript === targetScript) {
+      return;
+    }
+  } catch {}
+
+  // Do not delegate if local version is older or same as this binary
+  try {
+    const pkgDir = path.dirname(path.dirname(localPegas));
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+    if (pkgJson.version && compareSemver(pkgJson.version, VERSION) <= 0) {
       return;
     }
   } catch {}
