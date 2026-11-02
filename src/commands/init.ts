@@ -54,12 +54,26 @@ export async function setupGitignore(projectDir: string, dryRun = false): Promis
   }
 }
 
-export async function setupStarterDockerfile(projectDir: string, dryRun = false): Promise<string | null> {
+export async function setupStarterDockerfile(
+  projectDir: string,
+  contract?: PegasContract,
+  dryRun = false
+): Promise<string | null> {
   const dockerfilePath = path.join(projectDir, "Dockerfile");
   try {
     await fs.access(dockerfilePath);
     return null;
   } catch {}
+
+  // If contract already defines custom Dockerfiles in its services (e.g. apps/* or deploy/*), skip root Dockerfile
+  if (contract?.services) {
+    const hasCustomDockerfiles = Object.values(contract.services).some(
+      (svc) => svc.build?.dockerfile && svc.build.dockerfile !== "Dockerfile"
+    );
+    if (hasCustomDockerfiles) {
+      return null;
+    }
+  }
 
   const pm = await detectPackageManager(projectDir);
   let content = "";
@@ -364,7 +378,7 @@ export async function handleProjectInit(
   }
 
   // 3b. Starter Dockerfile for Docker-first projects
-  const dockerfileAction = await setupStarterDockerfile(cwd, dryRun);
+  const dockerfileAction = await setupStarterDockerfile(cwd, contractRes.contract, dryRun);
   if (dockerfileAction) {
     actions.push(dockerfileAction);
   }
