@@ -127,10 +127,35 @@ export const COMMANDS: CliCommandDef[] = [
         placeholder: "<path>",
         description: "Target project directory",
       },
+      {
+        name: "dry-run",
+        type: "boolean",
+        default: false,
+        description: "Preview planned deployment actions and routes without modifying containers or routes",
+      },
+      {
+        name: "skip-dns-check",
+        type: "boolean",
+        default: false,
+        description: "Skip DNS pre-flight verification",
+      },
+      {
+        name: "strict-dns",
+        type: "boolean",
+        default: false,
+        description: "Abort deployment if DNS does not resolve to this host",
+      },
+      {
+        name: "skip-up",
+        type: "boolean",
+        default: false,
+        description: "Configure routes without bringing up containers",
+      },
     ],
     examples: [
       "$ pegas deploy production",
       "$ pegas deploy stage",
+      "$ pegas deploy production --dry-run",
     ],
   },
   {

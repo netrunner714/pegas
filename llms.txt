@@ -21,7 +21,7 @@
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update @netrunner714/pegas to latest version.
 - `npx pegas dev -- <command>` (--cwd) — Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app.
 - `npx pegas dev` (--cwd) — Docker runtime: verify contract and attach to logs; host runtime: start local HTTPS proxy and app.
-- `npx pegas deploy <env> [options]` (-e, --cwd) — Deploy an environment (development/production): network, shared Gateway, containers, routes.
+- `npx pegas deploy <env> [options]` (-e, --cwd, --dry-run, --skip-dns-check, --strict-dns, --skip-up) — Deploy an environment (development/production): network, shared Gateway, containers, routes.
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas uninstall [options]` (--dry-run, --cwd) — Remove Pegas from the project and clean the package (mirror of init).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).

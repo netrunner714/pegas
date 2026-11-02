@@ -70,6 +70,10 @@ pegas dev -- next dev
 ```text
 -e, --env <name>      Целевое окружение (например, production, stage)
 --cwd <path>          Целевой каталог проекта
+--dry-run             Показать план изменений без записи на диск
+--skip-dns-check      Skip DNS pre-flight verification
+--strict-dns          Abort deployment if DNS does not resolve to this host
+--skip-up             Configure routes without bringing up containers
 ```
 
 Примеры:
@@ -77,6 +81,7 @@ pegas dev -- next dev
 ```bash
 pegas deploy production
 pegas deploy stage
+pegas deploy production --dry-run
 ```
 
 ### `pegas down [options]`
