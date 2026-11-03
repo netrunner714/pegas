@@ -290,7 +290,7 @@ describe("contract & package.json integration", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("wraps dev script, adds deploy script, and adds pegas to devDependencies in package.json", async () => {
+  it("preserves user scripts and adds pegas to devDependencies in package.json", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-pkg-"));
     const initialPkg = {
       name: "my-app",
@@ -305,15 +305,15 @@ describe("contract & package.json integration", () => {
     expect(actions.length).toBeGreaterThan(0);
 
     const updated = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
-    expect(updated.scripts.dev).toBe("pegas dev -- next dev");
-    expect(updated.scripts.deploy).toBe("pegas deploy production");
+    expect(updated.scripts.dev).toBe("next dev");
+    expect(updated.scripts.deploy).toBeUndefined();
     expect(updated.devDependencies["@netrunner714/pegas"]).toBe(`^${VERSION}`);
 
     // Test idempotence
     const secondActions = await updatePackageJson(tmpDir);
     expect(secondActions.length).toBe(0);
     const updatedAgain = JSON.parse(await fs.readFile(path.join(tmpDir, "package.json"), "utf-8"));
-    expect(updatedAgain.scripts.dev).toBe("pegas dev -- next dev");
+    expect(updatedAgain.scripts.dev).toBe("next dev");
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });

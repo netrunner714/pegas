@@ -41,7 +41,7 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     return [{ path: "$", message: "Contract must be a JSON object." }];
   }
 
-  const contract = value as Record<string, unknown>;
+  const contract = value as unknown as PegasContract & Record<string, unknown>;
   const issues: ContractValidationIssue[] = [];
   const add = (field: string, message: string) => issues.push({ path: field, message });
 
@@ -948,8 +948,12 @@ export function createContractFromInventory(
         service.env = { ...svc.env };
         delete service.env.PORT; // порт вынесен в поле port
       }
+      const devDomains = [`${svc.name}.${slug}.localhost`];
+      if (primary && primary.name === svc.name) {
+        devDomains.push(`${slug}.localhost`);
+      }
       service.domains = {
-        development: [`${svc.name}.${slug}.localhost`],
+        development: devDomains,
         // example.com (RFC 2606): явный маркер «домен не заполнен».
         // Stage без имени сервиса: угадать стейдж-домен почти никогда
         // нельзя — единая заглушка читается однозначнее.
@@ -1187,7 +1191,7 @@ export async function setupProjectContract(
 export async function updatePackageJson(
   projectDir: string,
   dryRun = false,
-  runtime?: "host" | "docker"
+  _runtime?: "host" | "docker"
 ): Promise<string[]> {
   const actions: string[] = [];
   const pkgPath = path.join(projectDir, "package.json");
@@ -1196,37 +1200,9 @@ export async function updatePackageJson(
     const raw = await fs.readFile(pkgPath, "utf-8");
     const pkg = JSON.parse(raw);
 
-    if (!pkg.scripts) {
-      pkg.scripts = {};
-    }
+    // Pegas does NOT mutate pkg.scripts. Native developer commands stay untouched.
 
-    // Host runtime wraps the user command. Docker runtime keeps the real app command
-    // untouched because it is executed inside the service container.
-    if (runtime === "docker") {
-      if (typeof pkg.scripts.dev === "string" && pkg.scripts.dev.startsWith("pegas dev -- ")) {
-        pkg.scripts.dev = pkg.scripts.dev.replace(/^pegas dev --\s*/, "");
-        actions.push("Восстановлен исходный dev-скрипт для запуска внутри Docker");
-      } else if (pkg.scripts.dev === "pegas dev") {
-        delete pkg.scripts.dev;
-        actions.push("Удалён host-wrapper dev-скрипта; Docker runtime использует command из pegas.json или package.json");
-      }
-    } else if (pkg.scripts.dev) {
-      if (!pkg.scripts.dev.includes("pegas dev")) {
-        const cleanDev = pkg.scripts.dev.replace(/^pegas up --env development --\s*/, "");
-        pkg.scripts.dev = "pegas dev -- " + cleanDev;
-        actions.push("Обновлён скрипт 'dev' в package.json: обёрнут в 'pegas dev --'");
-      }
-    } else {
-      pkg.scripts.dev = "pegas dev";
-      actions.push("Добавлен скрипт 'dev': 'pegas dev' в package.json");
-    }
-    // 2. Add deploy script
-    if (!pkg.scripts.deploy || !pkg.scripts.deploy.includes("pegas deploy")) {
-      pkg.scripts.deploy = "pegas deploy production";
-      actions.push("Добавлен скрипт 'deploy': 'pegas deploy production' в package.json");
-    }
-
-    // 3. Add pegas to devDependencies if missing (init does not bump version automatically)
+    // Add pegas to devDependencies if missing (init does not bump version automatically)
     if (!pkg.devDependencies) {
       pkg.devDependencies = {};
     }

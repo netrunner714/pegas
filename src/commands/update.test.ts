@@ -11,7 +11,7 @@ describe("pegas update", () => {
     it("stays within the current major version by default", async () => {
       // current 1.0.0, available 1.1.1 and 2.0.0
       const res = await resolveTargetVersion("1.0.0", false, "2.0.0");
-      expect(res.targetVer).toBe(VERSION); // stays within 1.x
+      expect(res.targetVer).toBe("1.0.0"); // stays within 1.x
       expect(res.hasNewerMajor).toBe(true);
       expect(res.availableMajor).toBe("2.0.0");
     });
@@ -83,7 +83,7 @@ describe("pegas update", () => {
       }) as any;
 
       try {
-        await handleUpdate({ cwd: tmpProj, json: true, noExit: true });
+        await handleUpdate({ cwd: tmpProj, latest: true, json: true, noExit: true });
       } finally {
         child_process.spawnSync = origSpawnSync;
         await fs.rm(tmpProj, { recursive: true, force: true });
@@ -132,7 +132,7 @@ describe("pegas update", () => {
       console.error = (...args) => errors.push(args.join(" "));
 
       try {
-        await handleUpdate({ cwd: tmpProj, noExit: true });
+        await handleUpdate({ cwd: tmpProj, latest: true, noExit: true });
       } finally {
         child_process.spawnSync = origSpawnSync;
         console.error = origError;

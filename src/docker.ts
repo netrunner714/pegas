@@ -201,9 +201,19 @@ export async function ensureGatewayContainer(gatewayDir: string): Promise<Comman
 
 /**
  * A stopped project still holds the Gateway dependency. Only when no
- * containers (running or stopped) carry pegas.project may the Gateway stop.
+ * route files in conf.d and no containers (running or stopped) carry
+ * pegas.project may the Gateway stop.
  */
 export async function stopGatewayIfUnused(gatewayDir: string): Promise<CommandResult> {
+  const confDir = path.join(gatewayDir, "conf.d");
+  try {
+    const files = await fs.readdir(confDir);
+    const routeFiles = files.filter((f) => f.endsWith(".caddy"));
+    if (routeFiles.length > 0) {
+      return { success: true, stdout: "Gateway retained: active route configurations exist.", stderr: "" };
+    }
+  } catch {}
+
   const holders = await runCommand("docker", [
     "ps", "-aq", "--filter", "label=pegas.project",
   ]);

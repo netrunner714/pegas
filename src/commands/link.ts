@@ -1,32 +1,27 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, reloadGateway } from "../gateway.js";
 import {
   CONTRACT_FILENAME,
   validatePegasContract,
   getEnvironmentDomains,
   normalizeDomain,
-  getProjectRuntimeId,
-  interpolateServiceReferences,
 } from "../contract.js";
 import { ensureGatewayContainer } from "../docker.js";
 import { generateCaddyfileSnippet } from "../generator.js";
-import { createRuntimeCompose } from "../runtime-compose.js";
-import { detectPackageManager } from "../pm.js";
-import { PegasContract, ServiceContract } from "../types.js";
+import { PegasContract } from "../types.js";
 
-export interface DevOptions {
+export interface LinkOptions {
   cwd?: string;
   gatewayDir?: string;
   json?: boolean;
-  noRun?: boolean;
-  command?: string[];
-  noExit?: boolean;
   dryRun?: boolean;
+  noExit?: boolean;
+  skipGatewayEnsure?: boolean;
+  skipReload?: boolean;
 }
 
-export async function handleDev(options: DevOptions = {}): Promise<void> {
+export async function handleLink(options: LinkOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
@@ -70,11 +65,10 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   }
 
   const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
-  const runtimeId = contract.runtime === "docker" ? getProjectRuntimeId(projectRoot, projectName) : projectName;
   const gatewayDir = await findGatewayDir(options.gatewayDir);
 
-  // 1. Ensure Caddy Gateway is running
-  if (!options.dryRun) {
+  // 1. Ensure Caddy Gateway is running (starts Caddy if not already running — first project)
+  if (!options.dryRun && !options.skipGatewayEnsure) {
     const gwRes = await ensureGatewayContainer(gatewayDir);
     if (!gwRes.success) {
       const msg = `Could not start shared Pegas Gateway: ${gwRes.stderr || gwRes.stdout}`;
@@ -85,43 +79,7 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     }
   }
 
-  // 2. Start infra services (e.g. redis, postgres) if any exist
-  const infraServices: [string, ServiceContract][] = Object.entries(contract.services || {}).filter(
-    ([_, s]) => s.role === "infra" || (s.role !== "app" && typeof s.image === "string" && !s.build),
-  );
-
-  if (infraServices.length > 0 && !options.dryRun) {
-    try {
-      const infraContract: PegasContract = {
-        ...contract,
-        runtime: "docker",
-        services: Object.fromEntries(infraServices),
-      };
-      const { content: composeContent } = createRuntimeCompose(infraContract, {
-        projectRoot,
-        projectId: runtimeId,
-        environment: "development",
-      });
-      const infraNames = infraServices.map(([name]) => name);
-      const composeProjectName = `${runtimeId}-development`;
-      child_process.execFileSync(
-        "docker",
-        ["compose", "--project-name", composeProjectName, "--project-directory", projectRoot, "-f", "-", "up", "-d", ...infraNames],
-        {
-          input: composeContent,
-          cwd: projectRoot,
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
-    } catch (err: any) {
-      const stderr = err?.stderr?.toString() || err?.message || "";
-      if (!isJson) {
-        console.warn(`⚠️ Warning: could not start infra services (${infraServices.map(([n]) => n).join(", ")}): ${stderr}`);
-      }
-    }
-  }
-
-  // 3. Generate Caddy routes pointing to host.docker.internal:<port>
+  // 2. Generate Caddy routes pointing to host.docker.internal:<port>
   const snippets: string[] = [];
   const registeredUrls: { service: string; url: string; upstream: string }[] = [];
   const seenDomains = new Set<string>();
@@ -203,93 +161,26 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     if (!options.dryRun) {
       await fs.mkdir(path.dirname(routeFilePath), { recursive: true });
       await fs.writeFile(routeFilePath, fullSnippet, "utf-8");
-      await reloadGateway({ gatewayDir, json: isJson, silent: true, exitOnError: false });
+      if (!options.skipReload) {
+        await reloadGateway({ gatewayDir, json: isJson, silent: true, exitOnError: false });
+      }
     }
   }
 
-  // 4. Output summary
   if (isJson) {
     console.log(
       JSON.stringify({
-        status: "ready",
+        status: "linked",
         project: projectName,
+        routeFile: routeFilePath,
         urls: registeredUrls,
-        infraServices: infraServices.map(([n]) => n),
       }),
     );
   } else {
-    console.log(`\n🚀 \x1b[1;32mPegas dev environment ready!\x1b[0m`);
-    if (infraServices.length > 0) {
-      console.log(`   📦 Infra: ${infraServices.map(([n]) => `\x1b[36m${n}\x1b[0m`).join(", ")} running`);
-    }
+    console.log(`\n🔗 \x1b[1;32mProject '${projectName}' linked to Pegas Gateway!\x1b[0m\n`);
     for (const r of registeredUrls) {
       console.log(`   • \x1b[1m${r.url}\x1b[0m ➔ \x1b[90m${r.upstream}\x1b[0m`);
     }
     console.log();
-  }
-
-  if (options.noRun || options.dryRun) {
-    return;
-  }
-
-  // 5. Detect and execute the dev command
-  let devCmd: string;
-  let devArgs: string[] = [];
-
-  const pm = await detectPackageManager(projectRoot);
-  let pkgJson: any = {};
-  try {
-    pkgJson = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf-8"));
-  } catch {}
-
-  const scripts = pkgJson.scripts || {};
-
-  if (options.command && options.command.length > 0) {
-    if (options.command.length === 1 && scripts[options.command[0]]) {
-      devCmd = pm;
-      devArgs = ["run", options.command[0]];
-    } else {
-      devCmd = options.command[0];
-      devArgs = options.command.slice(1);
-    }
-  } else {
-    devCmd = pm;
-    devArgs = ["run", "dev"];
-  }
-
-  if (!isJson) {
-    console.log(`▶ Running: \x1b[36m${devCmd} ${devArgs.join(" ")}\x1b[0m\n`);
-  }
-
-  const resolvedGlobalDevEnv: Record<string, string> = {};
-  if (contract.env) {
-    for (const [key, value] of Object.entries(contract.env)) {
-      let raw: string | undefined;
-      if (typeof value === "string") {
-        raw = value;
-      } else if (value && typeof value === "object") {
-        raw = (value as Record<string, string>).development;
-      }
-      if (raw !== undefined) {
-        resolvedGlobalDevEnv[key] = interpolateServiceReferences(raw, contract, "development");
-      }
-    }
-  }
-
-  const runEnv = {
-    ...process.env,
-    ...resolvedGlobalDevEnv,
-    PEGAS_ALLOWED_ORIGINS: allProjectDomains.map((d) => `https://${d}`).join(","),
-  };
-
-  const result = child_process.spawnSync(devCmd, devArgs, {
-    cwd: projectRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-    env: runEnv,
-  });
-
-  if (result.status !== null && result.status !== 0 && !options.noExit) {
-    process.exit(result.status);
   }
 }

@@ -107,10 +107,32 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas update", "$ pegas update --latest"],
   },
   {
-    name: "dev",
-    summary: "Start native host development (gateway, infra containers, host routes, and dev server)",
-    usage: "dev",
-    examples: ["$ pegas dev"],
+    name: "link",
+    summary: "Link project to shared Pegas Gateway for local development (*.localhost)",
+    usage: "link [options]",
+    options: [
+      {
+        name: "cwd",
+        type: "string",
+        placeholder: "<path>",
+        description: "Target project directory",
+      },
+    ],
+    examples: ["$ pegas link"],
+  },
+  {
+    name: "unlink",
+    summary: "Unlink project from shared Pegas Gateway and clean up dev routes",
+    usage: "unlink [options]",
+    options: [
+      {
+        name: "cwd",
+        type: "string",
+        placeholder: "<path>",
+        description: "Target project directory",
+      },
+    ],
+    examples: ["$ pegas unlink"],
   },
   {
     name: "logs",
@@ -418,8 +440,6 @@ export function generateHelpText(commandName?: string): string {
     }
     if (cmd.name === "deploy") {
       label += " -s <scenario>";
-    } else if (cmd.name === "dev") {
-      label += " [-- <command>]";
     }
     cmdLabels.push(label);
   }
@@ -438,7 +458,8 @@ export function generateHelpText(commandName?: string): string {
     { name: "update", options: COMMANDS.find((c) => c.name === "update")?.options || [] },
     { name: "deploy", options: COMMANDS.find((c) => c.name === "deploy")?.options || [] },
     { name: "init", options: COMMANDS.find((c) => c.name === "init")?.options || [] },
-    { name: "dev", options: COMMANDS.find((c) => c.name === "dev")?.options || [] },
+    { name: "link", options: COMMANDS.find((c) => c.name === "link")?.options || [] },
+    { name: "unlink", options: COMMANDS.find((c) => c.name === "unlink")?.options || [] },
   ];
 
   for (const sec of commandOptionSections) {

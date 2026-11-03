@@ -12,14 +12,15 @@
 - Service aliases inside the shared network are `<checkout-id>-<environment>-<service>`: several checkouts and environments coexist.
 - Each project gets an isolated declarative route file `conf.d/<projectName>.caddy` (per environment); hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
-- Dev containers bind-mount sources and keep dependencies in named volumes; apps run their real dev commands inside containers.
 - View and stream container logs: `pegas logs [env] [service] [-f] [--tail N]`; Ctrl+C only detaches without stopping containers.
+- Local dev: `pegas link` attaches project routes to the shared Gateway on port 443 (`[service].[project].localhost`); `pegas unlink` removes them.
 - Local dev HTTPS: `pegas ca install` (one-time), clean URLs on port 443 (`[service].[project].localhost`).
 
 ## CLI Usage for Agents
 - `npx @netrunner714/pegas init [options]` (--force, --dry-run, --cwd) — Create the pegas.json contract (runtime auto-detected from the project), docs and scripts.
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update @netrunner714/pegas to latest version.
-- `npx pegas dev` — Start native host development (gateway, infra containers, host routes, and dev server).
+- `npx pegas link` (--cwd) — Link project to shared Pegas Gateway for local development (*.localhost).
+- `npx pegas unlink` (--cwd) — Unlink project from shared Pegas Gateway and clean up dev routes.
 - `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).

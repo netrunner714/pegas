@@ -22,8 +22,9 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`env\` (глобально): переносимый конфиг проекта (строка или карта development/stage/production); профиль выбирает запуск. Секреты — только в \`envFile\`
 
 ## Команды
-* Локальная разработка: \`npm run dev\` (запускает \`pegas dev\`)
-* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas deploy production\`)
+* Подключить проект к локальному шлюзу: \`pegas link\`
+* Отключить проект от шлюза: \`pegas unlink\`
+* Деплой на продакшен: \`pegas deploy production\`
 * Деплой на стейджинг: \`pegas deploy stage\`
 * Остановка проекта: \`pegas down\`
 * Доверенный локальный HTTPS: \`pegas ca install\` (один раз на машину)

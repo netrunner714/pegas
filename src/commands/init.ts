@@ -21,9 +21,9 @@ const DOCS_PEGAS_MD = `# Pegas
 - \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
 
 ## Команды
-* Развернуть development: \`pegas deploy development\`
-* Подключиться к логам: \`pegas logs -f\`
-* Деплой на продакшен: \`npm run deploy\` (запускает \`pegas deploy production\`)
+* Подключить к локальному шлюзу: \`pegas link\`
+* Отключить от локального шлюза: \`pegas unlink\`
+* Деплой на продакшен: \`pegas deploy production\`
 * Деплой на стейджинг: \`pegas deploy stage\`
 * Остановка проекта: \`pegas down\`
 * Доверенный локальный HTTPS: \`pegas ca install\` (один раз на машину)
@@ -390,7 +390,7 @@ export async function handleProjectInit(
 
   // 4. Create docs/pegas.md
   const docsContent = runtime === "docker"
-    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Развернуть development: `pegas deploy development`\n- Подключиться к логам: `pegas logs -f` (Ctrl+C только отключает логи)\n- Деплой production: `pegas deploy production`\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
+    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Подключить к локальному шлюзу: `pegas link`\n- Отключить от локального шлюза: `pegas unlink`\n- Подключиться к логам: `pegas logs -f` (Ctrl+C только отключает логи)\n- Деплой production: `pegas deploy production`\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
     : DOCS_PEGAS_MD;
   const docsDir = path.join(cwd, "docs");
   const docsPath = path.join(docsDir, "pegas.md");

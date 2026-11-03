@@ -44,14 +44,36 @@ pegas update
 pegas update --latest
 ```
 
-### `pegas dev`
+### `pegas link [options]`
 
-Запуск локальной разработки: шлюз Caddy, prebuilt infra-сервисы, проксирование на хостовые порты и запуск dev-сервера
+Подключает проект к общему шлюзу Pegas для локальной разработки (*.localhost)
+
+Флаги:
+
+```text
+--cwd <path>          Целевой каталог проекта
+```
 
 Примеры:
 
 ```bash
-pegas dev
+pegas link
+```
+
+### `pegas unlink [options]`
+
+Отключает проект от шлюза Pegas и удаляет маршруты разработки
+
+Флаги:
+
+```text
+--cwd <path>          Целевой каталог проекта
+```
+
+Примеры:
+
+```bash
+pegas unlink
 ```
 
 ### `pegas logs [env] [service] [options]`

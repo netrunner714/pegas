@@ -18,8 +18,8 @@ const CORE_CONCEPTS = `## Core Concepts
 - Service aliases inside the shared network are \`<checkout-id>-<environment>-<service>\`: several checkouts and environments coexist.
 - Each project gets an isolated declarative route file \`conf.d/<projectName>.caddy\` (per environment); hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
-- Dev containers bind-mount sources and keep dependencies in named volumes; apps run their real dev commands inside containers.
 - View and stream container logs: \`pegas logs [env] [service] [-f] [--tail N]\`; Ctrl+C only detaches without stopping containers.
+- Local dev: \`pegas link\` attaches project routes to the shared Gateway on port 443 (\`[service].[project].localhost\`); \`pegas unlink\` removes them.
 - Local dev HTTPS: \`pegas ca install\` (one-time), clean URLs on port 443 (\`[service].[project].localhost\`).`;
 
 const CONTRACT_EXAMPLE = `## Example pegas.json (docker runtime)
@@ -85,8 +85,10 @@ export function buildLlmsText(): string {
       invocations.push("npx pegas logs -f");
       invocations.push("npx pegas logs production");
       invocations.push("npx pegas logs api -f");
-    } else if (cmd.name === "dev") {
-      invocations.push("npx pegas dev");
+    } else if (cmd.name === "link") {
+      invocations.push("npx pegas link");
+    } else if (cmd.name === "unlink") {
+      invocations.push("npx pegas unlink");
     } else if (cmd.name === "ca") {
       invocations.push("npx pegas ca install");
       invocations.push("npx pegas ca remove");

@@ -382,27 +382,33 @@ describe("main CLI command routing", () => {
     });
   });
 
-  it("dispatches 'dev' command with parsed options and custom command", async () => {
+  it("dispatches 'link' and 'unlink' commands with parsed options", async () => {
     const calls: Record<string, any> = {};
     const dispatchers: MainDispatchers = {
-      handleDev: async (opts) => {
-        calls.dev = opts;
+      handleLink: async (opts) => {
+        calls.link = opts;
+      },
+      handleUnlink: async (opts) => {
+        calls.unlink = opts;
       },
     };
 
-    await main(["dev", "--no-run", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
+    await main(["link", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
 
-    expect(calls.dev).toEqual({
+    expect(calls.link).toEqual({
       cwd: undefined,
       gatewayDir: "/tmp/gw",
-      noRun: true,
       dryRun: false,
       json: true,
-      command: undefined,
     });
 
-    await main(["dev", "--", "bun", "run", "dev:all"], { dispatchers });
-    expect(calls.dev.command).toEqual(["bun", "run", "dev:all"]);
+    await main(["unlink", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
+    expect(calls.unlink).toEqual({
+      cwd: undefined,
+      gatewayDir: "/tmp/gw",
+      dryRun: false,
+      json: true,
+    });
   });
 
   it("dispatches 'deploy' command with parsed options", async () => {
