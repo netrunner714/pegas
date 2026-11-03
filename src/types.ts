@@ -7,6 +7,7 @@ export interface CorsConfig {
   origins?: string[];
   methods?: string[];
   headers?: string[];
+  exposeHeaders?: string[];
   credentials?: boolean;
   maxAge?: number;
 }

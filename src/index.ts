@@ -19,6 +19,7 @@ import { VERSION, compareSemver } from "./version.js";
 import { generateHelpText, getParseArgsOptions } from "./help.js";
 export { VERSION, generateHelpText, getParseArgsOptions };
 export { getPegasAllowedOrigins, isPegasOriginAllowed } from "./cors.js";
+export { generateCaddyfileSnippet, buildCorsOriginRegex } from "./generator.js";
 
 export function validateNodeVersion(current = process.versions.node): boolean {
   if (!current) return true;

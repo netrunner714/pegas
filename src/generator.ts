@@ -92,6 +92,7 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
     ];
     const credentials = corsOpts.credentials !== false;
     const maxAge = corsOpts.maxAge ?? 86400;
+    const exposeHeaders = corsOpts.exposeHeaders;
 
     const regexPattern = buildCorsOriginRegex(origins, customOrigins);
 
@@ -106,23 +107,41 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
     lines.push(`        header Access-Control-Allow-Origin "{header.Origin}"`);
     lines.push(`        header Access-Control-Allow-Methods "${methods.join(", ")}"`);
     lines.push(`        header Access-Control-Allow-Headers "${headers.join(", ")}"`);
+    if (exposeHeaders && exposeHeaders.length > 0) {
+      lines.push(`        header Access-Control-Expose-Headers "${exposeHeaders.join(", ")}"`);
+    }
     if (credentials) {
       lines.push(`        header Access-Control-Allow-Credentials "true"`);
     }
     lines.push(`        header Access-Control-Max-Age "${maxAge}"`);
+    lines.push(`        header Vary "Origin"`);
     lines.push(`        respond "" 204`);
     lines.push(`    }`);
     lines.push(``);
+
+    const corsHeaderDown = [
+      `            header_down -Access-Control-Allow-Origin`,
+      `            header_down -Access-Control-Allow-Credentials`,
+      `            header_down -Access-Control-Allow-Methods`,
+      `            header_down -Access-Control-Allow-Headers`,
+      `            header_down -Access-Control-Expose-Headers`,
+    ].join("\n");
 
     if (routes && Object.keys(routes).length > 0) {
       for (const [pathPrefix, target] of Object.entries(routes)) {
         const targetUpstream = typeof target === "string" ? target : target.to;
         lines.push(`    handle ${pathPrefix} {`);
         lines.push(`        header @cors_origin Access-Control-Allow-Origin "{header.Origin}"`);
+        lines.push(`        header @cors_origin Vary "Origin"`);
         if (credentials) {
           lines.push(`        header @cors_origin Access-Control-Allow-Credentials "true"`);
         }
-        lines.push(`        reverse_proxy ${targetUpstream}`);
+        if (exposeHeaders && exposeHeaders.length > 0) {
+          lines.push(`        header @cors_origin Access-Control-Expose-Headers "${exposeHeaders.join(", ")}"`);
+        }
+        lines.push(`        reverse_proxy ${targetUpstream} {`);
+        lines.push(corsHeaderDown);
+        lines.push(`        }`);
         lines.push(`    }`);
         lines.push(``);
       }
@@ -130,10 +149,16 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
 
     lines.push(`    handle {`);
     lines.push(`        header @cors_origin Access-Control-Allow-Origin "{header.Origin}"`);
+    lines.push(`        header @cors_origin Vary "Origin"`);
     if (credentials) {
       lines.push(`        header @cors_origin Access-Control-Allow-Credentials "true"`);
     }
-    lines.push(`        reverse_proxy ${upstream || "app:3000"}`);
+    if (exposeHeaders && exposeHeaders.length > 0) {
+      lines.push(`        header @cors_origin Access-Control-Expose-Headers "${exposeHeaders.join(", ")}"`);
+    }
+    lines.push(`        reverse_proxy ${upstream || "app:3000"} {`);
+    lines.push(corsHeaderDown);
+    lines.push(`        }`);
     lines.push(`    }`);
   } else if (routes && Object.keys(routes).length > 0) {
     lines.push(`    encode gzip zstd`);

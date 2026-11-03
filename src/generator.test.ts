@@ -89,8 +89,12 @@ describe("Caddyfile snippet generator", () => {
     expect(snippet).toContain('header Access-Control-Allow-Methods');
     expect(snippet).toContain('header Access-Control-Allow-Credentials "true"');
     expect(snippet).toContain('respond "" 204');
+    expect(snippet).toContain('header Vary "Origin"');
     expect(snippet).toContain("handle {");
     expect(snippet).toContain('header @cors_origin Access-Control-Allow-Origin "{header.Origin}"');
-    expect(snippet).toContain("reverse_proxy api:3001");
+    expect(snippet).toContain('header @cors_origin Vary "Origin"');
+    expect(snippet).toContain("reverse_proxy api:3001 {");
+    expect(snippet).toContain("header_down -Access-Control-Allow-Origin");
+    expect(snippet).toContain("header_down -Access-Control-Allow-Credentials");
   });
 });
