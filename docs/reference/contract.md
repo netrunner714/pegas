@@ -27,22 +27,39 @@
 | `bootInfra` | boolean | false | При `true` `pegas dev` автоматически поднимает инфраструктурные сервисы из docker-compose.yml |
 | `deploy` | object | — | См. [Секция deploy](#секция-deploy) |
 | `devGateway` | object | — | См. [Секция devGateway](#секция-devgateway-host-runtime) |
-| `env` | object | `{}` | **Глобальный конфиг проекта**: env-ключи, переносимые между окружениями и коммитимые в git. Значение — строка (одинаково во всех профилях) или карта `{ development, stage, production }` со **всеми тремя** ключами (частичные карты невалидны). Инжектится каждому сервису при `pegas dev`/`deploy`; сервисный `env` перекрывает глобальный. Секреты — только в `envFile` |
+| `secrets` | string[] | `[]` | **Список обязательных секретов проекта**: строгое соответствие 1:1 с корневыми `.env` и `.env.example`. Закомментированные пары `#KEY=val` запрещены |
+| `env` | object | `{}` | **Глобальный конфиг проекта**: env-ключи, переносимые между окружениями и коммитимые в git. Значение — либо карта профилей (все профили обязательны), либо динамическая ссылка `${services.<name>.<prop>}`. Статические скаляры запрещены. Инжектируется каждому сервису при `pegas dev`/`deploy`; сервисный `env` перекрывает глобальный |
 | `services` | object | **обязательно** | Сервисы проекта; ключ — имя сервиса |
 
-### Пример глобального env
+### Пример глобального env и самоссылок на сервисы
 
 ```jsonc
 {
+  "secrets": [
+    "DATABASE_URL",
+    "TELEGRAM_BOT_TOKEN"
+  ],
   "env": {
-    "PUBLIC_PORT": { "development": "5432", "stage": "5432", "production": "5432" },
+    // Карта профилей проекта
     "FEATURE_X": { "development": "true", "stage": "false", "production": "false" },
-    "STATIC_KEY": "value"  // одинаковая во всех профилях
+
+    // Динамические ссылки на сервисы (Пегас сам подставит нужный домен и протокол по профилю)
+    "WEB_URL": "${services.web.url}",
+    "VITE_WS_URL": "${services.api.wsUrl}",
+    "SESSION_COOKIE_DOMAIN": "${services.web.host}",
+    "API_INTERNAL_URL": "${services.api.internalUrl}"
   }
 }
 ```
 
-Профиль выбирает сам запуск: `pegas deploy production` подставляет значения `production`, `pegas dev` — `development`. В коде проекта не нужны ключи типа `APP_ENV`/`NODE_ENV` и ветвления по ним: окружение уже разрешено деплоем (плюс каждому app-сервису инжектится `PEGAS_ENV=development|stage|production`).
+#### Доступные макросы `${services.<имя>.<свойство>}`:
+* `${services.<svc>.url}` / `${services.<svc>.origin}` — публичный URL со схемой (`http://` на dev, `https://` на stage/prod).
+* `${services.<svc>.wsUrl}` — WebSocket URL со схемой (`ws://` на dev, `wss://` на stage/prod).
+* `${services.<svc>.host}` / `${services.<svc>.domain}` — чистый домен без протокола.
+* `${services.<svc>.port}` — внутренний порт сервиса (`"3000"`).
+* `${services.<svc>.internalUrl}` — внутренний адрес в Docker-сети с автоопределением протокола (`http`, `redis`, `postgresql`).
+
+Профиль выбирает сам запуск: `pegas deploy production` подставляет значения `production`, `pegas dev` — `development`. В коде проекта не нужны ключи типа `APP_ENV` и ветвления по ним: окружение уже разрешено деплоем (плюс каждому app-сервису инжектится `PEGAS_ENV=<профиль>`).
 
 ## Секция services
 
