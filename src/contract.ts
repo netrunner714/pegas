@@ -74,8 +74,8 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
           for (const p of projectEnvs) {
             if (!(p in profiles)) {
               add(base, `Profile map must include "${p}" — missing value for project profile.`);
-            } else if (typeof profiles[p] !== "string" || !(profiles[p] as string).trim()) {
-              add(`${base}.${p}`, "Expected a non-empty string value.");
+            } else if (typeof profiles[p] !== "string") {
+              add(`${base}.${p}`, "Expected a string value.");
             }
           }
           for (const p of declaredProfiles) {
@@ -88,8 +88,8 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
             add(base, "Profile map cannot be empty.");
           }
           for (const [p, v] of Object.entries(profiles)) {
-            if (typeof v !== "string" || !v.trim()) {
-              add(`${base}.${p}`, "Expected a non-empty string value.");
+            if (typeof v !== "string") {
+              add(`${base}.${p}`, "Expected a string value.");
             }
           }
         }
@@ -248,11 +248,11 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
             continue;
           }
           if (typeof val === "string") {
-            if (!val.trim()) add(`${base}.env.${key}`, "Expected a non-empty string value.");
+            // string value allowed (including empty string)
           } else if (val && typeof val === "object" && !Array.isArray(val)) {
             for (const [p, v] of Object.entries(val as Record<string, unknown>)) {
-              if (typeof v !== "string" || !v.trim()) {
-                add(`${base}.env.${key}.${p}`, "Expected a non-empty string value.");
+              if (typeof v !== "string") {
+                add(`${base}.env.${key}.${p}`, "Expected a string value.");
               }
             }
           } else {
