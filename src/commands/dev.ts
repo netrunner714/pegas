@@ -140,7 +140,7 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
-    if (serviceConfig.role === "infra" && !serviceConfig.domains) continue;
+    if (serviceConfig.role === "infra") continue;
 
     const envDomains = getEnvironmentDomains(serviceConfig, "development");
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;

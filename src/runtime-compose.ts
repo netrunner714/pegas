@@ -3,7 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { EnvProfileValue, PegasContract, ServiceContract } from "./types.js";
-import { validatePegasContract, normalizeEnvironment } from "./contract.js";
+import { validatePegasContract, normalizeEnvironment, getEnvironmentDomains } from "./contract.js";
 
 export interface RuntimeComposeOptions {
   projectRoot: string;
@@ -535,6 +535,15 @@ export function createRuntimeCompose(
     });
     serviceHashes[serviceName] = serviceHash;
 
+    const envDomains = getEnvironmentDomains(service, environmentName);
+    const domainStr = Array.isArray(envDomains) && envDomains.length > 0 ? envDomains.join(",") : undefined;
+    const pubHost = typeof contract.env?.PUBLIC_HOST === "object"
+      ? (contract.env.PUBLIC_HOST as Record<string, string>)[environmentName]
+      : contract.env?.PUBLIC_HOST;
+    const effectiveEndpoint = domainStr
+      ? `${domainStr.split(",")[0]}:${service.port || (service.ports?.[0] ? service.ports[0].split(":")[0] : 5432)}`
+      : (pubHost && service.role === "infra" ? `${pubHost}:${service.port || 5432}` : undefined);
+
     const generated: Record<string, unknown> = {
       restart: "unless-stopped",
       labels: {
@@ -544,6 +553,8 @@ export function createRuntimeCompose(
         "pegas.service": serviceName,
         "pegas.manifest-hash": serviceHash,
         "pegas.role": service.role || (app ? "app" : "infra"),
+        ...(domainStr ? { "pegas.domains": domainStr } : {}),
+        ...(effectiveEndpoint ? { "pegas.endpoint": effectiveEndpoint } : {}),
         ...(appDefaults ? { "pegas.dependencies-hash": appDefaults.lockHash } : {}),
         ...(service.envFile ? {
           "pegas.env-hash": createHash("sha256")

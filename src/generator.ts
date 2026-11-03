@@ -99,10 +99,18 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
       "X-Requested-With",
       "Accept",
       "Origin",
+      "x-grpc-web",
+      "x-user-agent",
+      "grpc-timeout",
     ];
     const credentials = corsOpts.credentials !== false;
     const maxAge = corsOpts.maxAge ?? 86400;
-    const exposeHeaders = corsOpts.exposeHeaders;
+    const exposeHeaders = corsOpts.exposeHeaders || [
+      "ETag",
+      "grpc-status",
+      "grpc-message",
+      "grpc-status-details-bin",
+    ];
 
     const regexPattern = buildCorsOriginRegex(origins, customOrigins);
 

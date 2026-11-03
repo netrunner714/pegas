@@ -458,6 +458,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
+    if (serviceConfig.role === "infra") continue;
     const envDomains = getEnvironmentDomains(serviceConfig, runtimeEnvironment);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
