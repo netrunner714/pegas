@@ -18,9 +18,47 @@ export interface SecretsCheckResult {
   exampleExists: boolean;
   missingInExample: string[];
   extraInExample: string[];
+  commentedInEnv: string[];
+  commentedInExample: string[];
   extraEnvFiles: string[];
   warnings: string[];
   errors: string[];
+}
+
+export interface CommentedAssignment {
+  key: string;
+  line: number;
+  raw: string;
+}
+
+/**
+ * Finds all commented-out key-value assignments (e.g. '#KEY=value', '# KEY=value', '# export KEY=').
+ * Pegas strictly forbids commented-out assignments in .env and .env.example.
+ */
+export function findCommentedEnvAssignments(content: string): CommentedAssignment[] {
+  const result: CommentedAssignment[] = [];
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const match = rawLine.match(/^\s*#+\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (match) {
+      result.push({
+        key: match[1],
+        line: i + 1,
+        raw: rawLine.trim(),
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Removes commented-out key-value assignments from env file content.
+ */
+export function stripCommentedEnvAssignments(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const cleaned = lines.filter((line) => !/^\s*#+\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line));
+  return cleaned.join("\n");
 }
 
 /**
@@ -221,8 +259,9 @@ export async function syncEnvExample(
 
   const missingFromExample = contract.secrets.filter((key) => !existingKeys.has(key));
   const extraInExample = Array.from(existingKeys).filter((key) => !contractSet.has(key));
+  const commentedInExample = findCommentedEnvAssignments(existingContent);
 
-  if (missingFromExample.length === 0 && extraInExample.length === 0) {
+  if (missingFromExample.length === 0 && extraInExample.length === 0 && commentedInExample.length === 0) {
     return { updated: false, added: [] };
   }
 
@@ -261,13 +300,24 @@ export async function verifySecrets(
 
   let envExists = false;
   let parsedEnv = new Map<string, string>();
+  const commentedInEnv: string[] = [];
 
   try {
     const rawContent = await fs.readFile(resolvedEnv, "utf-8");
     envExists = true;
     parsedEnv = parseEnvContent(rawContent);
+    const commentedAssignments = findCommentedEnvAssignments(rawContent);
+    for (const ca of commentedAssignments) {
+      commentedInEnv.push(ca.key);
+    }
   } catch {
     envExists = false;
+  }
+
+  if (commentedInEnv.length > 0) {
+    errors.push(
+      `Commented-out variable assignment(s) forbidden in ${envFileName} (${commentedInEnv.length}): ${commentedInEnv.join(", ")}. Pegas strictly forbids '#KEY=value' commented-out definitions.`
+    );
   }
 
   const isGitIgnored = isIgnoredByGit(projectRoot, relativeEnv || envFileName);
@@ -281,13 +331,19 @@ export async function verifySecrets(
   let exampleExists = false;
   const missingInExample: string[] = [];
   const extraInExample: string[] = [];
+  const commentedInExample: string[] = [];
 
-  // 2. Validate .env.example parity if contract declares secrets
-  if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
-    const examplePath = path.join(projectRoot, ".env.example");
-    try {
-      const exampleContent = await fs.readFile(examplePath, "utf-8");
-      exampleExists = true;
+  // 2. Validate .env.example parity
+  const examplePath = path.join(projectRoot, ".env.example");
+  try {
+    const exampleContent = await fs.readFile(examplePath, "utf-8");
+    exampleExists = true;
+    const commentedExampleAssignments = findCommentedEnvAssignments(exampleContent);
+    for (const ca of commentedExampleAssignments) {
+      commentedInExample.push(ca.key);
+    }
+
+    if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
       const exampleParsed = parseEnvContent(exampleContent);
       const exampleKeySet = new Set(exampleParsed.keys());
       const contractSet = new Set(expectedSecrets);
@@ -298,10 +354,12 @@ export async function verifySecrets(
       for (const eKey of exampleKeySet) {
         if (!contractSet.has(eKey)) extraInExample.push(eKey);
       }
-    } catch {
-      exampleExists = false;
     }
+  } catch {
+    exampleExists = false;
+  }
 
+  if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
     if (!exampleExists) {
       errors.push("Missing root .env.example file. Root .env.example is required and must strictly mirror pegas.json secrets.");
     }
@@ -311,6 +369,12 @@ export async function verifySecrets(
     if (extraInExample.length > 0) {
       errors.push(`Undocumented variables in .env.example (not in pegas.json secrets): ${extraInExample.join(", ")}`);
     }
+  }
+
+  if (commentedInExample.length > 0) {
+    errors.push(
+      `Commented-out variable assignment(s) forbidden in .env.example (${commentedInExample.length}): ${commentedInExample.join(", ")}. Pegas strictly forbids '#KEY=value' commented-out definitions.`
+    );
   }
 
   // 3. Validate .env parity with expectedSecrets
@@ -372,6 +436,8 @@ export async function verifySecrets(
     exampleExists,
     missingInExample,
     extraInExample,
+    commentedInEnv,
+    commentedInExample,
     extraEnvFiles,
     warnings,
     errors,
@@ -405,6 +471,14 @@ export function formatSecretsDiagnostic(result: SecretsCheckResult): string {
 
   if (result.extraEnvFiles && result.extraEnvFiles.length > 0) {
     lines.push(`   ❌ Extraneous env file(s) (${result.extraEnvFiles.length}): ${result.extraEnvFiles.join(", ")}`);
+  }
+
+  if (result.commentedInEnv && result.commentedInEnv.length > 0) {
+    lines.push(`   ❌ Commented-out in ${result.envFile} (${result.commentedInEnv.length}): ${result.commentedInEnv.join(", ")}`);
+  }
+
+  if (result.commentedInExample && result.commentedInExample.length > 0) {
+    lines.push(`   ❌ Commented-out in .env.example (${result.commentedInExample.length}): ${result.commentedInExample.join(", ")}`);
   }
 
   if (result.missingKeys.length > 0) {

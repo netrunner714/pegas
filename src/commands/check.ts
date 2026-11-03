@@ -1,7 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { validatePegasContract, type ContractValidationIssue } from "../contract.js";
-import { verifySecrets, formatSecretsDiagnostic, syncEnvExample, isIgnoredByGit } from "../secrets.js";
+import {
+  verifySecrets,
+  formatSecretsDiagnostic,
+  syncEnvExample,
+  isIgnoredByGit,
+  findCommentedEnvAssignments,
+  stripCommentedEnvAssignments,
+} from "../secrets.js";
 import { setupGitignore } from "./init.js";
 import type { CheckOptions, PegasContract } from "../types.js";
 
@@ -131,6 +138,16 @@ export async function auditRepository(
         fixesApplied.push("Синхронизирован .env.example с contract.secrets");
       }
     }
+
+    try {
+      const rawEnv = await fs.readFile(envPath, "utf-8");
+      const commented = findCommentedEnvAssignments(rawEnv);
+      if (commented.length > 0) {
+        const cleaned = stripCommentedEnvAssignments(rawEnv);
+        await fs.writeFile(envPath, cleaned, "utf-8");
+        fixesApplied.push(`Удалены закомментированные переменные из ${envFileName} (${commented.map((c) => c.key).join(", ")})`);
+      }
+    } catch {}
   }
 
   // 2. Secrets parity and gitignore protection

@@ -9,6 +9,8 @@ import {
   syncEnvExample,
   verifySecrets,
   formatSecretsDiagnostic,
+  findCommentedEnvAssignments,
+  stripCommentedEnvAssignments,
 } from "./secrets.js";
 import type { PegasContract } from "./types.js";
 
@@ -183,5 +185,50 @@ EMPTY_VAL=
     expect(formatted).toContain("Missing in .env (1): A");
     expect(formatted).toContain("Empty in .env (1): B");
     expect(formatted).toContain("Extra in .env (1): C");
+  });
+
+  it("findCommentedEnvAssignments detects #KEY=value and stripCommentedEnvAssignments removes them", () => {
+    const raw = `
+# Normal descriptive comment
+DATABASE_URL=postgres://localhost/db
+# PORT=3000
+#export API_KEY=secret123
+#   DISABLED_VAR=false
+# Regular comment with no assignment
+# Note: something else
+`;
+    const found = findCommentedEnvAssignments(raw);
+    expect(found.length).toBe(3);
+    expect(found.map((f) => f.key)).toEqual(["PORT", "API_KEY", "DISABLED_VAR"]);
+
+    const stripped = stripCommentedEnvAssignments(raw);
+    expect(findCommentedEnvAssignments(stripped).length).toBe(0);
+    expect(stripped).toContain("DATABASE_URL=postgres://localhost/db");
+    expect(stripped).toContain("# Normal descriptive comment");
+    expect(stripped).toContain("# Note: something else");
+  });
+
+  it("verifySecrets flags commented-out variable assignments in .env and .env.example", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-commented-test-"));
+    try {
+      const contract: PegasContract = {
+        runtime: "docker",
+        secrets: ["DATABASE_URL"],
+        services: { web: { port: 80 } },
+      };
+
+      await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n.pegas/\n", "utf-8");
+      await fs.writeFile(path.join(tmp, ".env.example"), "DATABASE_URL=\n# OLD_VAR=123\n", "utf-8");
+      await fs.writeFile(path.join(tmp, ".env"), "DATABASE_URL=postgres://localhost/db\n# SECRET_KEY=foo\n", "utf-8");
+
+      const result = await verifySecrets(tmp, contract);
+      expect(result.valid).toBe(false);
+      expect(result.commentedInEnv).toEqual(["SECRET_KEY"]);
+      expect(result.commentedInExample).toEqual(["OLD_VAR"]);
+      expect(result.errors.some((e) => e.includes("Commented-out variable assignment(s) forbidden in .env"))).toBe(true);
+      expect(result.errors.some((e) => e.includes("Commented-out variable assignment(s) forbidden in .env.example"))).toBe(true);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 });
