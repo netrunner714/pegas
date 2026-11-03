@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'
   pull_request:
     branches: [main]
     types: [opened, ready_for_review, reopened]
@@ -53,7 +51,7 @@ jobs:
   publish:
     name: Build, Release & Publish
     needs: test
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish == true))
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish == true))
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -104,7 +102,12 @@ jobs:
       - name: Publish to NPM
         if: steps.check_version.outputs.should_release == 'true'
         run: |
-          npm publish --access public --provenance
+          CURRENT_VERSION="${{ steps.check_version.outputs.current_version }}"
+          if npm view "@netrunner714/pegas@${CURRENT_VERSION}" version >/dev/null 2>&1; then
+            echo "Version ${CURRENT_VERSION} is already published to npmjs.org. Skipping npm publish."
+          else
+            npm publish --access public --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
