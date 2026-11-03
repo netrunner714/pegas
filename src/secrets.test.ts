@@ -132,8 +132,13 @@ EMPTY_VAL=
       expect(res2.extraKeys).toEqual(["EXTRA_KEY"]);
       expect(res2.errors.some((e) => e.includes("NOT gitignored"))).toBe(true);
 
-      // Case 3: .gitignore added, empty key populated -> valid
+      // Case 3: .gitignore added, .env.example created, empty key populated -> valid
       await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n", "utf-8");
+      await fs.writeFile(
+        path.join(tmp, ".env.example"),
+        "DB_URL=\nJWT_SECRET=\nEMPTY_KEY=\n",
+        "utf-8"
+      );
       await fs.writeFile(
         path.join(tmp, ".env"),
         "DB_URL=postgres://...\nJWT_SECRET=secret\nEMPTY_KEY=now_filled\n",
@@ -143,6 +148,14 @@ EMPTY_VAL=
       expect(res3.valid).toBe(true);
       expect(res3.missingKeys).toEqual([]);
       expect(res3.emptyKeys).toEqual([]);
+
+      // Case 4: Rogue/extra env file detected
+      await fs.mkdir(path.join(tmp, "apps", "api"), { recursive: true });
+      await fs.writeFile(path.join(tmp, "apps", "api", ".env"), "FOO=bar\n", "utf-8");
+      const res4 = await verifySecrets(tmp, contract);
+      expect(res4.valid).toBe(false);
+      expect(res4.extraEnvFiles).toContain("apps/api/.env");
+      expect(res4.errors.some((e) => e.includes("Extraneous env file(s) detected"))).toBe(true);
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
@@ -167,8 +180,8 @@ EMPTY_VAL=
     expect(formatted).toContain("Secrets Schema (pegas.json contract):");
     expect(formatted).toContain("Expected: 2 variable(s)");
     expect(formatted).toContain(".env exists");
-    expect(formatted).toContain("Missing (1): A");
-    expect(formatted).toContain("Empty (1): B");
-    expect(formatted).toContain("Undocumented (1): C");
+    expect(formatted).toContain("Missing in .env (1): A");
+    expect(formatted).toContain("Empty in .env (1): B");
+    expect(formatted).toContain("Extra in .env (1): C");
   });
 });

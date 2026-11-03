@@ -15,6 +15,10 @@ export interface SecretsCheckResult {
   emptyKeys: string[];
   extraKeys: string[];
   loadedKeys: string[];
+  exampleExists: boolean;
+  missingInExample: string[];
+  extraInExample: string[];
+  extraEnvFiles: string[];
   warnings: string[];
   errors: string[];
 }
@@ -126,9 +130,59 @@ export function isIgnoredByGit(projectRoot: string, relativePath: string): boole
   }
 }
 
+const IGNORED_SCAN_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".pegas",
+  ".turbo",
+  ".next",
+  "dist",
+  "build",
+  ".cache",
+  "vendor",
+]);
+
 /**
- * Ensures that `.env.example` mirrors `contract.secrets`.
- * Creates or appends missing keys to `.env.example`.
+ * Recursively scans project directory for rogue env files.
+ * Pegas strictly permits ONLY a single root .env and root .env.example.
+ */
+export async function findExtraneousEnvFiles(projectRoot: string): Promise<string[]> {
+  const extraFiles: string[] = [];
+
+  async function walk(dir: string) {
+    let entries: fsSync.Dirent[] = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!IGNORED_SCAN_DIRS.has(entry.name)) {
+          await walk(path.join(dir, entry.name));
+        }
+      } else if (entry.isFile()) {
+        const fullPath = path.join(dir, entry.name);
+        const relPath = path.relative(projectRoot, fullPath).replace(/\\/g, "/");
+
+        const isRootEnv = relPath === ".env";
+        const isRootExample = relPath === ".env.example";
+        const isEnvName = entry.name.startsWith(".env") || entry.name.endsWith(".env") || /\.env\./.test(entry.name);
+
+        if (isEnvName && !isRootEnv && !isRootExample) {
+          extraFiles.push(relPath);
+        }
+      }
+    }
+  }
+
+  await walk(projectRoot);
+  return extraFiles;
+}
+
+/**
+ * Ensures that `.env.example` strictly mirrors `contract.secrets` 1:1.
  */
 export async function syncEnvExample(
   projectRoot: string,
@@ -140,38 +194,36 @@ export async function syncEnvExample(
 
   const examplePath = path.join(projectRoot, ".env.example");
   let existingContent = "";
-  let existingKeys = new Set<string>();
 
   try {
     existingContent = await fs.readFile(examplePath, "utf-8");
-    const parsed = parseEnvContent(existingContent);
-    existingKeys = new Set(parsed.keys());
   } catch {
     // file does not exist yet
   }
 
+  const parsed = parseEnvContent(existingContent);
+  const existingKeys = new Set(parsed.keys());
+  const contractSet = new Set(contract.secrets);
+
   const missingFromExample = contract.secrets.filter((key) => !existingKeys.has(key));
-  if (missingFromExample.length === 0) {
+  const extraInExample = Array.from(existingKeys).filter((key) => !contractSet.has(key));
+
+  if (missingFromExample.length === 0 && extraInExample.length === 0) {
     return { updated: false, added: [] };
   }
 
-  let newContent = existingContent;
-  if (!newContent) {
-    newContent = "# Pegas Contract Required Secrets\n";
-  } else if (!newContent.endsWith("\n")) {
-    newContent += "\n";
-  }
+  const lines = [
+    "# Pegas Required Secrets (strictly mirrors pegas.json secrets)",
+    ...contract.secrets.map((sec) => `${sec}=`),
+    "",
+  ];
 
-  for (const key of missingFromExample) {
-    newContent += `${key}=\n`;
-  }
-
-  await fs.writeFile(examplePath, newContent, "utf-8");
+  await fs.writeFile(examplePath, lines.join("\n"), "utf-8");
   return { updated: true, added: missingFromExample };
 }
 
 /**
- * Verifies that secrets in .env adhere to the contract or .env.example schema.
+ * Verifies that secrets in .env adhere to the contract or .env.example schema with strict 1:1 parity.
  */
 export async function verifySecrets(
   projectRoot: string,
@@ -184,6 +236,14 @@ export async function verifySecrets(
 
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  // 1. Detect extraneous env files across the repository tree
+  const extraEnvFiles = await findExtraneousEnvFiles(projectRoot);
+  if (extraEnvFiles.length > 0) {
+    errors.push(
+      `Extraneous env file(s) detected: ${extraEnvFiles.join(", ")}. Pegas strictly permits ONLY a single root .env and root .env.example. Multiple env files or environment-suffixed variants (.env.development, etc.) are prohibited.`
+    );
+  }
 
   let envExists = false;
   let parsedEnv = new Map<string, string>();
@@ -204,6 +264,42 @@ export async function verifySecrets(
   const emptyKeys: string[] = [];
   const extraKeys: string[] = [];
 
+  let exampleExists = false;
+  const missingInExample: string[] = [];
+  const extraInExample: string[] = [];
+
+  // 2. Validate .env.example parity if contract declares secrets
+  if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
+    const examplePath = path.join(projectRoot, ".env.example");
+    try {
+      const exampleContent = await fs.readFile(examplePath, "utf-8");
+      exampleExists = true;
+      const exampleParsed = parseEnvContent(exampleContent);
+      const exampleKeySet = new Set(exampleParsed.keys());
+      const contractSet = new Set(expectedSecrets);
+
+      for (const sec of expectedSecrets) {
+        if (!exampleKeySet.has(sec)) missingInExample.push(sec);
+      }
+      for (const eKey of exampleKeySet) {
+        if (!contractSet.has(eKey)) extraInExample.push(eKey);
+      }
+    } catch {
+      exampleExists = false;
+    }
+
+    if (!exampleExists) {
+      errors.push("Missing root .env.example file. Root .env.example is required and must strictly mirror pegas.json secrets.");
+    }
+    if (missingInExample.length > 0) {
+      errors.push(`Missing secrets in .env.example: ${missingInExample.join(", ")}`);
+    }
+    if (extraInExample.length > 0) {
+      errors.push(`Undocumented variables in .env.example (not in pegas.json secrets): ${extraInExample.join(", ")}`);
+    }
+  }
+
+  // 3. Validate .env parity with expectedSecrets
   if (expectedSecrets.length > 0) {
     for (const key of expectedSecrets) {
       if (!parsedEnv.has(key)) {
@@ -243,7 +339,7 @@ export async function verifySecrets(
   }
 
   if (extraKeys.length > 0) {
-    warnings.push(`Undocumented secrets in ${envFileName} (not listed in ${source === "contract" ? "pegas.json" : ".env.example"}): ${extraKeys.join(", ")}`);
+    errors.push(`Undocumented secrets in ${envFileName} (not listed in ${source === "contract" ? "pegas.json secrets" : ".env.example"}): ${extraKeys.join(", ")}. Strict 1:1 match with secrets is required.`);
   }
 
   const valid = errors.length === 0;
@@ -259,6 +355,10 @@ export async function verifySecrets(
     emptyKeys,
     extraKeys,
     loadedKeys,
+    exampleExists,
+    missingInExample,
+    extraInExample,
+    extraEnvFiles,
     warnings,
     errors,
   };
@@ -289,18 +389,29 @@ export function formatSecretsDiagnostic(result: SecretsCheckResult): string {
     }
   }
 
+  if (result.extraEnvFiles && result.extraEnvFiles.length > 0) {
+    lines.push(`   ❌ Extraneous env file(s) (${result.extraEnvFiles.length}): ${result.extraEnvFiles.join(", ")}`);
+  }
+
   if (result.missingKeys.length > 0) {
-    lines.push(`   ❌ Missing (${result.missingKeys.length}): ${result.missingKeys.join(", ")}`);
+    lines.push(`   ❌ Missing in ${result.envFile} (${result.missingKeys.length}): ${result.missingKeys.join(", ")}`);
   }
   if (result.emptyKeys.length > 0) {
-    lines.push(`   ❌ Empty (${result.emptyKeys.length}): ${result.emptyKeys.join(", ")}`);
+    lines.push(`   ❌ Empty in ${result.envFile} (${result.emptyKeys.length}): ${result.emptyKeys.join(", ")}`);
   }
   if (result.extraKeys.length > 0) {
-    lines.push(`   ⚠️  Undocumented (${result.extraKeys.length}): ${result.extraKeys.join(", ")}`);
+    lines.push(`   ❌ Extra in ${result.envFile} (${result.extraKeys.length}): ${result.extraKeys.join(", ")}`);
+  }
+
+  if (result.missingInExample && result.missingInExample.length > 0) {
+    lines.push(`   ❌ Missing in .env.example (${result.missingInExample.length}): ${result.missingInExample.join(", ")}`);
+  }
+  if (result.extraInExample && result.extraInExample.length > 0) {
+    lines.push(`   ❌ Extra in .env.example (${result.extraInExample.length}): ${result.extraInExample.join(", ")}`);
   }
 
   if (result.valid) {
-    lines.push(`   ✨ All required secrets are verified and present.`);
+    lines.push(`   ✨ Strict 1:1 secrets parity verified across contract, .env, and .env.example.`);
   }
 
   return lines.join("\n");

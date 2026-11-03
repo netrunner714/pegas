@@ -124,6 +124,13 @@ export async function auditRepository(
         fixesApplied.push(`Создан стартовый ${envFileName}`);
       }
     }
+
+    if (contract.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
+      const syncRes = await syncEnvExample(projectRoot, contract);
+      if (syncRes.updated) {
+        fixesApplied.push("Синхронизирован .env.example с contract.secrets");
+      }
+    }
   }
 
   // 2. Secrets parity and gitignore protection

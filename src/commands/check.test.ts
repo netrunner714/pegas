@@ -148,7 +148,7 @@ describe("pegas check command", () => {
 
       const allOutput = [...logs, ...errors].join("\n");
       expect(allOutput).toContain("Pegas Repository Audit");
-      expect(allOutput).toContain("Missing (1): MISSING_KEY");
+      expect(allOutput).toContain("Missing in .env (1): MISSING_KEY");
       expect(allOutput).toContain("Pegas audit failed");
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
