@@ -1,5 +1,40 @@
 import { RouteSnippetOptions } from "./types.js";
 
+export function buildCorsOriginRegex(domains: string[] = [], customOrigins?: string[]): string {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+
+  for (const d of domains) {
+    const clean = d.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      parts.push(clean.replace(/\./g, "\\."));
+    }
+  }
+
+  // Always allow localhost and 127.0.0.1
+  if (!seen.has("localhost")) {
+    seen.add("localhost");
+    parts.push("localhost(:\\d+)?");
+  }
+  if (!seen.has("127.0.0.1")) {
+    seen.add("127.0.0.1");
+    parts.push("127\\.0\\.0\\.1(:\\d+)?");
+  }
+
+  if (customOrigins && customOrigins.length > 0) {
+    for (const o of customOrigins) {
+      const clean = o.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        parts.push(clean.replace(/\./g, "\\."));
+      }
+    }
+  }
+
+  return `^https?:\\/\\/(${parts.join("|")})$`;
+}
+
 function isSubdomainOrIp(domain: string): boolean {
   // If IP address
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(domain) || domain.includes(":")) {
@@ -24,6 +59,8 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
     noWww = false,
     security = true,
     routes,
+    cors,
+    corsOrigins,
   } = options;
 
   const lines: string[] = [];
@@ -40,7 +77,65 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
   lines.push(`${domain} {`);
 
   // Upstream routing
-  if (routes && Object.keys(routes).length > 0) {
+  if (cors) {
+    const corsOpts = typeof cors === "object" && !Array.isArray(cors) && cors !== null ? cors : {};
+    const customOrigins = Array.isArray(cors) ? cors : corsOpts.origins;
+    const origins = corsOrigins || [];
+    const methods = corsOpts.methods || ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"];
+    const headers = corsOpts.headers || [
+      "Content-Type",
+      "Authorization",
+      "x-telegram-init-data",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+    ];
+    const credentials = corsOpts.credentials !== false;
+    const maxAge = corsOpts.maxAge ?? 86400;
+
+    const regexPattern = buildCorsOriginRegex(origins, customOrigins);
+
+    lines.push(`    encode gzip zstd`);
+    lines.push(``);
+    lines.push(`    @cors_origin header_regexp Origin ${regexPattern}`);
+    lines.push(`    @cors_preflight {`);
+    lines.push(`        method OPTIONS`);
+    lines.push(`        header_regexp Origin ${regexPattern}`);
+    lines.push(`    }`);
+    lines.push(`    handle @cors_preflight {`);
+    lines.push(`        header Access-Control-Allow-Origin "{header.Origin}"`);
+    lines.push(`        header Access-Control-Allow-Methods "${methods.join(", ")}"`);
+    lines.push(`        header Access-Control-Allow-Headers "${headers.join(", ")}"`);
+    if (credentials) {
+      lines.push(`        header Access-Control-Allow-Credentials "true"`);
+    }
+    lines.push(`        header Access-Control-Max-Age "${maxAge}"`);
+    lines.push(`        respond "" 204`);
+    lines.push(`    }`);
+    lines.push(``);
+
+    if (routes && Object.keys(routes).length > 0) {
+      for (const [pathPrefix, target] of Object.entries(routes)) {
+        const targetUpstream = typeof target === "string" ? target : target.to;
+        lines.push(`    handle ${pathPrefix} {`);
+        lines.push(`        header @cors_origin Access-Control-Allow-Origin "{header.Origin}"`);
+        if (credentials) {
+          lines.push(`        header @cors_origin Access-Control-Allow-Credentials "true"`);
+        }
+        lines.push(`        reverse_proxy ${targetUpstream}`);
+        lines.push(`    }`);
+        lines.push(``);
+      }
+    }
+
+    lines.push(`    handle {`);
+    lines.push(`        header @cors_origin Access-Control-Allow-Origin "{header.Origin}"`);
+    if (credentials) {
+      lines.push(`        header @cors_origin Access-Control-Allow-Credentials "true"`);
+    }
+    lines.push(`        reverse_proxy ${upstream || "app:3000"}`);
+    lines.push(`    }`);
+  } else if (routes && Object.keys(routes).length > 0) {
     lines.push(`    encode gzip zstd`);
     lines.push(``);
     for (const [pathPrefix, target] of Object.entries(routes)) {

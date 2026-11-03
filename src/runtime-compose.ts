@@ -584,6 +584,23 @@ export function createRuntimeCompose(
     if (app) {
       environment.NODE_ENV ??= environmentName === "development" ? "development" : "production";
       environment.PEGAS_ENV ??= environmentName;
+      if (!environment.PEGAS_ALLOWED_ORIGINS) {
+        const allProjectOrigins: string[] = [];
+        for (const [_, svc] of Object.entries(contract.services || {})) {
+          const dList = getEnvironmentDomains(svc, environmentName);
+          if (Array.isArray(dList)) {
+            for (const d of dList) {
+              const norm = normalizeDomain(d);
+              if (norm && norm !== "yourdomain.com") {
+                allProjectOrigins.push(`https://${norm}`);
+              }
+            }
+          }
+        }
+        if (allProjectOrigins.length > 0) {
+          environment.PEGAS_ALLOWED_ORIGINS = allProjectOrigins.join(",");
+        }
+      }
     }
     if (environmentName === "development" && watchMode === "polling") {
       environment.CHOKIDAR_USEPOLLING ??= "true";

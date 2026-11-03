@@ -3,6 +3,16 @@ export interface GatewayContext {
   networkName: string;
 }
 
+export interface CorsConfig {
+  origins?: string[];
+  methods?: string[];
+  headers?: string[];
+  credentials?: boolean;
+  maxAge?: number;
+}
+
+export type ServiceCorsContract = boolean | string[] | CorsConfig;
+
 export interface RouteSnippetOptions {
   domain: string;
   upstream?: string;
@@ -12,6 +22,8 @@ export interface RouteSnippetOptions {
   noWww?: boolean;
   security?: boolean;
   routes?: Record<string, string | { to: string; websocket?: boolean }>;
+  cors?: boolean | string[] | CorsConfig;
+  corsOrigins?: string[];
   force?: boolean;
   dryRun?: boolean;
   gatewayDir?: string;
@@ -71,6 +83,8 @@ export interface ServiceContract {
   upstream?: string;
   /** L7 path routing for this service's domains: e.g. { "/api/*": "api:3000", "/socket.io/*": "api:3000" } */
   routes?: Record<string, ServiceRouteTarget>;
+  /** Automatic CORS headers for cross-subdomain API access. Defaults to enabled for API services. */
+  cors?: ServiceCorsContract;
   /** Build an image from a project-relative context. Mutually exclusive with image. */
   build?: ServiceBuildContract;
   /** Use a prebuilt image instead of building one. */

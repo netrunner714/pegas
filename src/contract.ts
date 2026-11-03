@@ -172,6 +172,17 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
       }
     }
 
+    if (service.cors !== undefined) {
+      if (
+        typeof service.cors !== "boolean" &&
+        typeof service.cors !== "string" &&
+        !Array.isArray(service.cors) &&
+        (typeof service.cors !== "object" || service.cors === null)
+      ) {
+        add(`${base}.cors`, "Expected boolean, string, array of origins, or CORS configuration object.");
+      }
+    }
+
     if (service.build !== undefined && service.image !== undefined) {
       add(base, '"build" and "image" are mutually exclusive.');
     }

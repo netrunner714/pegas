@@ -442,6 +442,21 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
 
   const snippets: string[] = [];
   const deployedRoutes: { service: string; domain: string; upstream: string; routes?: Record<string, string | { to: string; websocket?: boolean }> }[] = [];
+
+  // Collect all domains declared in runtimeEnvironment for this project to configure CORS
+  const allProjectDomains: string[] = [];
+  for (const [_, svc] of Object.entries(contract.services || {})) {
+    const dList = getEnvironmentDomains(svc, runtimeEnvironment);
+    if (Array.isArray(dList)) {
+      for (const d of dList) {
+        const norm = normalizeDomain(d);
+        if (norm && norm !== "yourdomain.com") {
+          allProjectDomains.push(norm);
+        }
+      }
+    }
+  }
+
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
     const envDomains = getEnvironmentDomains(serviceConfig, runtimeEnvironment);
     const upstream = getServiceUpstream(serviceName, serviceConfig);
@@ -451,6 +466,14 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       upstream,
       prefix
     );
+
+    const isCorsEnabled =
+      serviceConfig.cors !== false &&
+      (Boolean(serviceConfig.cors) ||
+        serviceName === "api" ||
+        serviceName.startsWith("api") ||
+        envDomains.some((d) => d.startsWith("api.")));
+
     let scopedRoutes: Record<string, string | { to: string; websocket?: boolean }> | undefined;
     if (serviceConfig.routes && Object.keys(serviceConfig.routes).length > 0) {
       scopedRoutes = {};
@@ -472,6 +495,8 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
         domain: normDomain,
         upstream: scopedUpstream,
         routes: scopedRoutes,
+        cors: isCorsEnabled ? (serviceConfig.cors || true) : false,
+        corsOrigins: allProjectDomains,
       }));
       deployedRoutes.push({
         service: serviceName,

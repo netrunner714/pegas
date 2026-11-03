@@ -125,6 +125,20 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   const registeredUrls: { service: string; url: string; upstream: string }[] = [];
   const seenDomains = new Set<string>();
 
+  // Collect all domains declared in development for this project to configure CORS
+  const allProjectDomains: string[] = [];
+  for (const [_, svc] of Object.entries(contract.services || {})) {
+    const dList = getEnvironmentDomains(svc, "development");
+    if (Array.isArray(dList)) {
+      for (const d of dList) {
+        const norm = normalizeDomain(d);
+        if (norm && norm !== "yourdomain.com") {
+          allProjectDomains.push(norm);
+        }
+      }
+    }
+  }
+
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
     if (serviceConfig.role === "infra" && !serviceConfig.domains) continue;
 
@@ -133,6 +147,13 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
 
     const servicePort = serviceConfig.port || 3000;
     const upstream = `host.docker.internal:${servicePort}`;
+
+    const isCorsEnabled =
+      serviceConfig.cors !== false &&
+      (Boolean(serviceConfig.cors) ||
+        serviceName === "api" ||
+        serviceName.startsWith("api") ||
+        envDomains.some((d) => d.startsWith("api.")));
 
     let scopedRoutes: Record<string, string> | undefined;
     if (serviceConfig.routes && Object.keys(serviceConfig.routes).length > 0) {
@@ -155,6 +176,8 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
           domain: normDomain,
           upstream,
           routes: scopedRoutes,
+          cors: isCorsEnabled ? (serviceConfig.cors || true) : false,
+          corsOrigins: allProjectDomains,
         }),
       );
       registeredUrls.push({
@@ -237,11 +260,16 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     console.log(`▶ Running: \x1b[36m${devCmd} ${devArgs.join(" ")}\x1b[0m\n`);
   }
 
+  const runEnv = {
+    ...process.env,
+    PEGAS_ALLOWED_ORIGINS: allProjectDomains.map((d) => `https://${d}`).join(","),
+  };
+
   const result = child_process.spawnSync(devCmd, devArgs, {
     cwd: projectRoot,
     stdio: "inherit",
     shell: process.platform === "win32",
-    env: process.env,
+    env: runEnv,
   });
 
   if (result.status !== null && result.status !== 0 && !options.noExit) {

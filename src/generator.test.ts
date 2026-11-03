@@ -70,4 +70,27 @@ describe("Caddyfile snippet generator", () => {
     expect(snippet).toContain("handle {");
     expect(snippet).toContain("reverse_proxy frontend:80");
   });
+
+  it("generates automatic CORS preflight and origin validation handlers", () => {
+    const snippet = generateCaddyfileSnippet({
+      domain: "api.example.com",
+      upstream: "api:3001",
+      cors: true,
+      corsOrigins: ["example.com", "vibedb.example.com"],
+    });
+
+    expect(snippet).toContain("api.example.com {");
+    expect(snippet).toContain("@cors_origin header_regexp Origin");
+    expect(snippet).toContain("example\\.com|vibedb\\.example\\.com");
+    expect(snippet).toContain("@cors_preflight {");
+    expect(snippet).toContain("method OPTIONS");
+    expect(snippet).toContain("handle @cors_preflight {");
+    expect(snippet).toContain('header Access-Control-Allow-Origin "{header.Origin}"');
+    expect(snippet).toContain('header Access-Control-Allow-Methods');
+    expect(snippet).toContain('header Access-Control-Allow-Credentials "true"');
+    expect(snippet).toContain('respond "" 204');
+    expect(snippet).toContain("handle {");
+    expect(snippet).toContain('header @cors_origin Access-Control-Allow-Origin "{header.Origin}"');
+    expect(snippet).toContain("reverse_proxy api:3001");
+  });
 });
