@@ -620,7 +620,13 @@ export function resolveServiceProperty(
     }
     case "internalUrl": {
       const port = service.port || 80;
-      return `http://${serviceName}:${port}`;
+      let scheme = "http";
+      if (service.image?.includes("redis")) {
+        scheme = "redis";
+      } else if (service.image?.includes("postgres")) {
+        scheme = "postgresql";
+      }
+      return `${scheme}://${serviceName}:${port}`;
     }
     default:
       throw new Error(
