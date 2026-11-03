@@ -49,34 +49,48 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     add("runtime", 'Expected "host" or "docker".');
   }
 
-  // Глобальный env: строка (одинаково везде) или карта профилей.
-  // Карта обязана содержать ВСЕ три профиля: частичная карта — ошибка
-  // (нельзя молча получить пустое значение на недостающем профиле).
+  // Глобальный env: строго карта профилей проекта.
+  // Имена профилей произвольны (любые строки, заданные проектом в доменах/конфиге).
+  // Плоские скаляры запрещены во избежание скрытого протекания настроек между средами.
   if (contract.env !== undefined) {
     if (!contract.env || typeof contract.env !== "object" || Array.isArray(contract.env)) {
-      add("env", "Expected an object of env keys (string or profile map).");
+      add("env", "Expected an object of env keys mapped to project profiles.");
     } else {
+      const projectEnvs = listAvailableEnvironments(contract);
       for (const [key, val] of Object.entries(contract.env as Record<string, unknown>)) {
         const base = `env.${key}`;
         if (typeof val === "string") {
-          if (!val.trim()) add(base, "Expected a non-empty string or a full profile map.");
+          add(base, "Scalar values are not allowed in global env. Every key must be a profile map declaring values for each project environment.");
           continue;
         }
         if (!val || typeof val !== "object" || Array.isArray(val)) {
-          add(base, "Expected a string (same for all profiles) or an object with development/stage/production.");
+          add(base, "Expected a profile map object with values for each project profile.");
           continue;
         }
         const profiles = val as Record<string, unknown>;
-        for (const p of ["development", "stage", "production"] as const) {
-          if (!(p in profiles)) {
-            add(base, `Profile map must include "${p}" — partial maps are invalid.`);
-          } else if (typeof profiles[p] !== "string" || !(profiles[p] as string).trim()) {
-            add(`${base}.${p}`, "Expected a non-empty string.");
+        const declaredProfiles = Object.keys(profiles);
+
+        if (projectEnvs.length > 0) {
+          for (const p of projectEnvs) {
+            if (!(p in profiles)) {
+              add(base, `Profile map must include "${p}" — missing value for project profile.`);
+            } else if (typeof profiles[p] !== "string" || !(profiles[p] as string).trim()) {
+              add(`${base}.${p}`, "Expected a non-empty string value.");
+            }
           }
-        }
-        for (const p of Object.keys(profiles)) {
-          if (p !== "development" && p !== "stage" && p !== "production") {
-            add(base, `Unknown profile "${p}": expected development, stage or production.`);
+          for (const p of declaredProfiles) {
+            if (!projectEnvs.includes(p)) {
+              add(base, `Unknown profile "${p}": expected one of declared project profiles (${projectEnvs.join(", ")}).`);
+            }
+          }
+        } else {
+          if (declaredProfiles.length === 0) {
+            add(base, "Profile map cannot be empty.");
+          }
+          for (const [p, v] of Object.entries(profiles)) {
+            if (typeof v !== "string" || !v.trim()) {
+              add(`${base}.${p}`, "Expected a non-empty string value.");
+            }
           }
         }
       }
@@ -226,10 +240,24 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
 
     if (service.env !== undefined) {
       if (!service.env || typeof service.env !== "object" || Array.isArray(service.env)) {
-        add(`${base}.env`, "Expected an object of non-secret string values.");
+        add(`${base}.env`, "Expected an object of non-secret environment variables.");
       } else {
         for (const [key, val] of Object.entries(service.env as Record<string, unknown>)) {
-          if (!key.trim() || typeof val !== "string") add(`${base}.env.${key}`, "Environment keys and values must be strings.");
+          if (!key.trim()) {
+            add(`${base}.env`, "Environment variable key must be non-empty.");
+            continue;
+          }
+          if (typeof val === "string") {
+            if (!val.trim()) add(`${base}.env.${key}`, "Expected a non-empty string value.");
+          } else if (val && typeof val === "object" && !Array.isArray(val)) {
+            for (const [p, v] of Object.entries(val as Record<string, unknown>)) {
+              if (typeof v !== "string" || !v.trim()) {
+                add(`${base}.env.${key}.${p}`, "Expected a non-empty string value.");
+              }
+            }
+          } else {
+            add(`${base}.env.${key}`, "Expected a string or a profile map.");
+          }
         }
       }
     }
@@ -410,10 +438,19 @@ export function getEnvironmentDomains(
 export function listAvailableEnvironments(contract: PegasContract): string[] {
   const envs = new Set<string>();
   for (const sCfg of Object.values(contract.services || {})) {
-    if (sCfg.domains) {
+    if (sCfg.domains && typeof sCfg.domains === "object" && !Array.isArray(sCfg.domains)) {
       for (const [env, domains] of Object.entries(sCfg.domains)) {
         if (Array.isArray(domains) && domains.length > 0) {
           envs.add(env);
+        }
+      }
+    }
+  }
+  if (envs.size === 0 && contract.env && typeof contract.env === "object" && !Array.isArray(contract.env)) {
+    for (const val of Object.values(contract.env)) {
+      if (val && typeof val === "object" && !Array.isArray(val)) {
+        for (const env of Object.keys(val)) {
+          if (env.trim()) envs.add(env.trim());
         }
       }
     }

@@ -3,7 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { EnvProfileValue, PegasContract, ServiceContract } from "./types.js";
-import { validatePegasContract, normalizeEnvironment, getEnvironmentDomains } from "./contract.js";
+import { validatePegasContract, normalizeEnvironment, getEnvironmentDomains, normalizeDomain } from "./contract.js";
 
 export interface RuntimeComposeOptions {
   projectRoot: string;
@@ -591,7 +591,18 @@ export function createRuntimeCompose(
     // Глобальный env контракта: база для всех сервисов; сервисный env
     // перекрывает глобальный (сервис — более специфичная настройка).
     const globalEnv = resolveGlobalEnv(contract.env, environmentName);
-    const environment: Record<string, string> = { ...globalEnv, ...(service.env || {}) };
+    const serviceResolvedEnv: Record<string, string> = {};
+    if (service.env) {
+      for (const [k, v] of Object.entries(service.env as Record<string, unknown>)) {
+        if (typeof v === "string") {
+          serviceResolvedEnv[k] = v;
+        } else if (v && typeof v === "object") {
+          const resolvedV = (v as Record<string, string>)[environmentName];
+          if (resolvedV !== undefined) serviceResolvedEnv[k] = resolvedV;
+        }
+      }
+    }
+    const environment: Record<string, string> = { ...globalEnv, ...serviceResolvedEnv };
     if (app) {
       environment.NODE_ENV ??= environmentName === "development" ? "development" : "production";
       environment.PEGAS_ENV ??= environmentName;

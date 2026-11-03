@@ -92,8 +92,8 @@ export interface ServiceContract {
   image?: string;
   /** Container command; when omitted, the image default is used. */
   command?: string[];
-  /** Non-secret environment variables. */
-  env?: Record<string, string>;
+  /** Non-secret environment variables (scalars for container invariants, or profile map). */
+  env?: Record<string, string | Record<string, string>>;
   /** Path to a gitignored env file; values are passed to Docker without logging. */
   envFile?: string;
   /** Additional named or bind volumes in Docker Compose short syntax. */
@@ -172,15 +172,14 @@ export interface DeployConfig {
   skipReadiness?: boolean;
 }
 
-/** Допустимые профили контракта. */
-export type EnvironmentProfile = "development" | "stage" | "production";
+/** Имя профиля окружения (любая текстовая строка, заданная проектом). */
+export type EnvironmentProfile = string;
 /**
- * Значение глобального env-ключа: либо одинаковое для всех профилей
- * (строка), либо явная карта — в ней обязаны быть ВСЕ три профиля.
- * Секреты сюда не пишутся: им место в envFile (не переносится между
- * окружениями и не коммитится).
+ * Значение глобального env-ключа: строго карта профилей проекта.
+ * Все объявленные профили проекта обязаны присутствовать в карте.
+ * Плоские скалярные строки запрещены во избежание скрытого протекания настроек между средами.
  */
-export type EnvProfileValue = string | Record<EnvironmentProfile, string>;
+export type EnvProfileValue = Record<string, string>;
 
 export interface PegasContract {
   /** JSON Schema URL; enables editor hints for pegas.json. */
