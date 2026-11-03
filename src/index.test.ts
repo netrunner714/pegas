@@ -422,6 +422,7 @@ describe("main CLI command routing", () => {
     await main(
       [
         "deploy",
+        "-s",
         "production",
         "--gateway-dir",
         "/var/caddy",
@@ -432,24 +433,23 @@ describe("main CLI command routing", () => {
 
     expect(calls.deploy).toEqual({
       scenario: "production",
-      target: "production",
-      env: "production",
       cwd: undefined,
       gatewayDir: "/var/caddy",
       json: true,
     });
 
-    await main(["deploy", "stage", "--json"], { dispatchers });
-    expect(calls.deploy.env).toBe("stage");
+    await main(["deploy", "--scenario", "stage", "--json"], { dispatchers });
+    expect(calls.deploy.scenario).toBe("stage");
 
-    // Test pegas -s development and pegas -t development root dispatch
-    await main(["-s", "development", "--json"], { dispatchers });
-    expect(calls.deploy.scenario).toBe("development");
-    expect(calls.deploy.env).toBe("development");
+    await main(["deploy", "-scenario", "custom-flow", "--json"], { dispatchers });
+    expect(calls.deploy.scenario).toBe("custom-flow");
 
-    await main(["-t", "staging", "--json"], { dispatchers });
-    expect(calls.deploy.target).toBe("staging");
-    expect(calls.deploy.env).toBe("staging");
+    await main(["deploy", "-scenario=my-flow", "--json"], { dispatchers });
+    expect(calls.deploy.scenario).toBe("my-flow");
+
+    // Positional argument without -s or --scenario is not picked up as scenario
+    await main(["deploy", "production", "--json"], { dispatchers });
+    expect(calls.deploy.scenario).toBeUndefined();
   });
 
   it("dispatches 'down' command with options", async () => {

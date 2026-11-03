@@ -20,20 +20,6 @@ export interface CliCommandDef {
 
 export const GLOBAL_OPTIONS: CliOptionDef[] = [
   {
-    name: "scenario",
-    type: "string",
-    short: "s",
-    placeholder: "<name>",
-    description: "Scenario from pegas.json to deploy",
-  },
-  {
-    name: "target",
-    type: "string",
-    short: "t",
-    placeholder: "<name>",
-    description: "Alias for --scenario",
-  },
-  {
     name: "gateway-dir",
     type: "string",
     placeholder: "<path>",
@@ -179,40 +165,20 @@ export const COMMANDS: CliCommandDef[] = [
   {
     name: "deploy",
     summary: "Deploy a scenario from pegas.json: network, shared Gateway, containers, routes",
-    usage: "deploy [options]",
+    usage: "deploy -s <scenario> [options]",
     options: [
       {
         name: "scenario",
         type: "string",
         short: "s",
         placeholder: "<name>",
-        description: "Target scenario from pegas.json (e.g. development, production, stage)",
-      },
-      {
-        name: "target",
-        type: "string",
-        short: "t",
-        placeholder: "<name>",
-        description: "Alias for --scenario",
-      },
-      {
-        name: "env",
-        type: "string",
-        short: "e",
-        placeholder: "<name>",
-        description: "Legacy alias for --scenario",
+        description: "Target scenario from pegas.json (e.g. production, stage)",
       },
       {
         name: "cwd",
         type: "string",
         placeholder: "<path>",
         description: "Target project directory",
-      },
-      {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Preview planned deployment actions and routes without modifying containers or routes",
       },
       {
         name: "skip-dns-check",
@@ -234,10 +200,8 @@ export const COMMANDS: CliCommandDef[] = [
       },
     ],
     examples: [
-      "$ pegas -s development",
-      "$ pegas -s production",
       "$ pegas deploy -s production",
-      "$ pegas deploy -t stage --dry-run",
+      "$ pegas deploy --scenario stage",
     ],
   },
   {
@@ -428,7 +392,6 @@ export function generateHelpText(commandName?: string): string {
   const lines: string[] = [];
   lines.push(`pegas v${VERSION} — Agent-native Caddy gateway for multi-app VPS\n`);
   lines.push(`USAGE:`);
-  lines.push(`  $ pegas -s <scenario> [options]`);
   lines.push(`  $ pegas <command> [options]\n`);
 
   lines.push(`COMMANDS:`);
@@ -476,9 +439,9 @@ export function generateHelpText(commandName?: string): string {
 
   lines.push(`EXAMPLES:`);
   lines.push(`  $ pegas init`);
-  lines.push(`  $ pegas -s development`);
+  lines.push(`  $ pegas link`);
+  lines.push(`  $ pegas deploy -s production`);
   lines.push(`  $ pegas logs -f`);
-  lines.push(`  $ pegas -s production`);
   lines.push(`  $ pegas status`);
   lines.push(`  $ pegas down`);
   lines.push("");

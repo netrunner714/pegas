@@ -23,8 +23,7 @@ const DOCS_PEGAS_MD = `# Pegas
 ## Команды
 * Подключить к локальному шлюзу: \`pegas link\`
 * Отключить от локального шлюза: \`pegas unlink\`
-* Деплой на продакшен: \`pegas deploy production\`
-* Деплой на стейджинг: \`pegas deploy stage\`
+* Деплой сценария: \`pegas deploy -s <scenario>\` (например, \`pegas deploy -s production\`)
 * Остановка проекта: \`pegas down\`
 * Доверенный локальный HTTPS: \`pegas ca install\` (один раз на машину)
 
@@ -390,7 +389,7 @@ export async function handleProjectInit(
 
   // 4. Create docs/pegas.md
   const docsContent = runtime === "docker"
-    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Подключить к локальному шлюзу: `pegas link`\n- Отключить от локального шлюза: `pegas unlink`\n- Подключиться к логам: `pegas logs -f` (Ctrl+C только отключает логи)\n- Деплой production: `pegas deploy production`\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
+    ? "# Pegas\n\nОкружение описывается в `pegas.json`. Development и production работают в Docker.\n\n## Команды\n- Подключить к локальному шлюзу: `pegas link`\n- Отключить от локального шлюза: `pegas unlink`\n- Подключиться к логам: `pegas logs -f` (Ctrl+C только отключает логи)\n- Деплой сценария: `pegas deploy -s <scenario>` (например, `pegas deploy -s production`)\n- Остановить проект: `pegas down`\n\nПользовательский Compose не является источником конфигурации Pegas.\n"
     : DOCS_PEGAS_MD;
   const docsDir = path.join(cwd, "docs");
   const docsPath = path.join(docsDir, "pegas.md");
@@ -492,7 +491,7 @@ export async function handleProjectInit(
   console.log("  1. Проверьте pegas.json и укажите свои домены.");
   if (runtime === "docker") {
     console.log("  2. Заполните секреты в файле .env (если требуются)");
-    console.log("  3. Разверните окружение: pegas deploy development");
+    console.log("  3. Разверните окружение: pegas deploy -s development");
     console.log("  4. Подключитесь к логам: pegas logs -f (Ctrl+C не останавливает контейнеры)\n");
   } else {
     console.log("  2. Запустите локальную разработку: npm run dev\n");

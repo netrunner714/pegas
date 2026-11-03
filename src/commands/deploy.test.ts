@@ -3,10 +3,12 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
 import child_process from "node:child_process";
+import * as actualDocker from "../docker.js";
 
 let mockDeployReloadOk = true;
 
 mock.module("../docker.js", () => ({
+  ...actualDocker,
   validateCaddyConfig: async () => ({ success: mockDeployReloadOk, stderr: mockDeployReloadOk ? "" : "invalid" }),
   reloadCaddyConfig: async () => ({ success: mockDeployReloadOk, stderr: mockDeployReloadOk ? "" : "reload err" }),
 }));
@@ -55,7 +57,7 @@ describe("pegas deploy", () => {
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
 
-    // Run deploy in dry-run mode
+    // Run deploy in skipUp mode
     const origLog = console.log;
     const origWarn = console.warn;
     console.log = () => {};
@@ -63,9 +65,8 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
-        dryRun: true,
         skipUp: true,
       });
     } finally {
@@ -76,7 +77,7 @@ describe("pegas deploy", () => {
     }
   });
 
-  it("skips placeholder domain 'yourdomain.com' and services without prod domains in dry-run", async () => {
+  it("skips placeholder domain 'yourdomain.com' and services without prod domains", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
 
@@ -104,9 +105,8 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
-        dryRun: true,
         skipUp: true,
       });
     } finally {
@@ -128,17 +128,17 @@ describe("pegas deploy", () => {
 
     try {
       // 1. Missing pegas.json (JSON mode)
-      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: true });
+      await handleDeploy({ cwd: tmpProj, scenario: "production", noExit: true, json: true });
 
       // 2. Missing pegas.json (Text mode)
-      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: false });
+      await handleDeploy({ cwd: tmpProj, scenario: "production", noExit: true, json: false });
 
       // 3. Corrupted pegas.json (JSON mode)
       await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), "{ invalid-json", "utf-8");
-      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: true });
+      await handleDeploy({ cwd: tmpProj, scenario: "production", noExit: true, json: true });
 
       // 4. Corrupted pegas.json (Text mode)
-      await handleDeploy({ cwd: tmpProj, env: "production", noExit: true, json: false });
+      await handleDeploy({ cwd: tmpProj, scenario: "production", noExit: true, json: false });
     } finally {
       console.log = origLog;
       console.error = origError;
@@ -189,7 +189,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
         noExit: true,
         skipUp: true,
@@ -246,9 +246,8 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
-        dryRun: true,
         noExit: true,
         skipUp: true,
       });
@@ -290,7 +289,7 @@ describe("pegas deploy", () => {
       // 1. Live deploy in JSON mode
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
         skipDnsCheck: true,
         skipUp: true,
@@ -306,7 +305,7 @@ describe("pegas deploy", () => {
       // 2. Live deploy in Text mode
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
         skipDnsCheck: true,
         skipUp: true,
@@ -355,7 +354,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
         skipDnsCheck: true,
         skipUp: true,
@@ -399,7 +398,7 @@ describe("pegas deploy", () => {
       await handleDeploy({
         cwd: tmpProj,
         gatewayDir: tmpGateway,
-        env: "stage",
+        scenario: "stage",
         skipUp: true,
         noExit: true,
         json: true,
@@ -506,7 +505,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
         serverIp: "192.0.2.1", // mismatch!
         strictDns: true,
@@ -524,7 +523,7 @@ describe("pegas deploy", () => {
     expect(strictErr).toBeDefined();
   });
 
-  it("fails when no environment is provided", async () => {
+  it("fails when no scenario is provided", async () => {
     const errors: string[] = [];
     const origError = console.error;
     console.error = (...args) => errors.push(args.join(" "));
@@ -535,7 +534,7 @@ describe("pegas deploy", () => {
       console.error = origError;
     }
 
-    expect(errors.some((e) => e.includes("Environment contour is required for deploy"))).toBe(true);
+    expect(errors.some((e) => e.includes("Scenario is required for deploy"))).toBe(true);
   });
 
   it("resolves scoped routes and passes them to caddy generator during deploy", async () => {
@@ -562,26 +561,25 @@ describe("pegas deploy", () => {
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
 
-    let dryRunOutput: any = null;
+    let successOutput: any = null;
     const origLog = console.log;
     console.log = (msg: any) => {
       try {
         const parsed = JSON.parse(msg);
-        if (parsed.status === "dry-run") dryRunOutput = parsed;
+        if (parsed.status === "success") successOutput = parsed;
       } catch {}
     };
 
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
-        dryRun: true,
         skipUp: true,
         json: true,
       });
-      expect(dryRunOutput).not.toBeNull();
-      expect(dryRunOutput.routes[0].routes["/api/*"]).toContain("backend:3000");
+      expect(successOutput).not.toBeNull();
+      expect(successOutput.routes[0].routes["/api/*"]).toContain("backend:3000");
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
@@ -589,7 +587,7 @@ describe("pegas deploy", () => {
     }
   });
 
-  it("aborts deploy when required secrets are missing in non-dry-run", async () => {
+  it("aborts deploy when required secrets are missing", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-sec-deploy-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-sec-"));
 
@@ -618,7 +616,7 @@ describe("pegas deploy", () => {
     try {
       await handleDeploy({
         cwd: tmpProj,
-        env: "production",
+        scenario: "production",
         gatewayDir: tmpGateway,
         skipUp: true,
         noExit: true,

@@ -17,10 +17,7 @@ import { verifySecrets } from "../secrets.js";
 
 export interface DeployOptions {
   scenario?: string;
-  target?: string;
-  env?: string;
   gatewayDir?: string;
-  dryRun?: boolean;
   skipUp?: boolean;
   skipReadiness?: boolean;
   readinessTimeoutMs?: number;
@@ -173,13 +170,13 @@ export function resolveScopedUpstream(upstream: string, projectName: string): st
 async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
-  const rawScenario = options.scenario || options.target || options.env;
+  const rawScenario = options.scenario;
   if (!rawScenario) {
-    const errorMsg = "Environment contour is required for deploy. Option --scenario (-s) or --target (-t) is missing.";
+    const errorMsg = "Scenario is required for deploy. Option -s or --scenario is missing.";
     if (isJson) console.log(JSON.stringify({ error: errorMsg }));
     else {
       console.error(`❌ Error: ${errorMsg}`);
-      console.error("   Usage: pegas -s <scenario> (e.g. 'pegas -s development')");
+      console.error("   Usage: pegas deploy -s <scenario>");
     }
     if (!options.noExit) process.exit(1);
     return;
@@ -230,27 +227,20 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
 
   const secretsCheck = await verifySecrets(projectRoot, contract);
   if (!secretsCheck.valid) {
-    if (options.dryRun) {
-      if (!isJson) {
-        console.warn(`⚠️  Warning: Secrets check failed (dry-run):`);
-        for (const err of secretsCheck.errors) console.warn(`   - ${err}`);
-      }
-    } else {
-      if (isJson) console.log(JSON.stringify({ error: "Secrets verification failed", details: secretsCheck.errors }));
-      else {
-        console.error("❌ Secrets verification failed:");
-        for (const err of secretsCheck.errors) console.error(`  - ${err}`);
-      }
-      if (!options.noExit) process.exit(1);
-      return;
+    if (isJson) console.log(JSON.stringify({ error: "Secrets verification failed", details: secretsCheck.errors }));
+    else {
+      console.error("❌ Secrets verification failed:");
+      for (const err of secretsCheck.errors) console.error(`  - ${err}`);
     }
+    if (!options.noExit) process.exit(1);
+    return;
   }
 
   const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
   const runtimeId = getProjectRuntimeId(projectRoot, projectName);
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const confDir = getConfDir(gatewayDir);
-  if (!options.dryRun) await fs.mkdir(confDir, { recursive: true });
+  await fs.mkdir(confDir, { recursive: true });
 
   const strictDns = contract.deploy?.strictDns ?? options.strictDns ?? false;
   const skipDnsCheck = contract.deploy?.skipDnsCheck ?? options.skipDnsCheck ?? false;
@@ -357,8 +347,8 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     }
   }
 
-  if (!options.dryRun && !options.skipUp) {
-    if (!isJson) console.log(`\n🚀 [1/3] Starting project containers for environment '${env}'...`);
+  if (!options.skipUp) {
+    if (!isJson) console.log(`\n🚀 [1/3] Starting project containers for scenario '${env}'...`);
     const primaryDomain = requestedDomains[0] || "";
     const deployEnv = {
       ...process.env,
@@ -506,23 +496,6 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
         ...(scopedRoutes ? { routes: scopedRoutes } : {}),
       });
     }
-  }
-
-  if (options.dryRun) {
-    if (!isJson) {
-      console.log(`\n📋 [dry-run] Target project route file: ${projectRouteFile}`);
-      for (const route of deployedRoutes) {
-        console.log(`  - Route: https://${route.domain} -> ${route.upstream}`);
-        if (route.routes) {
-          for (const [p, t] of Object.entries(route.routes)) {
-            const targetStr = typeof t === "string" ? t : t.to;
-            console.log(`    ↳ ${p} -> ${targetStr}`);
-          }
-        }
-      }
-      if (snippets.length === 0) console.log(`  (No ${env} domains to configure)`);
-    } else console.log(JSON.stringify({ status: "dry-run", env, project: projectName, file: projectRouteFile, routes: deployedRoutes }));
-    return;
   }
 
   let originalContent: string | null = null;

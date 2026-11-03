@@ -256,11 +256,9 @@ async function runUnifiedE2E() {
 
     // Verify package.json & gitignore
     const updatedPkg = JSON.parse(await fs.readFile(path.join(surgeryDir, "package.json"), "utf-8"));
-    if (updatedPkg.scripts?.dev !== "pegas dev -- node -e 'console.log(\"OK\")'") {
-      throw new Error(`package.json scripts.dev mismatch: ${updatedPkg.scripts?.dev}`);
-    }
-    if (updatedPkg.scripts?.deploy !== "pegas deploy production") {
-      throw new Error(`package.json scripts.deploy mismatch: ${updatedPkg.scripts?.deploy}`);
+    const hasDevDep = !!(updatedPkg.devDependencies?.["@netrunner714/pegas"] || updatedPkg.devDependencies?.pegas);
+    if (!hasDevDep) {
+      throw new Error("devDependencies missing @netrunner714/pegas");
     }
     const gitignoreContent = await fs.readFile(path.join(surgeryDir, ".gitignore"), "utf-8");
     if (!gitignoreContent.includes(".pegas")) {
@@ -366,7 +364,7 @@ networks:
     // (заглушки не должны дойти до деплоя — так же, как в реальном проекте).
     await setContractDomains(pAlphaDir, "project-alpha.com");
     await setDockerServiceImages(pAlphaDir, "traefik/whoami");
-    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
+    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir], {
       cwd: pAlphaDir,
     });
     if (deployAlphaRes.code !== 0) {
@@ -386,7 +384,7 @@ networks:
     await execAsync("node", [BIN_PATH, "init"], { cwd: pBetaDir });
     await setContractDomains(pBetaDir, "project-beta.com");
     await setDockerServiceImages(pBetaDir, "traefik/whoami");
-    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
+    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir], {
       cwd: pBetaDir,
     });
     if (deployBetaRes.code !== 0) {
@@ -485,7 +483,7 @@ networks:
     };
     await fs.writeFile(path.join(pMultiDir, "pegas.json"), JSON.stringify(multiContract, null, 2));
 
-    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir], {
+    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir], {
       cwd: pMultiDir,
     });
     if (deployMultiRes.code !== 0) {
@@ -538,7 +536,7 @@ networks:
 
     const hijackDeployRes = await execAsync(
       "node",
-      [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir],
+      [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir],
       { cwd: pHijackDir }
     );
 
@@ -598,7 +596,7 @@ networks:
 
     const brokenDeployRes = await execAsync(
       "node",
-      [BIN_PATH, "deploy", "production", "--gateway-dir", gatewayDir],
+      [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir],
       { cwd: pBrokenDir }
     );
 

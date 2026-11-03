@@ -100,7 +100,7 @@ pegas logs development api -f
 pegas logs -n 50
 ```
 
-### `pegas deploy [options]`
+### `pegas deploy -s <scenario> [options]`
 
 Разворачивает проект по сценарию из pegas.json: сеть, общий Gateway, контейнеры, маршруты
 
@@ -108,10 +108,7 @@ pegas logs -n 50
 
 ```text
 -s, --scenario <name>  Целевой сценарий из pegas.json (например, development, production, stage)
--t, --target <name>    Алиас для --scenario
--e, --env <name>       Целевое окружение (например, production, stage)
 --cwd <path>           Целевой каталог проекта
---dry-run              Показать план изменений без записи на диск
 --skip-dns-check       Skip DNS pre-flight verification
 --strict-dns           Abort deployment if DNS does not resolve to this host
 --skip-up              Configure routes without bringing up containers
@@ -120,10 +117,8 @@ pegas logs -n 50
 Примеры:
 
 ```bash
-pegas -s development
-pegas -s production
 pegas deploy -s production
-pegas deploy -t stage --dry-run
+pegas deploy --scenario stage
 ```
 
 ### `pegas down [options]`
@@ -223,10 +218,8 @@ pegas llms --json
 ## Глобальные флаги
 
 ```text
--s, --scenario <name>  Целевой сценарий из pegas.json (например, development, production, stage)
--t, --target <name>    Алиас для --scenario
---gateway-dir <path>   Переопределить каталог шлюза
---json                 Машиночитаемый JSON-вывод (для агентов и скриптов)
--h, --help             Показать справку
--v, --version          Показать версию
+--gateway-dir <path>  Переопределить каталог шлюза
+--json                Машиночитаемый JSON-вывод (для агентов и скриптов)
+-h, --help            Показать справку
+-v, --version         Показать версию
 ```

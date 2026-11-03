@@ -286,18 +286,11 @@ ${bold("EXAMPLES:")}
       try {
         const updatedPkg = JSON.parse(await fs.readFile(path.join(sandboxDir, "package.json"), "utf-8"));
         const hasDevDep = !!(updatedPkg.devDependencies?.["@netrunner714/pegas"] || updatedPkg.devDependencies?.pegas);
-        const hasDeployScript =
-          typeof updatedPkg.scripts?.deploy === "string" && updatedPkg.scripts.deploy.startsWith("pegas deploy");
-        const hasDevWrapped = typeof updatedPkg.scripts?.dev === "string" && updatedPkg.scripts?.dev.startsWith("pegas dev");
 
-        if (hasDevDep && hasDeployScript && hasDevWrapped) {
-          log(`  ${green("✔")} 4. package.json Integration: dev script wrapped, deploy added, devDependency injected`);
+        if (hasDevDep) {
+          log(`  ${green("✔")} 4. package.json Integration: devDependency injected`);
         } else {
-          const missingParts = [];
-          if (!hasDevDep) missingParts.push("devDependencies");
-          if (!hasDeployScript) missingParts.push("scripts.deploy");
-          if (!hasDevWrapped) missingParts.push("scripts.dev wrapping");
-          log(`  ${yellow("⚠️")}  4. package.json Integration: Incomplete (missing: ${missingParts.join(", ")})`);
+          log(`  ${yellow("⚠️")}  4. package.json Integration: Incomplete (missing devDependencies)`);
           allChecksPassed = false;
         }
       } catch (err: any) {

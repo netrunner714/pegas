@@ -24,8 +24,7 @@ const DOCS_PEGAS_MD = `# Pegas
 ## Команды
 * Подключить проект к локальному шлюзу: \`pegas link\`
 * Отключить проект от шлюза: \`pegas unlink\`
-* Деплой на продакшен: \`pegas deploy production\`
-* Деплой на стейджинг: \`pegas deploy stage\`
+* Деплой сценария: \`pegas deploy -s <scenario>\` (например, \`pegas deploy -s production\`)
 * Остановка проекта: \`pegas down\`
 * Доверенный локальный HTTPS: \`pegas ca install\` (один раз на машину)
 
