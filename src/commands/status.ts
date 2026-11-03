@@ -16,8 +16,12 @@ export interface DockerContainerInfo {
   state: string;
   status: string;
   networks: string[];
+  ports?: string;
   composeProject?: string;
   composeService?: string;
+  pegasProject?: string;
+  pegasService?: string;
+  pegasRole?: string;
 }
 
 export interface ParsedProjectRoute {
@@ -152,6 +156,10 @@ export function matchContainerForRoute(
 ): DockerContainerInfo | undefined {
   const hostPart = upstream.split(":")[0];
 
+  if (hostPart === "host.docker.internal" || hostPart === "127.0.0.1" || hostPart === "localhost") {
+    return undefined;
+  }
+
   const composeMatch = containers.find(
     (c) =>
       c.composeProject?.toLowerCase() === projectName.toLowerCase() &&
@@ -174,12 +182,23 @@ export function matchContainerForRoute(
   return undefined;
 }
 
-export function formatDockerStatus(container?: DockerContainerInfo): {
+export function formatDockerStatus(container?: DockerContainerInfo, upstream?: string): {
   displayStatus: string;
   state: string;
   statusText: string;
 } {
   if (!container) {
+    if (
+      upstream?.startsWith("host.docker.internal") ||
+      upstream?.startsWith("127.0.0.1") ||
+      upstream?.startsWith("localhost")
+    ) {
+      return {
+        displayStatus: "\x1b[36m💻 Host (dev)\x1b[0m",
+        state: "host",
+        statusText: "Host (dev)",
+      };
+    }
     return {
       displayStatus: "\x1b[90m⚪ Not started\x1b[0m",
       state: "stopped",
@@ -256,6 +275,9 @@ export async function getDockerContainers(): Promise<DockerContainerInfo[]> {
         const labels = item.Labels || "";
         const projectMatch = labels.match(/com\.docker\.compose\.project=([^,]+)/);
         const serviceMatch = labels.match(/com\.docker\.compose\.service=([^,]+)/);
+        const pegasProjectMatch = labels.match(/pegas\.project-name=([^,]+)/);
+        const pegasServiceMatch = labels.match(/pegas\.service=([^,]+)/);
+        const pegasRoleMatch = labels.match(/pegas\.role=([^,]+)/);
 
         containers.push({
           id: item.ID || "",
@@ -264,8 +286,12 @@ export async function getDockerContainers(): Promise<DockerContainerInfo[]> {
           state: (item.State || "").toLowerCase(),
           status: item.Status || "",
           networks: (item.Networks || "").split(",").map((n: string) => n.trim()),
+          ports: item.Ports || "",
           composeProject: projectMatch ? projectMatch[1] : undefined,
           composeService: serviceMatch ? serviceMatch[1] : undefined,
+          pegasProject: pegasProjectMatch ? pegasProjectMatch[1] : undefined,
+          pegasService: pegasServiceMatch ? pegasServiceMatch[1] : undefined,
+          pegasRole: pegasRoleMatch ? pegasRoleMatch[1] : undefined,
         });
       } catch {}
     }
@@ -311,7 +337,7 @@ export async function handleStatus(options: { gatewayDir?: string; json?: boolea
   const containers = await getDockerContainers();
   const items: ProjectDashboardItem[] = routes.map((route) => {
     const matchedContainer = matchContainerForRoute(route.upstream, route.projectName, containers);
-    const { displayStatus, state, statusText } = formatDockerStatus(matchedContainer);
+    const { displayStatus, state, statusText } = formatDockerStatus(matchedContainer, route.upstream);
 
     return {
       project: route.projectName,
@@ -327,8 +353,33 @@ export async function handleStatus(options: { gatewayDir?: string; json?: boolea
 
   items.sort((a, b) => a.project.localeCompare(b.project));
 
+  const matchedContainerIds = new Set(items.map((i) => i.containerId).filter(Boolean));
+  const infraContainers = containers.filter((c) => {
+    if (c.name === "pegas-gateway" || c.name === "/pegas-gateway") return false;
+    if (matchedContainerIds.has(c.id)) return false;
+    return Boolean(c.pegasProject || c.composeProject) && c.state === "running";
+  });
+
   if (isJson) {
     const cleanProjects = items.map(({ displayStatus, ...rest }) => rest);
+    const cleanInfra = infraContainers.map((c) => {
+      const proj =
+        c.pegasProject ||
+        c.composeProject?.replace(/-[a-f0-9]{12}-development|-development|-production|-stage/g, "") ||
+        "unknown";
+      const svc = c.pegasService || c.composeService || c.name.replace(/^\//, "");
+      const { statusText } = formatDockerStatus(c);
+      return {
+        project: proj,
+        service: svc,
+        image: c.image,
+        ports: c.ports,
+        status: statusText,
+        state: c.state,
+        containerId: c.id,
+        containerName: c.name.replace(/^\//, ""),
+      };
+    });
     console.log(
       JSON.stringify(
         {
@@ -346,6 +397,7 @@ export async function handleStatus(options: { gatewayDir?: string; json?: boolea
             activeRoutesCount: routes.length,
           },
           projects: cleanProjects,
+          infrastructure: cleanInfra,
         },
         null,
         2
@@ -363,7 +415,7 @@ export async function handleStatus(options: { gatewayDir?: string; json?: boolea
   console.log(`  Active Routes:      ${routes.length} domain(s)\n`);
 
   if (items.length > 0) {
-    console.log(`🚀 \x1b[1mActive Projects:\x1b[0m\n`);
+    console.log(`🚀 \x1b[1mActive Web Routes (HTTP/HTTPS):\x1b[0m\n`);
     const headers = ["PROJECT", "DOMAINS", "UPSTREAM", "STATUS"];
     const rows = items.map((item) => [
       item.project,
@@ -374,6 +426,30 @@ export async function handleStatus(options: { gatewayDir?: string; json?: boolea
     console.log(renderTable({ headers, rows }));
     console.log(`\nTotal: ${items.length} active route${items.length === 1 ? "" : "s"}\n`);
   } else {
-    console.log("ℹ️  No projects currently deployed to Pegas gateway.\n");
+    console.log("ℹ️  No web routes currently deployed to Pegas gateway.\n");
+  }
+
+  if (infraContainers.length > 0) {
+    console.log(`📦 \x1b[1mActive Infrastructure & Background Services:\x1b[0m\n`);
+    const infraHeaders = ["PROJECT", "SERVICE", "IMAGE", "PORTS", "STATUS"];
+    const infraRows = infraContainers.map((c) => {
+      const proj =
+        c.pegasProject ||
+        c.composeProject?.replace(/-[a-f0-9]{12}-development|-development|-production|-stage/g, "") ||
+        "unknown";
+      const svc = c.pegasService || c.composeService || c.name.replace(/^\//, "");
+      const { displayStatus } = formatDockerStatus(c);
+      const cleanPorts = c.ports
+        ? c.ports
+            .split(",")
+            .map((p) => p.trim().replace(/0\.0\.0\.0:|\[::\]:/g, "").replace(/\/tcp|\/udp/g, ""))
+            .filter(Boolean)
+            .filter((v, i, a) => a.indexOf(v) === i)
+            .join(", ")
+        : "-";
+      return [proj, svc, c.image, cleanPorts || "-", displayStatus];
+    });
+    console.log(renderTable({ headers: infraHeaders, rows: infraRows }));
+    console.log(`\nTotal: ${infraContainers.length} active service${infraContainers.length === 1 ? "" : "s"}\n`);
   }
 }
