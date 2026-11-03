@@ -112,7 +112,21 @@ export function isIgnoredByGit(projectRoot: string, relativePath: string): boole
     return true;
   } catch (error: any) {
     if (error?.status === 0) return true;
-    if (error?.status === 1) return false;
+    if (error?.status === 1) {
+      // If path doesn't end in slash, try with trailing slash in case .gitignore specifies a directory pattern (e.g. .pegas/)
+      if (!relativePath.endsWith("/")) {
+        try {
+          childProcess.execFileSync("git", ["check-ignore", "-q", "--", `${relativePath}/`], {
+            cwd: projectRoot,
+            stdio: "ignore",
+          });
+          return true;
+        } catch (dirError: any) {
+          if (dirError?.status === 0) return true;
+        }
+      }
+      return false;
+    }
     // Status 128: not a git repo, git command not found, or directory outside repo.
     // Fall back to reading .gitignore manually.
     const gitignorePath = path.join(projectRoot, ".gitignore");
