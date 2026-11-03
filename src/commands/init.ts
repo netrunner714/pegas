@@ -169,8 +169,6 @@ export async function setupStarterEnvFiles(
     let content = "# Project environment variables schema (mirrors contract.secrets in pegas.json)\n";
     if (secrets.length > 0) {
       content += secrets.map((s) => `${s}=`).join("\n") + "\n";
-    } else {
-      content += "# PORT=3000\n";
     }
     if (!dryRun) {
       await fs.writeFile(envExamplePath, content, "utf-8");
