@@ -382,19 +382,27 @@ describe("main CLI command routing", () => {
     });
   });
 
-  it("handles removed 'dev' command with guidance", async () => {
-    const errors: string[] = [];
-    console.error = (...args) => errors.push(args.join(" "));
+  it("dispatches 'dev' command with parsed options and custom command", async () => {
+    const calls: Record<string, any> = {};
+    const dispatchers: MainDispatchers = {
+      handleDev: async (opts) => {
+        calls.dev = opts;
+      },
+    };
 
-    try {
-      await main(["dev"], { noExit: true });
-    } finally {
-      console.error = origError;
-    }
+    await main(["dev", "--no-run", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
 
-    expect(errors.join(" ")).toContain("'pegas dev' has been removed");
-    expect(errors.join(" ")).toContain("pegas deploy development");
-    expect(errors.join(" ")).toContain("pegas logs -f");
+    expect(calls.dev).toEqual({
+      cwd: undefined,
+      gatewayDir: "/tmp/gw",
+      noRun: true,
+      dryRun: false,
+      json: true,
+      command: undefined,
+    });
+
+    await main(["dev", "--", "bun", "run", "dev:all"], { dispatchers });
+    expect(calls.dev.command).toEqual(["bun", "run", "dev:all"]);
   });
 
   it("dispatches 'deploy' command with parsed options", async () => {

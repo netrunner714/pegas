@@ -7,6 +7,7 @@ import { handleInit } from "./commands/init.js";
 import { handleDeploy } from "./commands/deploy.js";
 import { handleDown } from "./commands/down.js";
 import { handleLogs } from "./commands/logs.js";
+import { handleDev } from "./commands/dev.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
 import { handleUpdate } from "./commands/update.js";
@@ -98,7 +99,7 @@ export interface MainDispatchers {
   handleDeploy?: typeof handleDeploy;
   handleDown?: typeof handleDown;
   handleLogs?: typeof handleLogs;
-  handleDev?: (options?: any) => Promise<void>;
+  handleDev?: typeof handleDev;
   handleStatus?: typeof handleStatus;
   handleLlms?: typeof handleLlms;
   handleUpdate?: typeof handleUpdate;
@@ -121,7 +122,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleDeploy: options.dispatchers?.handleDeploy || handleDeploy,
     handleDown: options.dispatchers?.handleDown || handleDown,
     handleLogs: options.dispatchers?.handleLogs || handleLogs,
-    handleDev: options.dispatchers?.handleDev,
+    handleDev: options.dispatchers?.handleDev || handleDev,
     handleStatus: options.dispatchers?.handleStatus || handleStatus,
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
@@ -235,22 +236,16 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     }
 
     case "dev": {
-      if (dispatch.handleDev) {
-        const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : positionals.slice(1);
-        await dispatch.handleDev({
-          cwd: values.cwd as string | undefined,
-          command: userCmd,
-        });
-        break;
-      }
-      console.error(
-        "❌ 'pegas dev' has been removed in favor of 'pegas deploy development' and 'pegas logs'.\n\n" +
-        "   To start containers: pegas deploy development\n" +
-        "   To stream logs:      pegas logs -f\n"
-      );
-      if (!options.noExit) {
-        process.exit(1);
-      }
+      const userCmd = doubleDashIdx !== -1 ? rawArgs.slice(doubleDashIdx + 1) : positionals.slice(1);
+      await dispatch.handleDev({
+        cwd: values.cwd as string | undefined,
+        gatewayDir: values["gateway-dir"] as string | undefined,
+        noRun: values["no-run"] as boolean | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
+        json: values.json as boolean | undefined,
+        command: userCmd.length > 0 ? userCmd : undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
+      });
       break;
     }
 

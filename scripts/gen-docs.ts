@@ -27,6 +27,7 @@ const LLMS_PATH = path.join(REPO_ROOT, "llms.txt");
 const RU_COMMANDS: Record<string, string> = {
   init: "Инициализирует проект: создаёт контракт pegas.json, документацию и скрипты (runtime определяется автоматически)",
   update: "Обновляет @netrunner714/pegas до актуальной версии",
+  dev: "Запуск локальной разработки: шлюз Caddy, prebuilt infra-сервисы, проксирование на хостовые порты и запуск dev-сервера",
   logs: "Просмотр и стриминг логов контейнеров любого окружения (development, stage, production)",
   deploy: "Разворачивает проект по сценарию из pegas.json: сеть, общий Gateway, контейнеры, маршруты",
   down: "Удаляет контейнеры проекта и его маршруты из Caddy",
@@ -44,6 +45,7 @@ const RU_FLAGS: Record<string, string> = {
   help: "Показать справку",
   version: "Показать версию",
   force: "Сбросить контракт pegas.json на дефолты (создаёт pegas.json.bak)",
+  "no-run": "Подготовить шлюз, infra-сервисы и маршруты без запуска dev-сервера",
   "dry-run": "Показать план изменений без записи на диск",
   cwd: "Целевой каталог проекта",
   scenario: "Целевой сценарий из pegas.json (например, development, production, stage)",

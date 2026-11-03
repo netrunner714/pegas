@@ -85,6 +85,8 @@ export function buildLlmsText(): string {
       invocations.push("npx pegas logs -f");
       invocations.push("npx pegas logs production");
       invocations.push("npx pegas logs api -f");
+    } else if (cmd.name === "dev") {
+      invocations.push("npx pegas dev");
     } else if (cmd.name === "ca") {
       invocations.push("npx pegas ca install");
       invocations.push("npx pegas ca remove");

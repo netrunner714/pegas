@@ -131,6 +131,8 @@ export async function ensureGatewayFiles(gatewayDir: string): Promise<void> {
       "      - ./conf.d:/etc/caddy/conf.d:ro",
       "      - caddy_data:/data",
       "      - caddy_config:/config",
+      "    extra_hosts:",
+      "      - \"host.docker.internal:host-gateway\"",
       "    networks:",
       "      - pegas-network",
       "",

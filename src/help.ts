@@ -107,6 +107,37 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas update", "$ pegas update --latest"],
   },
   {
+    name: "dev",
+    summary: "Start native host development: gateway, prebuilt infra services, host routes, and dev server",
+    usage: "dev [options] [-- <command...>]",
+    options: [
+      {
+        name: "no-run",
+        type: "boolean",
+        default: false,
+        description: "Prepare gateway, infra services, and routes without launching dev server",
+      },
+      {
+        name: "dry-run",
+        type: "boolean",
+        default: false,
+        description: "Preview planned actions and routes without modifying containers or routes",
+      },
+      {
+        name: "cwd",
+        type: "string",
+        placeholder: "<path>",
+        description: "Target project directory",
+      },
+    ],
+    examples: [
+      "$ pegas dev",
+      "$ pegas dev --no-run",
+      "$ pegas dev -- bun run dev",
+      "$ pegas dev --dry-run",
+    ],
+  },
+  {
     name: "logs",
     summary: "Stream or view container logs for any environment (development, stage, production)",
     usage: "logs [env] [service] [options]",
