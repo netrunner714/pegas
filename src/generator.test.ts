@@ -27,6 +27,16 @@ describe("Caddyfile snippet generator", () => {
     expect(snippet).toContain("reverse_proxy api:8000");
   });
 
+  it("omits www redirect for localhost and local domains", () => {
+    const snippet = generateCaddyfileSnippet({
+      domain: "netrunner714.localhost",
+      upstream: "site:3000",
+    });
+
+    expect(snippet).not.toContain("www.netrunner714.localhost");
+    expect(snippet).toContain("netrunner714.localhost {");
+  });
+
   it("generates SPA + API config", () => {
     const snippet = generateCaddyfileSnippet({
       domain: "app.example.com",

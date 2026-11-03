@@ -170,7 +170,6 @@ describe("contract & package.json integration", () => {
     expect(content.services.web.port).toBe(3000);
     expect(content.services.web.domains.development).toEqual([
       "web.my-awesome-site.localhost",
-      "my-awesome-site.localhost",
     ]);
     expect(content.services.web.domains.stage).toEqual(["example.com"]);
     expect(content.services.web.domains.production).toEqual(["example.com"]);
@@ -208,7 +207,7 @@ describe("contract & package.json integration", () => {
 
     const content = JSON.parse(await fs.readFile(path.join(tmpDir, CONTRACT_FILENAME), "utf-8"));
     expect(content.projectName).toBe(slug);
-    expect(content.services.web.domains.development).toEqual([`web.${slug}.localhost`, `${slug}.localhost`]);
+    expect(content.services.web.domains.development).toEqual([`web.${slug}.localhost`]);
     expect(content.services.web.domains.production).toEqual(["example.com"]);
 
     await fs.rm(tmpDir, { recursive: true, force: true });
@@ -378,7 +377,7 @@ describe("contract & package.json integration", () => {
     expect(contractRes.created).toBe(true);
     expect(contractRes.slug).toBe("dry-app");
     expect(contractRes.contract).toBeDefined();
-    expect(contractRes.contract?.services?.web?.domains?.development).toEqual(["web.dry-app.localhost", "dry-app.localhost"]);
+    expect(contractRes.contract?.services?.web?.domains?.development).toEqual(["web.dry-app.localhost"]);
     expect(await fs.access(path.join(tmpDir, CONTRACT_FILENAME)).then(() => true).catch(() => false)).toBe(false);
 
     // Test dry-run package.json update

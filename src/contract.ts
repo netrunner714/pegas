@@ -618,7 +618,7 @@ export function createDefaultContract(
         port: portNum,
         envFile: ".env",
         domains: {
-          development: [`${serviceName}.${slug}.localhost`, `${slug}.localhost`],
+          development: [`${serviceName}.${slug}.localhost`],
           // example.com (RFC 2606) — зарезервированный домен: явный маркер
           // «домен не заполнен», а не догадка о реальном домене пользователя.
           stage: ["example.com"],
@@ -721,10 +721,7 @@ export function createContractFromInventory(
         delete service.env.PORT; // порт вынесен в поле port
       }
       service.domains = {
-        development:
-          svc.name === primary?.name
-            ? [`${svc.name}.${slug}.localhost`, `${slug}.localhost`]
-            : [`${svc.name}.${slug}.localhost`],
+        development: [`${svc.name}.${slug}.localhost`],
         // example.com (RFC 2606): явный маркер «домен не заполнен».
         // Stage без имени сервиса: угадать стейдж-домен почти никогда
         // нельзя — единая заглушка читается однозначнее.

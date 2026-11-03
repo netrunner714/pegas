@@ -2,9 +2,35 @@ import { describe, it, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs/promises";
-import { handleStatus } from "./status.js";
+import { handleStatus, parseCaddyProjectFile } from "./status.js";
 
 describe("pegas status", () => {
+  it("parses caddyfile with nested handle and cors blocks accurately", () => {
+    const caddyContent = `
+api.example.com {
+    @cors_preflight {
+        method OPTIONS
+    }
+    handle @cors_preflight {
+        respond "" 204
+    }
+    handle {
+        reverse_proxy host.docker.internal:3001 {
+            header_down -Access-Control-Allow-Origin
+        }
+    }
+}
+site.example.com {
+    reverse_proxy host.docker.internal:3000
+}
+`;
+    const routes = parseCaddyProjectFile(caddyContent, "example-development.caddy");
+    expect(routes.length).toBe(2);
+    expect(routes[0].domains).toEqual(["api.example.com"]);
+    expect(routes[0].upstream).toBe("host.docker.internal:3001");
+    expect(routes[1].domains).toEqual(["site.example.com"]);
+    expect(routes[1].upstream).toBe("host.docker.internal:3000");
+  });
   it("handleStatus outputs json payload with docker and gateway status", async () => {
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-status-"));
     const confDir = path.join(tmpGateway, "conf.d");

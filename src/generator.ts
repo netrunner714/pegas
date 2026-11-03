@@ -40,8 +40,18 @@ function isSubdomainOrIp(domain: string): boolean {
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(domain) || domain.includes(":")) {
     return true;
   }
-  // If starts with www. or localhost
-  if (domain.startsWith("www.") || domain === "localhost") {
+  // Local development domains never have www redirects
+  if (
+    domain === "localhost" ||
+    domain.endsWith(".localhost") ||
+    domain.endsWith(".test") ||
+    domain.endsWith(".local") ||
+    domain.endsWith(".internal")
+  ) {
+    return true;
+  }
+  // If starts with www.
+  if (domain.startsWith("www.")) {
     return true;
   }
   // Check dot parts (e.g., example.com -> 2 parts, api.example.com -> 3 parts)
