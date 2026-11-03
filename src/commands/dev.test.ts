@@ -247,7 +247,7 @@ describe("pegas dev command", () => {
     fs.writeFileSync(
       path.join(tmpDir, "package.json"),
       JSON.stringify({
-        scripts: { "dev:all": "concurrently 'bun run dev:*'" },
+        scripts: { dev: "vite" },
       })
     );
 
@@ -259,7 +259,7 @@ describe("pegas dev command", () => {
     });
 
     expect(spawnSyncCalls.length).toBe(1);
-    expect(spawnSyncCalls[0].args).toEqual(["run", "dev:all"]);
+    expect(spawnSyncCalls[0].args).toEqual(["run", "dev"]);
 
     // Test explicit command override
     spawnSyncCalls = [];

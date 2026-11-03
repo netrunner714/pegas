@@ -229,35 +229,8 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
       devArgs = options.command.slice(1);
     }
   } else {
-    let scriptToRun: string | null = null;
-    const appServicesCount = Object.values(contract.services || {}).filter(
-      (s) => s.role === "app" || (!s.role && !s.image)
-    ).length;
-
-    if (appServicesCount > 1 && scripts["dev:all"]) {
-      scriptToRun = "dev:all";
-    } else if (scripts["dev"] && !scripts["dev"].trim().startsWith("pegas dev")) {
-      scriptToRun = "dev";
-    } else if (scripts["dev:all"]) {
-      scriptToRun = "dev:all";
-    } else if (scripts["dev:run"]) {
-      scriptToRun = "dev:run";
-    } else if (scripts["start"]) {
-      scriptToRun = "start";
-    }
-
-    if (scriptToRun) {
-      devCmd = pm;
-      devArgs = ["run", scriptToRun];
-    } else {
-      if (pm === "bun") {
-        devCmd = "bun";
-        devArgs = ["dev"];
-      } else {
-        devCmd = pm;
-        devArgs = ["run", "dev"];
-      }
-    }
+    devCmd = pm;
+    devArgs = ["run", "dev"];
   }
 
   if (!isJson) {
