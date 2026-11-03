@@ -19,7 +19,7 @@
 ## CLI Usage for Agents
 - `npx @netrunner714/pegas init [options]` (--force, --dry-run, --cwd) — Create the pegas.json contract (runtime auto-detected from the project), docs and scripts.
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update @netrunner714/pegas to latest version.
-- `npx pegas dev` (--no-run, --dry-run, --cwd) — Start native host development: gateway, prebuilt infra services, host routes, and dev server.
+- `npx pegas dev` — Start native host development (gateway, infra containers, host routes, and dev server).
 - `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).

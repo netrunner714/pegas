@@ -212,20 +212,31 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
   let devCmd: string;
   let devArgs: string[] = [];
 
+  const pm = await detectPackageManager(projectRoot);
+  let pkgJson: any = {};
+  try {
+    pkgJson = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf-8"));
+  } catch {}
+
+  const scripts = pkgJson.scripts || {};
+
   if (options.command && options.command.length > 0) {
-    devCmd = options.command[0];
-    devArgs = options.command.slice(1);
+    if (options.command.length === 1 && scripts[options.command[0]]) {
+      devCmd = pm;
+      devArgs = ["run", options.command[0]];
+    } else {
+      devCmd = options.command[0];
+      devArgs = options.command.slice(1);
+    }
   } else {
-    const pm = await detectPackageManager(projectRoot);
-    let pkgJson: any = {};
-    try {
-      pkgJson = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf-8"));
-    } catch {}
-
-    const scripts = pkgJson.scripts || {};
     let scriptToRun: string | null = null;
+    const appServicesCount = Object.values(contract.services || {}).filter(
+      (s) => s.role === "app" || (!s.role && !s.image)
+    ).length;
 
-    if (scripts["dev"] && !scripts["dev"].trim().startsWith("pegas dev")) {
+    if (appServicesCount > 1 && scripts["dev:all"]) {
+      scriptToRun = "dev:all";
+    } else if (scripts["dev"] && !scripts["dev"].trim().startsWith("pegas dev")) {
       scriptToRun = "dev";
     } else if (scripts["dev:all"]) {
       scriptToRun = "dev:all";

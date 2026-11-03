@@ -45,7 +45,6 @@ const RU_FLAGS: Record<string, string> = {
   help: "Показать справку",
   version: "Показать версию",
   force: "Сбросить контракт pegas.json на дефолты (создаёт pegas.json.bak)",
-  "no-run": "Подготовить шлюз, infra-сервисы и маршруты без запуска dev-сервера",
   "dry-run": "Показать план изменений без записи на диск",
   cwd: "Целевой каталог проекта",
   scenario: "Целевой сценарий из pegas.json (например, development, production, stage)",

@@ -44,25 +44,14 @@ pegas update
 pegas update --latest
 ```
 
-### `pegas dev [options] [-- <command...>]`
+### `pegas dev`
 
 Запуск локальной разработки: шлюз Caddy, prebuilt infra-сервисы, проксирование на хостовые порты и запуск dev-сервера
-
-Флаги:
-
-```text
---no-run              Подготовить шлюз, infra-сервисы и маршруты без запуска dev-сервера
---dry-run             Показать план изменений без записи на диск
---cwd <path>          Целевой каталог проекта
-```
 
 Примеры:
 
 ```bash
 pegas dev
-pegas dev --no-run
-pegas dev -- bun run dev
-pegas dev --dry-run
 ```
 
 ### `pegas logs [env] [service] [options]`
