@@ -245,7 +245,7 @@ export async function setupDevBinary(dryRun = false): Promise<string> {
     await findOrDownloadCaddy({ silent: true });
     return "Подготовлен локальный Caddy для dev-режима";
   } catch (err: any) {
-    return `Предупреждение: не удалось предзагрузить Caddy (${err?.message || "ошибка сети"}), будет загружен при первом pegas dev`;
+    return `Предупреждение: не удалось предзагрузить Caddy (${err?.message || "ошибка сети"}), будет загружен при первом pegas link`;
   }
 }
 

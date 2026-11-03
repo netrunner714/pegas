@@ -15,12 +15,12 @@
 
 ## Обучение
 
-* [Быстрый старт](./tutorials/quickstart.md) — init → dev-HTTPS → deploy за несколько минут.
+* [Быстрый старт](./tutorials/quickstart.md) — `init` → `ca install` → `link` → `deploy -s <scenario>`.
 
 ## Руководства
 
-* [Инициализация проекта](./how-to/init.md) — `pegas init`: контракт, скрипты, compose-хирургия.
-* [Локальная разработка с HTTPS](./how-to/local-https.md) — `pegas dev`, доверенный CA, подъём БД, корректная остановка.
+* [Инициализация проекта](./how-to/init.md) — `pegas init`: декларативный контракт, секреты, compose-хирургия.
+* [Локальная разработка с HTTPS](./how-to/local-https.md) — `pegas link`, доверенный CA, единый шлюз, `pegas unlink`.
 
 ## Справочники
 

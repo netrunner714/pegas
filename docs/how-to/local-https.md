@@ -1,174 +1,142 @@
-# Локальная разработка с HTTPS (`pegas dev`)
+# Локальная разработка с HTTPS (`pegas link` / `pegas unlink`)
 
-> How-to: получить доверенный HTTPS на `*.localhost`, поднять БД одной командой и корректно всё остановить.
+> How-to: получить доверенный HTTPS на `*.localhost` без запуска тяжелых прокси в каждом проекте и без изменения скриптов разработки.
 
-Команда `pegas dev` запускает локальный обратный прокси Caddy с поддержкой HTTPS и автоматическим роутингом на ваш локальный dev-сервер (Next.js, Vite, NestJS, Bun и т.д.), а также умеет автоматически поднимать вспомогательную инфраструктуру (БД, кэш).
+В современной веб-разработке многие API и возможности браузера требуют безопасного контекста (**HTTPS**) даже при локальной разработке:
+* Безопасные Cookie (с атрибутами `Secure; SameSite=None`)
+* WebCrypto API, Service Workers, WebAuthn/Passkeys, Geolocation
+* Мультидоменная маршрутизация (например, `app.localhost` и `api.localhost` с разделением кук)
+* Внешние OAuth-интеграции (Telegram WebApp, Google OAuth, VK ID), требующие HTTPS redirect URL
+
+Pegas решает эту задачу с помощью **единого общего Docker Gateway** (`pegas-gateway`) и прозрачной привязки хостовых портов (`pegas link`).
 
 ---
 
-## 1. Зачем нужен `pegas dev`?
+## 1. Установка доверенного Root CA
 
-В современной веб-разработке многие API и фичи требуют безопасного контекста (**HTTPS**) даже на localhost:
-* Secure Cookies (флаги `Secure; SameSite=None`)
-* WebCrypto API, Service Workers, WebAuthn/Passkeys, Geolocation
-* Тестирование мульти-доменных сервисов (например, `app.localhost` и `api.localhost` с общими куками)
-* Тестирование интеграций с внешними OAuth-провайдерами (Telegram WebApp, Google OAuth, VK ID), которые требуют HTTPS redirect_uri
-
-Вместо сложной ручной настройки Nginx, mkcert или самоподписанных сертификатов доступен доверенный локальный HTTPS.
-
-Для доверенного зелёного замка в браузере достаточно один раз выполнить:
+Для того чтобы браузеры и системные утилиты отображали валидный зеленый замок и доверяли локальным сертификатам без предупреждений, достаточно один раз выполнить на машине:
 
 ```bash
 npx pegas ca install
 ```
 
-Команда генерирует локальный Root CA Pegas, регистрирует его в системном хранилище доверия и (на Linux) выдаёт бинарнику Caddy `cap_net_bind_service`, чтобы локальный шлюз мог использовать стандартный порт **443** без `sudo` при каждом запуске. Удалить CA можно командой `npx pegas ca remove`.
+Команда генерирует локальный Root CA Pegas (`~/.pegas/ca/root.crt`), регистрирует его в системном хранилище доверия ОС и браузеров. Удалить Root CA можно в любой момент командой `npx pegas ca remove`.
 
-### Куда устанавливается сертификат (по платформам)
+### Хранилища сертификатов по платформам
 
 | Платформа | Хранилище | Что получает доверие |
 |---|---|---|
-| Linux (Debian/Ubuntu/Alpine) | `/usr/local/share/ca-certificates/pegas-root-ca.crt` + `update-ca-certificates` | curl, git, openssl, системные утилиты, Chrome/Chromium (через системный бандл) |
+| Linux (Debian/Ubuntu/Alpine) | `/usr/local/share/ca-certificates/pegas-root-ca.crt` + `update-ca-certificates` | curl, git, openssl, системные утилиты, Chrome/Chromium |
 | Linux (RHEL/Fedora/CentOS) | `/etc/pki/ca-trust/source/anchors/pegas-root-ca.crt` + `update-ca-trust` | то же |
 | macOS | System.keychain (`security add-trusted-cert`) | Safari, Chrome, системные фреймворки |
-| Windows | user Root store (`certutil -user`, без UAC) | Edge, Chrome, системные API |
-| WSL | **обе системы**: Windows user store (`certutil.exe` из interop) **и** Linux-side бандл (Debian/RHEL-путь) | браузеры в Windows + curl/node/git внутри WSL; плюс `setcap` на Linux-стороне для порта 443 |
+| Windows | User Root Store (`certutil -user`, без UAC) | Edge, Chrome, системные API |
+| WSL | **Обе системы**: Windows user store + Linux bundle | Браузеры в Windows + curl/node/git внутри WSL |
 
-`pegas ca remove` симметрично чистит все места установки, включая отзыв `cap_net_bind_service` (Linux/WSL) и «чужие» копии сертификата, установленные самим Caddy в trust-каталоги.
+### Ограничения доверия и нюансы
 
-### Ограничения доверия (важно знать)
-
-Не все рантаймы читают системное хранилище:
-* **Firefox на Linux** использует собственный NSS-профиль — сертификат нужно добавить вручную (Настройки → Приватность → Сертификаты → Импорт) или через `certutil -A -t "C,," -n pegas -i ~/.pegas/ca/root.crt -d ~/.pki/nssdb`;
-* **Node.js / Bun** имеют встроенный CA-лист. `pegas dev -- <команда>` автоматически прокидывает `NODE_EXTRA_CA_CERTS=~/.pegas/ca/root.crt` в дочерний процесс — `fetch()` из dev-сервера доверяет локальному HTTPS. Для standalone-запусков экспортируйте переменную вручную;
-* **Python (requests)** использует certifi — задайте `REQUESTS_CA_BUNDLE=~/.pegas/ca/root.crt`.
-
-### Диагностика: красный замок в браузере при успешном `pegas ca install` (WSL)
-
-Редкий, но живой сценарий на WSL: `certutil.exe -addstore` из interop возвращает exit 0, **молча не записав** сертификат в Windows-хранилище. Симптом — браузер в Windows показывает предупреждение сертификата, хотя `pegas ca install` отчитался успехом. `isCaTrusted` это ловит (проверяет фактический fingerprint в сторе, а не вывод certutil), поэтому повторный `pegas ca install` или `pegas init` честно скажет «сертификат не установлен».
-
-Ручное лечение — PowerShell-импорт (обходит interop-путь certutil):
-
-```bash
-powershell.exe -NoProfile -Command "Import-Certificate -FilePath '\\\\wsl.localhost\\<дистро>\\home\\<user>\\.pegas\\ca\\root.crt' -CertStoreLocation Cert:\CurrentUser\Root"
-```
-
-Если сценарий повторяется регулярно на вашей машине, стоит перевести установку Windows-стороны WSL на `Import-Certificate` как основной путь (текущая реализация использует certutil).
+Некоторые среды используют собственные списки доверенных сертификатов:
+* **Firefox на Linux**: использует собственный профиль NSS. Сертификат можно добавить через настройки браузера (Настройки → Приватность → Сертификаты → Импорт) или утилитой `certutil`:
+  ```bash
+  certutil -A -t "C,," -n pegas -i ~/.pegas/ca/root.crt -d ~/.pki/nssdb
+  ```
+* **Node.js / Bun**: используют встроенный список CA. Для межсервисных запросов по HTTPS передайте переменную окружения:
+  ```bash
+  export NODE_EXTRA_CA_CERTS="$HOME/.pegas/ca/root.crt"
+  ```
+* **Python (requests / httpx)**:
+  ```bash
+  export REQUESTS_CA_BUNDLE="$HOME/.pegas/ca/root.crt"
+  ```
 
 ---
 
-## 2. Архитектура работы `dev`
+## 2. Архитектура общего Gateway
+
+Вместо запуска изолированного Caddy-прокси в каждом проекте, Pegas использует **один глобальный Gateway-контейнер** (`pegas-gateway`), который слушает порты `80` и `443` на машине разработчика.
 
 ```mermaid
 flowchart TD
-    User["Разработчик (pegas dev -- npm run dev)"]
-    PortFinder["Авто-поиск свободных портов (8443+)"]
-    CaddyRunner["User-Space Caddy (~/.pegas/bin/caddy)"]
-    InfraManager["Docker Compose (опционально: Postgres, Redis)"]
-    ChildApp["Dev-сервер приложения (e.g. localhost:3000)"]
-    Browser["Браузер / curl (https://app.localhost:8443)"]
+    Browser["Браузер / curl (https://web.my-app.localhost)"]
+    Gateway["Общий Docker Gateway (pegas-gateway на портах 80 / 443)"]
+    HostServer["Локальный dev-сервер на хосте (например, localhost:3000)"]
+    DockerServices["Контейнеры БД / Redis (опционально)"]
 
-    User --> PortFinder
-    PortFinder --> CaddyRunner
-    User --> InfraManager
-    User --> ChildApp
-    Browser -->|TLS / HTTPS| CaddyRunner
-    CaddyRunner -->|reverse_proxy| ChildApp
+    Browser -->|HTTPS :443| Gateway
+    Gateway -->|reverse_proxy| HostServer
+    HostServer -.->|TCP| DockerServices
 ```
 
-### Ключевые принципы:
-1. **User-Space & Zero Root**:
-   Бинарник Caddy запускается от имени текущего пользователя из `~/.pegas/bin/caddy`. Не создаются фоновые службы `systemd`, не требуются `sudo` или root-привилегии.
-2. **Бесконфликтные порты (443/80 + fallback)**:
-   По умолчанию используются стандартные порты `443` (`https`) и `80` (`http`) — браузер скрывает порт из адресной строки, оставляя чистый URL `https://web.my-app.localhost`. Если порт `443` занят или ОС запрещает непривилегированному процессу слушать низкие порты, Pegas не падает, а мягко откатывается на свободный порт (`8443`, затем следующий) и выводит подсказку `pegas ca install`.
-3. **Управление дочерним процессом**:
-   Команда после `--` (например, `pegas dev -- bun run dev`) запускается как дочерний процесс. Весь вывод (stdout/stderr) транслируется напрямую в консоль, а при нажатии `Ctrl+C` (SIGINT) Pegas корректно останавливает как Caddy, так и все запущенные дочерние подпроцессы.
-4. **Умный авто-запуск инфраструктуры (`--infra`)**:
-   Если в `docker-compose.yml` присутствуют сервисы баз данных или очередей (PostgreSQL, Redis, MySQL, MongoDB, RabbitMQ, Kafka), Pegas может запустить **только их**, не запуская сам веб-контейнер (ведь веб-приложение крутится на хосте в hot-reload режиме). При выходе из `dev` инфраструктура останавливается командой `docker compose stop`, сохраняя все тома данных (`volumes`).
+### Как это работает:
+1. `pegas link` считывает маршруты сценария `development` из файла `pegas.json`.
+2. Если общий Gateway ещё не запущен, Pegas поднимает его в Docker.
+3. Маршруты текущего проекта транслируются на `host.docker.internal:<порт>` и динамически регистрируются в Gateway через Caddy Admin API.
+4. Разработчик запускает dev-сервер любимым нативным инструментом (`bun run dev`, `npm run dev`, `cargo run` и т.д.).
+5. Браузер открывает `https://web.my-app.localhost` с валидным сертификатом без указания портов.
+6. `pegas unlink` удаляет маршруты проекта из Gateway при завершении работы.
 
 ---
 
-## 3. Использование
+## 3. Пошаговый рабочий процесс
 
-### Базовый запуск вместе с приложением
+### Шаг 1: Подключение проекта к Gateway
+В каталоге проекта выполните:
+
 ```bash
-# Next.js / Vite / React
-npx pegas dev -- npm run dev
-
-# Bun
-npx pegas dev -- bun run dev
-
-# Запуск с авто-поднятием инфраструктуры (Postgres, Redis) из compose
-npx pegas dev --infra -- pnpm dev
+npx pegas link
 ```
 
-### Доверенный HTTPS на чистом порту
-```bash
-# Один раз на машину — включает чистые URL вида https://web.my-app.localhost
-npx pegas ca install
+Команда автоматически:
+* Проверит наличие `pegas.json` и сценария `development`
+* Поднимет или обновит общий Gateway-контейнер
+* Зарегистрирует домены (например, `web.my-app.localhost`) на соответствующий локальный порт
 
-# Откат: удалить локальный CA из системы
-npx pegas ca remove
+### Шаг 2: Запуск вашего локального dev-сервера
+Запустите dev-сервер стандартной командой проекта:
+
+```bash
+npm run dev
+# или
+bun run dev
+# или
+pnpm dev
 ```
 
-### Автономый запуск прокси (без дочерней команды)
-Если вы запускаете сервер из IDE или в отдельном терминале:
+Dev-сервер работает нативно на хосте со стандартным Hot Module Replacement (HMR) и доступом к IDE отладчикам.
+
+### Шаг 3: Отключение проекта
+Когда разработка завершена или вы переключаетесь на другую задачу:
+
 ```bash
-npx pegas dev
+npx pegas unlink
 ```
-Caddy будет работать в терминале до нажатия `Ctrl+C`.
+
+Gateway освободит маршруты текущего проекта, не затрагивая маршруты других активных проектов.
 
 ---
 
-## 4. Конфигурация в `pegas.json`
+## 4. Конфигурация сценария в `pegas.json`
 
-В файле контракта `pegas.json` вы указываете локальные домены и поведение инфраструктуры:
+Маршруты локальной разработки настраиваются в сценарии `development`:
 
 ```json
 {
-  "$schema": "https://netrunner714.ru/schemas/pegas.json",
-  "projectName": "my-project",
-  "bootInfra": true,
-  "services": {
-    "web": {
-      "upstream": "web:3000",
-      "domains": {
-        "dev": ["web.my-app.localhost", "my-app.localhost"],
-        "prod": ["my-app.ru"]
-      }
+  "name": "my-project",
+  "scenarios": {
+    "development": {
+      "routes": [
+        {
+          "host": "web.my-app.localhost",
+          "to": "host.docker.internal:3000"
+        },
+        {
+          "host": "api.my-app.localhost",
+          "to": "host.docker.internal:4000"
+        }
+      ]
     }
   }
 }
 ```
 
-* `domains.dev`: список доменов для локальной разработки (рекомендуется использовать зону `.localhost`, так как все современные браузеры резолвят её на `127.0.0.1` без изменения `/etc/hosts`).
-* `bootInfra: true`: автоматически поднимать инфраструктурные контейнеры при `pegas dev` даже без флага `--infra`.
-
----
-
-## 5. E2E Тестирование рантайма разработки (`e2e:dev`)
-
-Для верификации работы локального прокси разработан автономный E2E-тест:
-
-```bash
-bun run test:e2e:dev
-```
-
-### Что проверяет тест:
-1. **[Phase 0] Сборка бандла**: компиляция свежего `dist/index.js`.
-2. **[Phase 1] Кэш Caddy (`~/.pegas/bin`)**:
-   - Поиск исполняемого файла Caddy в глобальном управляемом кэше `~/.pegas/bin/caddy-v<версия>` (скачивается один раз при первом запуске, далее переиспользуется).
-3. **[Phase 2] Разрешение коллизий портов**: искусственный захват порта 8443 фиктивным TCP-сервером и проверка, что Pegas динамически выделил свободный порт (8444).
-4. **[Phase 3] Физический HTTPS-трафик (`curl`)**:
-   - Создание изолированного проекта в `/tmp/` с контрактом `pegas.json`.
-   - Запуск реального мок-сервера на случайном порту.
-   - Запуск `pegas dev -- node mock-dev-server.cjs`.
-   - Выполнение реального сетевого HTTPS-запроса через `curl -k --resolve demo-app.localhost:8443:127.0.0.1 https://demo-app.localhost:8443/api/profile`.
-   - Валидация HTTP 200 OK, заголовков TLS и тела JSON-ответа.
-   - Проверка чистого завершения всех процессов группы по SIGTERM.
-5. **[Phase 4] Smart Infra Boot**:
-   - Авто-детект инфраструктурных сервисов из compose.
-   - Запуск сервиса через `docker compose up -d`.
-   - Валидация вывода о готовности.
-   - Автоматическая безопасная остановка (`docker compose stop`) без удаления томов при завершении сессии.
-6. **[Phase 5] Гарантированная очистка**: удаление всех временных песочниц и остановка любых запущенных процессов.
+* Зона `*.localhost` по стандарту RFC 6761 автоматически резолвится всеми современными ОС и браузерами в `127.0.0.1` без необходимости редактировать `/etc/hosts`.
+* Директива `to` указывает на `host.docker.internal:<порт>`, благодаря чему контейнер Caddy перенаправляет запросы обратно на хост разработчика.
