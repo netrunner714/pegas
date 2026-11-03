@@ -11,6 +11,7 @@ import { detectPackageManager, getUpdateCommand } from "../pm.js";
 const DOCS_PEGAS_MD = `# Pegas
 
 Этот проект настроен для работы со стандартизированным L7-шлюзом **Pegas**.
+Проект стандартизирован на **Bun** для локальной разработки и выполнения скриптов (\`bun run <cmd>\`).
 
 ## Контракт сервисов
 Конфигурация роутинга объявлена в файле \`pegas.json\`:
@@ -196,6 +197,7 @@ export async function setupStarterEnvFiles(
 
 export const PEGAS_AGENT_RULES = `<!-- BEGIN:pegas-rules -->
 ## Pegas
+- Проект использует Bun как основной стандарт выполнения и управления зависимостями (\`bun run <cmd>\`).
 - Перед работой с роутингом или окружениями изучить \`docs/pegas.md\` и \`pegas.json\`.
 - Все публичные домены и порты сервисов объявляются в \`pegas.json\`.
 <!-- END:pegas-rules -->`;
@@ -492,7 +494,7 @@ export async function handleProjectInit(
     console.log("  3. Разверните окружение: pegas deploy -s development");
     console.log("  4. Подключитесь к логам: pegas logs -f (Ctrl+C не останавливает контейнеры)\n");
   } else {
-    console.log("  2. Запустите локальную разработку: npm run dev\n");
+    console.log("  2. Запустите локальную разработку: bun run dev\n");
   }
 }
 

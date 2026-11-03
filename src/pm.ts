@@ -37,7 +37,8 @@ export async function detectPackageManager(projectDir: string): Promise<PackageM
     } catch {}
   }
 
-  return "npm";
+  // Fallback to Bun as the primary first-class default
+  return "bun";
 }
 
 /**

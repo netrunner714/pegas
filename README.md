@@ -1,6 +1,6 @@
 # pegas
 
-> **Agent-native оркестратор окружений и L7 reverse-proxy на базе Caddy для Docker.**
+> **Bun-native, agent-first оркестратор окружений и L7 reverse-proxy на базе Caddy для Docker.**
 > Хостите сколько угодно сайтов и API на одном VPS: без конфликтов портов,
 > с автоматическим Let's Encrypt SSL, строгой изоляцией секретов и hot-reload без даунтайма.
 > Создан, чтобы быть надёжным и для разработчиков, и для ИИ-агентов (Cursor, Claude Code, Cline, Copilot).
@@ -9,7 +9,7 @@
 [![CI](https://github.com/netrunner714/pegas/actions/workflows/ci.yml/badge.svg)](https://github.com/netrunner714/pegas/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
-[![Node](https://img.shields.io/badge/node-%3E%3D24.0.0-black.svg)](package.json)
+[![Bun](https://img.shields.io/badge/bun-%3E%3D1.2-black.svg)](package.json)
 
 ---
 
@@ -73,7 +73,7 @@ npx pegas ca install
 npx pegas link
 
 # 3. Запустить проект привычной для вас командой разработки
-npm run dev # или: bun dev, pnpm dev, cargo run и т.д.
+bun run dev # или: cargo run, go run и т.д.
 ```
 
 Ваш проект мгновенно доступен по доверенному HTTPS: `https://<проект>.localhost`.
@@ -181,6 +181,7 @@ Pegas поднимет изолированные контейнеры, пров
 Pegas изначально спроектирован с расчетом на автономную работу AI-агентов (Cursor, Claude Code, Cline, Copilot):
 
 * **Строгий JSON-режим**: любая команда поддерживает флаг `--json` с детерминированным машиночитаемым выводом.
+* **Bun-first стандарт**: выполнение скриптов хоста стандартизировано на Bun (`bun run <cmd>`).
 * **Никаких интерактивных зависаний**: команды никогда не блокируют терминал вопросами или промптами.
 * **Контекст в одном файле**: команда `npx pegas llms` и файл [llms.txt](llms.txt) содержат компактное, полное описание архитектуры, контракта и команд.
 * **Самодиагностика и исправление**: `pegas check --fix` находит несоответствия секретов или `.gitignore` и автоматически их исправляет.

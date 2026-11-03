@@ -41,12 +41,12 @@ describe("package manager detection and commands", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("falls back to npm when no lockfile or packageManager field is found", async () => {
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pm-test-npm-fallback-"));
+  it("falls back to bun when no lockfile or packageManager field is found", async () => {
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "pm-test-bun-fallback-"));
 
     const pm = await detectPackageManager(tmpDir);
-    expect(pm).toBe("npm");
-    expect(getUpdateCommand(pm)).toBe("npm update @netrunner714/pegas");
+    expect(pm).toBe("bun");
+    expect(getUpdateCommand(pm)).toBe("bun update @netrunner714/pegas");
 
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
