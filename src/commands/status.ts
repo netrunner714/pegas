@@ -9,6 +9,7 @@ import {
   runCommand,
 } from "../docker.js";
 import { renderTable } from "../table.js";
+import { interpolateServiceReferences } from "../contract.js";
 
 export interface DockerContainerInfo {
   id: string;
@@ -343,7 +344,10 @@ export function resolveInfraEndpoint(
               typeof contract.env.PUBLIC_HOST === "object"
                 ? contract.env.PUBLIC_HOST.development
                 : contract.env.PUBLIC_HOST;
-            if (pub) return hostPort ? `${pub}:${hostPort}` : pub;
+            if (pub) {
+              const resolvedPub = interpolateServiceReferences(pub, contract, "development");
+              return hostPort ? `${resolvedPub}:${hostPort}` : resolvedPub;
+            }
           }
         }
       }

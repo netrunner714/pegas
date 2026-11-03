@@ -8,6 +8,7 @@ import {
   getEnvironmentDomains,
   normalizeDomain,
   getProjectRuntimeId,
+  interpolateServiceReferences,
 } from "../contract.js";
 import { ensureGatewayContainer } from "../docker.js";
 import { generateCaddyfileSnippet } from "../generator.js";
@@ -260,8 +261,24 @@ export async function handleDev(options: DevOptions = {}): Promise<void> {
     console.log(`▶ Running: \x1b[36m${devCmd} ${devArgs.join(" ")}\x1b[0m\n`);
   }
 
+  const resolvedGlobalDevEnv: Record<string, string> = {};
+  if (contract.env) {
+    for (const [key, value] of Object.entries(contract.env)) {
+      let raw: string | undefined;
+      if (typeof value === "string") {
+        raw = value;
+      } else if (value && typeof value === "object") {
+        raw = (value as Record<string, string>).development;
+      }
+      if (raw !== undefined) {
+        resolvedGlobalDevEnv[key] = interpolateServiceReferences(raw, contract, "development");
+      }
+    }
+  }
+
   const runEnv = {
     ...process.env,
+    ...resolvedGlobalDevEnv,
     PEGAS_ALLOWED_ORIGINS: allProjectDomains.map((d) => `https://${d}`).join(","),
   };
 

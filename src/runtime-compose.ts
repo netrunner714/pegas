@@ -3,7 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { EnvProfileValue, PegasContract, ServiceContract } from "./types.js";
-import { validatePegasContract, normalizeEnvironment, getEnvironmentDomains, normalizeDomain } from "./contract.js";
+import { validatePegasContract, normalizeEnvironment, getEnvironmentDomains, normalizeDomain, interpolateServiceReferences } from "./contract.js";
 
 export interface RuntimeComposeOptions {
   projectRoot: string;
@@ -431,16 +431,22 @@ export function hasHostNodeModules(
  */
 function resolveGlobalEnv(
   envBlock: Record<string, EnvProfileValue> | undefined,
-  environmentName: string
+  environmentName: string,
+  contract?: PegasContract
 ): Record<string, string> {
   if (!envBlock) return {};
   const resolved: Record<string, string> = {};
   for (const [key, value] of Object.entries(envBlock)) {
+    let raw: string | undefined;
     if (typeof value === "string") {
-      resolved[key] = value;
+      raw = value;
     } else if (value && typeof value === "object") {
-      const v = (value as Record<string, string>)[environmentName];
-      if (v !== undefined) resolved[key] = v;
+      raw = (value as Record<string, string>)[environmentName];
+    }
+    if (raw !== undefined) {
+      resolved[key] = contract
+        ? interpolateServiceReferences(raw, contract, environmentName)
+        : raw;
     }
   }
   return resolved;
@@ -537,9 +543,10 @@ export function createRuntimeCompose(
 
     const envDomains = getEnvironmentDomains(service, environmentName);
     const domainStr = Array.isArray(envDomains) && envDomains.length > 0 ? envDomains.join(",") : undefined;
-    const pubHost = typeof contract.env?.PUBLIC_HOST === "object"
+    const rawPub = typeof contract.env?.PUBLIC_HOST === "object"
       ? (contract.env.PUBLIC_HOST as Record<string, string>)[environmentName]
       : contract.env?.PUBLIC_HOST;
+    const pubHost = rawPub ? interpolateServiceReferences(rawPub, contract, environmentName) : undefined;
     const effectiveEndpoint = domainStr
       ? `${domainStr.split(",")[0]}:${service.port || (service.ports?.[0] ? service.ports[0].split(":")[0] : 5432)}`
       : (pubHost && service.role === "infra" ? `${pubHost}:${service.port || 5432}` : undefined);
@@ -590,15 +597,18 @@ export function createRuntimeCompose(
     else if (service.command) generated.command = service.command;
     // Глобальный env контракта: база для всех сервисов; сервисный env
     // перекрывает глобальный (сервис — более специфичная настройка).
-    const globalEnv = resolveGlobalEnv(contract.env, environmentName);
+    const globalEnv = resolveGlobalEnv(contract.env, environmentName, contract);
     const serviceResolvedEnv: Record<string, string> = {};
     if (service.env) {
       for (const [k, v] of Object.entries(service.env as Record<string, unknown>)) {
+        let rawV: string | undefined;
         if (typeof v === "string") {
-          serviceResolvedEnv[k] = v;
+          rawV = v;
         } else if (v && typeof v === "object") {
-          const resolvedV = (v as Record<string, string>)[environmentName];
-          if (resolvedV !== undefined) serviceResolvedEnv[k] = resolvedV;
+          rawV = (v as Record<string, string>)[environmentName];
+        }
+        if (rawV !== undefined) {
+          serviceResolvedEnv[k] = interpolateServiceReferences(rawV, contract, environmentName);
         }
       }
     }

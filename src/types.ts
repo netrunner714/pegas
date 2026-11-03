@@ -175,11 +175,12 @@ export interface DeployConfig {
 /** Имя профиля окружения (любая текстовая строка, заданная проектом). */
 export type EnvironmentProfile = string;
 /**
- * Значение глобального env-ключа: строго карта профилей проекта.
- * Все объявленные профили проекта обязаны присутствовать в карте.
- * Плоские скалярные строки запрещены во избежание скрытого протекания настроек между средами.
+ * Значение глобального env-ключа:
+ * - Карта профилей проекта (development, stage, production и т.д.)
+ * - Либо динамическая ссылка на сервис (${services.<name>.<property>})
+ * Плоские статические скаляры без ссылок запрещены во избежание скрытого протекания настроек между средами.
  */
-export type EnvProfileValue = Record<string, string>;
+export type EnvProfileValue = string | Record<string, string>;
 
 export interface PegasContract {
   /** JSON Schema URL; enables editor hints for pegas.json. */

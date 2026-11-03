@@ -49,22 +49,32 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
     add("runtime", 'Expected "host" or "docker".');
   }
 
-  // Глобальный env: строго карта профилей проекта.
+  // Глобальный env: строго карта профилей проекта либо динамическая ссылка на сервис (${services.<name>.<prop>}).
   // Имена профилей произвольны (любые строки, заданные проектом в доменах/конфиге).
-  // Плоские скаляры запрещены во избежание скрытого протекания настроек между средами.
+  // Плоские статические скаляры без ссылок запрещены во избежание скрытого протекания настроек между средами.
   if (contract.env !== undefined) {
     if (!contract.env || typeof contract.env !== "object" || Array.isArray(contract.env)) {
-      add("env", "Expected an object of env keys mapped to project profiles.");
+      add("env", "Expected an object of env keys mapped to project profiles or service references.");
     } else {
       const projectEnvs = listAvailableEnvironments(contract);
       for (const [key, val] of Object.entries(contract.env as Record<string, unknown>)) {
         const base = `env.${key}`;
         if (typeof val === "string") {
-          add(base, "Scalar values are not allowed in global env. Every key must be a profile map declaring values for each project environment.");
+          const refs = extractServiceReferences(val);
+          if (refs.length === 0) {
+            add(
+              base,
+              "Scalar values are not allowed in global env. Every key must be a profile map declaring values for each project environment, or a service reference like \"${services.<name>.url}\"."
+            );
+          } else {
+            for (const ref of refs) {
+              validateServiceRef(ref, base, contract, projectEnvs, add);
+            }
+          }
           continue;
         }
         if (!val || typeof val !== "object" || Array.isArray(val)) {
-          add(base, "Expected a profile map object with values for each project profile.");
+          add(base, "Expected a profile map object with values for each project profile, or a service reference.");
           continue;
         }
         const profiles = val as Record<string, unknown>;
@@ -76,6 +86,11 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
               add(base, `Profile map must include "${p}" — missing value for project profile.`);
             } else if (typeof profiles[p] !== "string") {
               add(`${base}.${p}`, "Expected a string value.");
+            } else {
+              const refs = extractServiceReferences(profiles[p] as string);
+              for (const ref of refs) {
+                validateServiceRef(ref, `${base}.${p}`, contract, [p], add);
+              }
             }
           }
           for (const p of declaredProfiles) {
@@ -90,6 +105,11 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
           for (const [p, v] of Object.entries(profiles)) {
             if (typeof v !== "string") {
               add(`${base}.${p}`, "Expected a string value.");
+            } else {
+              const refs = extractServiceReferences(v as string);
+              for (const ref of refs) {
+                validateServiceRef(ref, `${base}.${p}`, contract, [p], add);
+              }
             }
           }
         }
@@ -242,17 +262,26 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
       if (!service.env || typeof service.env !== "object" || Array.isArray(service.env)) {
         add(`${base}.env`, "Expected an object of non-secret environment variables.");
       } else {
+        const projectEnvs = listAvailableEnvironments(contract);
         for (const [key, val] of Object.entries(service.env as Record<string, unknown>)) {
           if (!key.trim()) {
             add(`${base}.env`, "Environment variable key must be non-empty.");
             continue;
           }
           if (typeof val === "string") {
-            // string value allowed (including empty string)
+            const refs = extractServiceReferences(val);
+            for (const ref of refs) {
+              validateServiceRef(ref, `${base}.env.${key}`, contract, projectEnvs, add);
+            }
           } else if (val && typeof val === "object" && !Array.isArray(val)) {
             for (const [p, v] of Object.entries(val as Record<string, unknown>)) {
               if (typeof v !== "string") {
                 add(`${base}.env.${key}.${p}`, "Expected a string value.");
+              } else {
+                const refs = extractServiceReferences(v as string);
+                for (const ref of refs) {
+                  validateServiceRef(ref, `${base}.env.${key}.${p}`, contract, [p], add);
+                }
               }
             }
           } else {
@@ -456,6 +485,162 @@ export function listAvailableEnvironments(contract: PegasContract): string[] {
     }
   }
   return Array.from(envs);
+}
+
+export const SERVICE_REF_REGEX = /\$\{services\.([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_]+)\}/g;
+export const SUPPORTED_SERVICE_REF_PROPERTIES = new Set([
+  "url",
+  "origin",
+  "wsUrl",
+  "host",
+  "domain",
+  "port",
+  "internalUrl",
+]);
+
+export interface ServiceReferenceMatch {
+  raw: string;
+  service: string;
+  property: string;
+}
+
+export function extractServiceReferences(val: string): ServiceReferenceMatch[] {
+  if (!val || typeof val !== "string") return [];
+  const matches: ServiceReferenceMatch[] = [];
+  const regex = new RegExp(SERVICE_REF_REGEX);
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(val)) !== null) {
+    matches.push({
+      raw: match[0],
+      service: match[1],
+      property: match[2],
+    });
+  }
+  return matches;
+}
+
+function validateServiceRef(
+  ref: ServiceReferenceMatch,
+  fieldPath: string,
+  contract: PegasContract,
+  envs: string[],
+  add: (path: string, message: string) => void
+): void {
+  const svc = contract.services?.[ref.service];
+  if (!svc) {
+    const defined = Object.keys(contract.services || {});
+    add(
+      fieldPath,
+      `Unknown service "${ref.service}" in reference "${ref.raw}". Defined services: ${defined.length > 0 ? defined.join(", ") : "none"}.`
+    );
+    return;
+  }
+
+  if (!SUPPORTED_SERVICE_REF_PROPERTIES.has(ref.property)) {
+    add(
+      fieldPath,
+      `Unknown property "${ref.property}" in reference "${ref.raw}". Supported properties: ${Array.from(SUPPORTED_SERVICE_REF_PROPERTIES).join(", ")}.`
+    );
+    return;
+  }
+
+  if (ref.property === "port" || ref.property === "internalUrl") {
+    if (!svc.port) {
+      add(fieldPath, `Service "${ref.service}" referenced in "${ref.raw}" has no port defined.`);
+    }
+  }
+
+  if (["url", "origin", "wsUrl", "host", "domain"].includes(ref.property)) {
+    if (envs && envs.length > 0) {
+      for (const env of envs) {
+        const domains = getEnvironmentDomains(svc, env);
+        if (!domains || domains.length === 0) {
+          add(
+            fieldPath,
+            `Service "${ref.service}" referenced in "${ref.raw}" has no domains defined for environment "${env}".`
+          );
+        }
+      }
+    }
+  }
+}
+
+export function resolveServiceProperty(
+  serviceName: string,
+  property: string,
+  contract: PegasContract,
+  environmentName: string
+): string {
+  const service = contract.services?.[serviceName];
+  if (!service) {
+    throw new Error(`Referenced service "${serviceName}" does not exist in contract.services.`);
+  }
+
+  const isDev = environmentName === "development" || environmentName === "dev";
+
+  switch (property) {
+    case "url":
+    case "origin": {
+      const domains = getEnvironmentDomains(service, environmentName);
+      if (!domains || domains.length === 0) {
+        throw new Error(
+          `Service "${serviceName}" has no domains defined for environment "${environmentName}".`
+        );
+      }
+      const domain = normalizeDomain(domains[0]);
+      const scheme = isDev ? "http" : "https";
+      return `${scheme}://${domain}`;
+    }
+    case "wsUrl": {
+      const domains = getEnvironmentDomains(service, environmentName);
+      if (!domains || domains.length === 0) {
+        throw new Error(
+          `Service "${serviceName}" has no domains defined for environment "${environmentName}".`
+        );
+      }
+      const domain = normalizeDomain(domains[0]);
+      const scheme = isDev ? "ws" : "wss";
+      return `${scheme}://${domain}`;
+    }
+    case "host":
+    case "domain": {
+      const domains = getEnvironmentDomains(service, environmentName);
+      if (!domains || domains.length === 0) {
+        throw new Error(
+          `Service "${serviceName}" has no domains defined for environment "${environmentName}".`
+        );
+      }
+      return normalizeDomain(domains[0]);
+    }
+    case "port": {
+      if (!service.port) {
+        throw new Error(`Service "${serviceName}" has no port defined.`);
+      }
+      return String(service.port);
+    }
+    case "internalUrl": {
+      const port = service.port || 80;
+      return `http://${serviceName}:${port}`;
+    }
+    default:
+      throw new Error(
+        `Unknown service property "${property}" in reference. Supported properties: ${Array.from(SUPPORTED_SERVICE_REF_PROPERTIES).join(", ")}.`
+      );
+  }
+}
+
+export function interpolateServiceReferences(
+  template: string,
+  contract: PegasContract,
+  environmentName: string
+): string {
+  if (!template || typeof template !== "string") return template;
+  return template.replace(
+    SERVICE_REF_REGEX,
+    (_, serviceName, property) => {
+      return resolveServiceProperty(serviceName, property, contract, environmentName);
+    }
+  );
 }
 
 /**
