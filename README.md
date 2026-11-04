@@ -86,12 +86,14 @@ bunx @netrunner714/pegas init
     "production":  { "httpPort": 80, "httpsPort": 443, "acmeEmail": "admin@example.com" }
   },
   "services": {
+    // development: api — host-процесс (bun run dev), stage/production — docker
     "api": {
       "runtime":  { "development": { "driver": "bun" }, "stage": { "driver": "docker" }, "production": { "driver": "docker" } },
       "build":    { "development": null, "stage": { "context": "." }, "production": { "context": "." } },
       "port":     { "development": 3000, "stage": 3000, "production": 3000 },
       "domains":  { "development": ["api.my-app.localhost"], "stage": ["api-stage.example.com"], "production": ["api.example.com"] },
       "cors":     { "development": true, "stage": true, "production": true },
+      "env":      { "DATABASE_HOST": { "development": "localhost", "stage": "pegas://postgres", "production": "pegas://postgres" } },
       "secrets":  ["DATABASE_URL"]
     },
     "postgres": {
@@ -104,6 +106,8 @@ bunx @netrunner714/pegas init
   }
 }
 ```
+
+`scenarios` — открытый список: имён может быть сколько угодно, имена произвольны (`^[a-z0-9-]+$`); три выше — конвенция, не ограничение. Каждая сценарная карта (runtime, port, domains…) обязана содержать ровно эти ключи.
 
 Проверка: `pegas check` — рид-онли аудит (контракт, паритет секретов, git-гигиена, свежесть артефактов).
 
