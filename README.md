@@ -79,25 +79,26 @@ bunx @netrunner714/pegas init
 {
   "$schema": "https://netrunner714.ru/schemas/pegas.json",
   "projectName": "my-app",
-  "scenarios": ["development", "production"],
+  "scenarios": ["development", "stage", "production"],
   "gateway": {
     "development": { "httpPort": 80, "httpsPort": 443 },
-    "production": { "httpPort": 80, "httpsPort": 443, "acmeEmail": "admin@example.com" }
+    "stage":       { "httpPort": 80, "httpsPort": 443, "acmeEmail": "admin@example.com" },
+    "production":  { "httpPort": 80, "httpsPort": 443, "acmeEmail": "admin@example.com" }
   },
   "services": {
     "api": {
-      "runtime":  { "development": { "driver": "docker" }, "production": { "driver": "docker" } },
-      "build":    { "development": { "context": "." }, "production": { "context": "." } },
-      "port":     { "development": 3000, "production": 3000 },
-      "domains":  { "development": ["api.my-app.localhost"], "production": ["api.example.com"] },
-      "cors":     { "development": true, "production": true },
+      "runtime":  { "development": { "driver": "bun" }, "stage": { "driver": "docker" }, "production": { "driver": "docker" } },
+      "build":    { "development": null, "stage": { "context": "." }, "production": { "context": "." } },
+      "port":     { "development": 3000, "stage": 3000, "production": 3000 },
+      "domains":  { "development": ["api.my-app.localhost"], "stage": ["api-stage.example.com"], "production": ["api.example.com"] },
+      "cors":     { "development": true, "stage": true, "production": true },
       "secrets":  ["DATABASE_URL"]
     },
     "postgres": {
-      "runtime": { "development": { "driver": "docker" }, "production": { "driver": "docker" } },
-      "image":   { "development": "postgres:18-alpine", "production": "postgres:18-alpine" },
-      "port":     { "development": 5432, "production": 5432 },
-      "volumes":  { "development": ["pgdata:/var/lib/postgresql/data"], "production": ["pgdata:/var/lib/postgresql/data"] },
+      "runtime": { "development": { "driver": "docker" }, "stage": { "driver": "docker" }, "production": { "driver": "docker" } },
+      "image":   { "development": "postgres:18-alpine", "stage": "postgres:18-alpine", "production": "postgres:18-alpine" },
+      "port":     { "development": 5432, "stage": 5432, "production": 5432 },
+      "volumes":  { "development": ["pgdata:/var/lib/postgresql/data"], "stage": ["pgdata:/var/lib/postgresql/data"], "production": ["pgdata:/var/lib/postgresql/data"] },
       "secrets":  ["DATABASE_URL"]
     }
   }
