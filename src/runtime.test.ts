@@ -38,16 +38,23 @@ describe("runtime compose execution", () => {
     fs.rmSync(projectRoot, { recursive: true, force: true });
   });
 
-  const contract: PegasContract = {
-    runtime: "docker",
+  const contract = {
+    projectName: "rt",
+    scenarios: ["development", "production"],
+    gateway: { development: { httpPort: 80, httpsPort: 443 }, production: { httpPort: 80, httpsPort: 443, acmeEmail: "a@b.co" } },
     services: {
-      web: { role: "app", port: 3000, build: { context: ".", dockerfile: "Dockerfile" }, domains: {} },
+      web: {
+        runtime: { development: { driver: "docker" }, production: { driver: "docker" } },
+        build: { development: { context: "." }, production: { context: "." } },
+        port: { development: 3000, production: 3000 },
+        domains: { development: [], production: [] },
+      },
     },
-  };
+  } as unknown as PegasContract;
 
   it("runs a non-up compose operation without touching the shared network", async () => {
     fs.rmSync(logFile, { force: true });
-    await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["ps", "services"], { ...process.env, PEGAS_ENV: "dev" });
+    await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["ps", "services"], { ...process.env, PEGAS_ENV: "development" });
     const calls = dockerCalls();
     expect(calls.some((c) => c.startsWith("compose") && c.includes("rt-abc123-development"))).toBe(true);
     expect(calls.some((c) => c.startsWith("network"))).toBe(false);
@@ -81,10 +88,10 @@ describe("runtime compose execution", () => {
 
   it("removes listed containers with the environment label filter", async () => {
     fs.rmSync(logFile, { force: true });
-    await removeProjectContainers("rt-abc123", "prod");
+    await removeProjectContainers("rt-abc123", "production");
     const calls = dockerCalls();
     expect(calls.some((c) => c.includes("label=pegas.project=rt-abc123"))).toBe(true);
-    expect(calls.some((c) => c.includes("label=pegas.environment=production"))).toBe(true);
+    expect(calls.some((c) => c.includes("label=pegas.scenario=production"))).toBe(true);
     expect(calls.some((c) => c.startsWith("rm -f"))).toBe(true);
   });
 

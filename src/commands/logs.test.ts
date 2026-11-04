@@ -112,22 +112,6 @@ describe("pegas logs", () => {
     expect(stderr).toContain("Failed to parse 'pegas.json'");
   });
 
-  it("rejects non-docker runtime projects", async () => {
-    fs.writeFileSync(
-      path.join(projectRoot, "pegas.json"),
-      JSON.stringify({ projectName: "hostapp", runtime: "host", services: {} })
-    );
-    let stderr = "";
-    const origErr = console.error;
-    console.error = (...args) => { stderr = args.join(" "); };
-    try {
-      await handleLogs({ cwd: projectRoot, noExit: true });
-    } finally {
-      console.error = origErr;
-    }
-    expect(stderr).toContain("'pegas logs' requires a Docker runtime project");
-  });
-
   it("validates requested service name against contract.services", async () => {
     let stderr = "";
     const origErr = console.error;

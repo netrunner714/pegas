@@ -46,15 +46,19 @@ EMPTY_VAL=
       expect(res2.source).toBe("example");
       expect(res2.secrets).toEqual(["API_KEY", "SECRET"]);
 
-      // 3. Contract secrets takes precedence
-      const contract: PegasContract = {
-        runtime: "docker",
-        secrets: ["DB_URL", "REDIS_URL"],
-        services: { web: { port: 80 } },
-      };
+      // 3. Contract secrets (v3: services.<name>.secrets) takes precedence
+      const contract = {
+        projectName: "p",
+        scenarios: ["development"],
+        gateway: { development: { httpPort: 80, httpsPort: 443 } },
+        services: {
+          web: { runtime: { development: { driver: "docker" } }, image: { development: "x" }, secrets: ["DB_URL", "REDIS_URL"] },
+          api: { runtime: { development: { driver: "docker" } }, image: { development: "x" }, secrets: ["API_TOKEN"] },
+        },
+      } as unknown as PegasContract;
       const res3 = await getExpectedSecrets(tmp, contract);
       expect(res3.source).toBe("contract");
-      expect(res3.secrets).toEqual(["DB_URL", "REDIS_URL"]);
+      expect(res3.secrets.sort()).toEqual(["API_TOKEN", "DB_URL", "REDIS_URL"]);
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
@@ -63,11 +67,13 @@ EMPTY_VAL=
   it("syncEnvExample creates and updates .env.example with missing contract keys", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-sync-test-"));
     try {
-      const contract: PegasContract = {
-        runtime: "docker",
-        secrets: ["KEY_A", "KEY_B"],
-        services: { web: { port: 80 } },
-      };
+      const mkContract = (keys: string[]) => ({
+        projectName: "p",
+        scenarios: ["development"],
+        gateway: { development: { httpPort: 80, httpsPort: 443 } },
+        services: { web: { runtime: { development: { driver: "docker" } }, image: { development: "x" }, secrets: keys } },
+      }) as unknown as PegasContract;
+      const contract = mkContract(["KEY_A", "KEY_B"]);
 
       // Initial create
       const sync1 = await syncEnvExample(tmp, contract);
@@ -83,10 +89,7 @@ EMPTY_VAL=
       expect(sync2.updated).toBe(false);
 
       // Add one more key
-      const contract2: PegasContract = {
-        ...contract,
-        secrets: ["KEY_A", "KEY_B", "KEY_C"],
-      };
+      const contract2 = mkContract(["KEY_A", "KEY_B", "KEY_C"]);
       const sync3 = await syncEnvExample(tmp, contract2);
       expect(sync3.updated).toBe(true);
       expect(sync3.added).toEqual(["KEY_C"]);
@@ -110,11 +113,12 @@ EMPTY_VAL=
   it("verifySecrets detects missing, empty, and extra secrets and security issues", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-ver-test-"));
     try {
-      const contract: PegasContract = {
-        runtime: "docker",
-        secrets: ["DB_URL", "JWT_SECRET", "EMPTY_KEY"],
-        services: { web: { port: 80 } },
-      };
+      const contract = {
+        projectName: "p",
+        scenarios: ["development"],
+        gateway: { development: { httpPort: 80, httpsPort: 443 } },
+        services: { web: { runtime: { development: { driver: "docker" } }, image: { development: "x" }, secrets: ["DB_URL", "JWT_SECRET", "EMPTY_KEY"] } },
+      } as unknown as PegasContract;
 
       // Case 1: .env missing completely
       const res1 = await verifySecrets(tmp, contract);
@@ -211,11 +215,12 @@ DATABASE_URL=postgres://localhost/db
   it("verifySecrets flags commented-out variable assignments in .env and .env.example", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-commented-test-"));
     try {
-      const contract: PegasContract = {
-        runtime: "docker",
-        secrets: ["DATABASE_URL"],
-        services: { web: { port: 80 } },
-      };
+      const contract = {
+        projectName: "p",
+        scenarios: ["development"],
+        gateway: { development: { httpPort: 80, httpsPort: 443 } },
+        services: { web: { runtime: { development: { driver: "docker" } }, image: { development: "x" }, secrets: ["DATABASE_URL"] } },
+      } as unknown as PegasContract;
 
       await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n.pegas/\n", "utf-8");
       await fs.writeFile(path.join(tmp, ".env.example"), "DATABASE_URL=\n# OLD_VAR=123\n", "utf-8");

@@ -8,6 +8,7 @@ import {
   getCaddyHomeEnv,
   buildProvisionCaddyfile,
   provisionCa,
+  installCa,
   detectWsl,
   canBindLowPorts,
   buildInstallTrustCommands,
@@ -394,6 +395,64 @@ describe("pegas ca (fixes)", () => {
     try {
       expect(await isCaTrusted("linux", paths, { wsl: true })).toBe(true);
       expect(capturedTimeout).toBeGreaterThanOrEqual(30_000);
+    } finally {
+      spy.mockRestore();
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("installCa: синк экспорта с PKI живого pegas-gateway", () => {
+  it("docker-exec root отличается от экспорта → экспорт перезаписан с контейнера", async () => {
+    const home = await tmpHome();
+    const paths = getCaPaths(home);
+    const fakeCaddy = path.join(home, "caddy");
+    const GATEWAY_ROOT = "-----BEGIN CERTIFICATE-----\nGATEWAYROOT\n-----END CERTIFICATE-----\n";
+    let callCount = 0;
+    const spy = spyOn(child_process, "spawnSync").mockImplementation(((cmd: string, args: string[]) => {
+      // caddy validate: материализуем host-PKI (отличный от gateway)
+      if (cmd === fakeCaddy) {
+        callCount++;
+        require("node:fs").mkdirSync(path.dirname(paths.caddyRootCert), { recursive: true });
+        require("node:fs").writeFileSync(paths.caddyRootCert, "HOST_ROOT_CERT");
+        return { status: 0, stdout: "", stderr: "" };
+      }
+      // docker exec pegas-gateway cat .../root.crt
+      if (cmd === "docker" && args.includes("pegas-gateway")) {
+        return { status: 0, stdout: Buffer.from(GATEWAY_ROOT, "utf-8"), stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    }) as any);
+    try {
+      const ok = await installCa({ paths, caddyPath: fakeCaddy, skipTrust: true });
+      expect(ok).toBe(true);
+      const exported = await fs.readFile(paths.caCertPath, "utf-8");
+      expect(exported).toBe(GATEWAY_ROOT); // контейнер — источник истины
+    } finally {
+      spy.mockRestore();
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("docker недоступен/контейнера нет → экспорт не трогается (PKI хоста)", async () => {
+    const home = await tmpHome();
+    const paths = getCaPaths(home);
+    const fakeCaddy = path.join(home, "caddy");
+    const spy = spyOn(child_process, "spawnSync").mockImplementation(((cmd: string, args: string[]) => {
+      if (cmd === fakeCaddy) {
+        require("node:fs").mkdirSync(path.dirname(paths.caddyRootCert), { recursive: true });
+        require("node:fs").writeFileSync(paths.caddyRootCert, "HOST_ROOT_CERT");
+        return { status: 0, stdout: "", stderr: "" };
+      }
+      if (cmd === "docker") {
+        return { status: 1, stdout: Buffer.alloc(0), stderr: "no container" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    }) as any);
+    try {
+      await installCa({ paths, caddyPath: fakeCaddy, skipTrust: true });
+      const exported = await fs.readFile(paths.caCertPath, "utf-8");
+      expect(exported).toBe("HOST_ROOT_CERT");
     } finally {
       spy.mockRestore();
       await fs.rm(home, { recursive: true, force: true });

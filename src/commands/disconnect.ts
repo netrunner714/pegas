@@ -5,7 +5,7 @@ import { CONTRACT_FILENAME } from "../contract.js";
 import { stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
 
-export interface UnlinkOptions {
+export interface DisconnectOptions {
   cwd?: string;
   gatewayDir?: string;
   json?: boolean;
@@ -14,7 +14,7 @@ export interface UnlinkOptions {
   skipReload?: boolean;
 }
 
-export async function handleUnlink(options: UnlinkOptions = {}): Promise<void> {
+export async function handleDisconnect(options: DisconnectOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
@@ -39,6 +39,15 @@ export async function handleUnlink(options: UnlinkOptions = {}): Promise<void> {
     removed = true;
   } catch {}
 
+  // Host-контекст SDK больше не актуален: сессия завершена.
+  if (!options.dryRun) {
+    try {
+      const ctxPath = path.join(projectRoot, ".pegas", "context.json");
+      await fs.access(ctxPath);
+      await fs.unlink(ctxPath);
+    } catch {}
+  }
+
   let gatewayStopped = false;
   if (!options.dryRun) {
     if (removed && !options.skipReload) {
@@ -54,7 +63,7 @@ export async function handleUnlink(options: UnlinkOptions = {}): Promise<void> {
   if (isJson) {
     console.log(
       JSON.stringify({
-        status: "unlinked",
+        status: "disconnected",
         project: projectName,
         removedRouteFile: removed ? routeFilePath : null,
         gatewayStopped,
@@ -62,9 +71,9 @@ export async function handleUnlink(options: UnlinkOptions = {}): Promise<void> {
     );
   } else {
     if (removed) {
-      console.log(`\n🔌 \x1b[1;33mProject '${projectName}' unlinked from Pegas Gateway.\x1b[0m`);
+      console.log(`\n🔌 \x1b[1;33mProject '${projectName}' disconnected from Pegas Gateway.\x1b[0m`);
     } else {
-      console.log(`\nℹ️ Project '${projectName}' was not linked.`);
+      console.log(`\nℹ️ Project '${projectName}' was not connected.`);
     }
     if (gatewayStopped) {
       console.log(`   🛑 Shared Gateway stopped: no other projects are using it.\n`);

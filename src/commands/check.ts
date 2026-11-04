@@ -1,17 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { validatePegasContract, type ContractValidationIssue } from "../contract.js";
-import {
-  verifySecrets,
-  formatSecretsDiagnostic,
-  syncEnvExample,
-  isIgnoredByGit,
-  findCommentedEnvAssignments,
-  stripCommentedEnvAssignments,
-} from "../secrets.js";
-import { setupGitignore } from "./init.js";
+import { verifySecrets, formatSecretsDiagnostic, isIgnoredByGit } from "../secrets.js";
 import type { CheckOptions, PegasContract } from "../types.js";
 
+/**
+ * pegas check v3 — рид-онли валидатор (RFC_UX_V3.md, решение №4):
+ * контракт + secrets-паритет + git-гигиена. Ничего не пишет на диск.
+ */
 export interface RepoAuditResult {
   valid: boolean;
   hasErrors: boolean;
@@ -22,57 +18,22 @@ export interface RepoAuditResult {
   contract?: PegasContract;
   secretsCheck?: import("../secrets.js").SecretsCheckResult;
   gitignoreIssues: string[];
-  legacyFiles: { path: string; reason: string; severity: "warn" | "info" }[];
-  fixesApplied: string[];
+  /** Свежесть AGENTS.md-блока и docs/pegas.md против канона установленного пегаса (детектор, не мутатор). */
+  artifactIssues: string[];
   errors: string[];
   warnings: string[];
 }
 
-const LEGACY_PATTERNS: { pattern: RegExp; reason: string; severity: "warn" | "info" }[] = [
-  {
-    pattern: /^(docker-compose(\.[a-zA-Z0-9_-]+)?\.ya?ml|compose(\.[a-zA-Z0-9_-]+)?\.ya?ml)$/,
-    reason: "Redundant Compose file. Pegas Docker runtime orchestrates containers directly from pegas.json.",
-    severity: "warn",
-  },
-  {
-    pattern: /^Caddyfile(\.[a-zA-Z0-9_-]+)?$/,
-    reason: "Redundant in-project Caddyfile. Pegas Gateway routes domains and path prefixes (routes) automatically.",
-    severity: "warn",
-  },
-  {
-    pattern: /^nginx(\.[a-zA-Z0-9_-]+)?\.conf$/,
-    reason: "Redundant in-project Nginx config. Pegas Gateway handles reverse proxying and SSL at L7.",
-    severity: "warn",
-  },
-  {
-    pattern: /^\.env\.(production|prod|stage|staging|development|dev|test|local)$/,
-    reason: "Multi-environment .env proliferation. Put non-secret configs into pegas.json env profiles, keep secrets in a single root .env.",
-    severity: "warn",
-  },
-];
-
 export async function auditRepository(
   cwd = process.cwd(),
-  options?: { envFile?: string; fix?: boolean }
+  options?: { envFile?: string }
 ): Promise<RepoAuditResult> {
   const projectRoot = path.resolve(cwd);
   const errors: string[] = [];
   const warnings: string[] = [];
   const gitignoreIssues: string[] = [];
-  const legacyFiles: { path: string; reason: string; severity: "warn" | "info" }[] = [];
-  const fixesApplied: string[] = [];
 
-  // Automated repair mode (--fix)
-  if (options?.fix) {
-    if (!isIgnoredByGit(projectRoot, ".pegas") || !isIgnoredByGit(projectRoot, ".env")) {
-      const gitignoreFix = await setupGitignore(projectRoot);
-      if (gitignoreFix) {
-        fixesApplied.push(gitignoreFix);
-      }
-    }
-  }
-
-  // 1. Contract existence and validation
+  // 1. Контракт: существование + валидация v3
   const contractPath = path.join(projectRoot, "pegas.json");
   let contractExists = false;
   let contract: PegasContract | undefined;
@@ -86,133 +47,110 @@ export async function auditRepository(
       contract = parsed;
       contractIssues = validatePegasContract(parsed);
       for (const issue of contractIssues) {
-        errors.push(`Contract issue at "${issue.path}": ${issue.message}`);
+        errors.push(`Контракт, "${issue.path}": ${issue.message}`);
       }
     } catch (parseErr: any) {
-      errors.push(`Failed to parse pegas.json: ${parseErr.message}`);
+      errors.push(`Не удалось разобрать pegas.json: ${parseErr.message}`);
     }
   } catch {
     contractExists = false;
-    errors.push("pegas.json contract file does not exist. Run 'pegas init' to create one.");
+    errors.push(
+      "pegas.json не найден. Напишите контракт v3 по схеме https://netrunner714.ru/schemas/pegas.json (контекст для агента: pegas llms)."
+    );
   }
 
-  // If fix is requested and contract exists, sync .env.example and create starter .env if missing
-  if (options?.fix && contract) {
-    if (contract.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
-      const syncRes = await syncEnvExample(projectRoot, contract);
-      if (syncRes.updated) {
-        fixesApplied.push(`Синхронизирован .env.example с contract.secrets (${syncRes.added.join(", ")})`);
-      }
-    }
-
-    const envFileName = options?.envFile || ".env";
-    const envPath = path.join(projectRoot, envFileName);
-    const examplePath = path.join(projectRoot, ".env.example");
-    let hasEnv = false;
-    try {
-      await fs.access(envPath);
-      hasEnv = true;
-    } catch {}
-
-    if (!hasEnv) {
-      let hasExample = false;
-      try {
-        await fs.access(examplePath);
-        hasExample = true;
-      } catch {}
-
-      if (hasExample) {
-        await fs.copyFile(examplePath, envPath);
-        fixesApplied.push(`Создан стартовый ${envFileName} из .env.example`);
-      } else if (contract.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
-        const starter = "# Local environment secrets (not committed to git)\n" +
-          contract.secrets.map((s) => `${s}=\n`).join("");
-        await fs.writeFile(envPath, starter, "utf-8");
-        fixesApplied.push(`Создан стартовый ${envFileName}`);
-      }
-    }
-
-    if (contract.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
-      const syncRes = await syncEnvExample(projectRoot, contract);
-      if (syncRes.updated) {
-        fixesApplied.push("Синхронизирован .env.example с contract.secrets");
-      }
-    }
-
-    try {
-      const rawEnv = await fs.readFile(envPath, "utf-8");
-      const commented = findCommentedEnvAssignments(rawEnv);
-      if (commented.length > 0) {
-        const cleaned = stripCommentedEnvAssignments(rawEnv);
-        await fs.writeFile(envPath, cleaned, "utf-8");
-        fixesApplied.push(`Удалены закомментированные переменные из ${envFileName} (${commented.map((c) => c.key).join(", ")})`);
-      }
-    } catch {}
-  }
-
-  // 2. Secrets parity and gitignore protection
+  // 2. Secrets-паритет: services.*.secrets ↔ .env (если существует)
   const secretsCheck = await verifySecrets(projectRoot, contract, { envFile: options?.envFile });
   if (!secretsCheck.valid) {
     errors.push(...secretsCheck.errors);
   }
   warnings.push(...secretsCheck.warnings);
 
-  // Check if .pegas is gitignored
+  // 3. Git-гигиена: .pegas и env-маска в .gitignore (.env* + !.env.example)
   if (!isIgnoredByGit(projectRoot, ".pegas")) {
-    gitignoreIssues.push(".pegas directory should be added to .gitignore (internal runtime cache).");
-    warnings.push(".pegas directory is not in .gitignore.");
+    gitignoreIssues.push("Каталог .pegas должен быть в .gitignore (рантайм-каталог проекта).");
+    warnings.push(".pegas отсутствует в .gitignore.");
   }
-
-  // Check if contract.secrets has sync with .env.example
-  if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
-    const examplePath = path.join(projectRoot, ".env.example");
-    try {
-      await fs.access(examplePath);
-    } catch {
-      warnings.push("Missing .env.example schema file mirroring contract.secrets. Run 'pegas check --fix' or create it.");
-    }
+  if (!isIgnoredByGit(projectRoot, ".env")) {
+    gitignoreIssues.push("Файл .env должен быть в .gitignore (секреты не коммитятся).");
+    warnings.push(".env отсутствует в .gitignore.");
   }
-
-  // 3. Scan root and immediate subdirs for legacy clutter
+  // Шаблон секретов обязан коммититься: маска .env* без !.env.example прячет его — баг.
   try {
-    const rootEntries = await fs.readdir(projectRoot, { withFileTypes: true });
-    for (const entry of rootEntries) {
-      if (entry.isFile()) {
-        for (const rule of LEGACY_PATTERNS) {
-          if (rule.pattern.test(entry.name)) {
-            legacyFiles.push({
-              path: entry.name,
-              reason: rule.reason,
-              severity: rule.severity,
-            });
-            break;
-          }
-        }
-      } else if (entry.isDirectory() && (entry.name === "apps" || entry.name === "packages")) {
-        // Monorepo subproject scan for rogue .env files
-        const subDirPath = path.join(projectRoot, entry.name);
-        try {
-          const subDirs = await fs.readdir(subDirPath, { withFileTypes: true });
-          for (const sub of subDirs) {
-            if (sub.isDirectory()) {
-              const subEnv = path.join(entry.name, sub.name, ".env");
-              try {
-                await fs.access(path.join(projectRoot, subEnv));
-                legacyFiles.push({
-                  path: subEnv,
-                  reason: "Subproject .env file violates single-root .env doctrine. Move secrets to root .env.",
-                  severity: "warn",
-                });
-              } catch {}
-            }
-          }
-        } catch {}
-      }
+    await fs.access(path.join(projectRoot, ".env.example"));
+    if (isIgnoredByGit(projectRoot, ".env.example")) {
+      gitignoreIssues.push("Файл .env.example игнорируется git (шаблон секретов обязан быть в git): добавьте !.env.example после .env*.");
+      warnings.push(".env.example исключён из git (!.env.example отсутствует).");
     }
   } catch {}
+  // Легаси-конфиги шлюза в репо: Caddyfile/Caddyfile.* — маршруты обязан описывать
+  // контракт (domains), файлы обратного прокси в репо — рассинхрон с pegas.json.
+  // НО: Caddyfile, который Dockerfile копирует внутрь образа (COPY/ADD), — контейнерная
+  // статика (file_server), а не конфиг шлюза: не алертим.
+  {
+    const dockerReferenced = new Set<string>();
+    const skip = new Set(["node_modules", ".pegas", ".git", "dist", "build", ".next", ".cache"]);
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > 3) return;
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        if (e.isDirectory()) {
+          if (!skip.has(e.name)) await walk(path.join(dir, e.name), depth + 1);
+        } else if (/^Caddyfile(\..+)?$/i.test(e.name) || e.name === "caddy.json") {
+          const rel = path.relative(projectRoot, path.join(dir, e.name)).replace(/\\/g, "/");
+          foundCaddy.push(rel);
+        } else if (/^Dockerfile(\..+)?$/i.test(e.name)) {
+          // COPY/ADD <src>, ссылающийся на Caddyfile: файл уходит внутрь образа
+          try {
+            const text = await fs.readFile(path.join(dir, e.name), "utf-8");
+            for (const line of text.split("\n")) {
+              const m = line.match(/^\s*(COPY|ADD)\s+(\S+)/i);
+              if (m && /Caddyfile/i.test(m[2])) {
+                dockerReferenced.add(path.join(path.relative(projectRoot, dir), m[2]).replace(/\\/g, "/"));
+              }
+            }
+          } catch {}
+        }
+      }
+    };
+    const foundCaddy: string[] = [];
+    await walk(projectRoot, 0);
+    const legacy = foundCaddy.filter((f) => {
+      if (dockerReferenced.has(f)) return false;
+      const base = f.split("/").pop() ?? f;
+      for (const ref of dockerReferenced) {
+        const refBase = ref.split("/").pop() ?? ref;
+        if (refBase === base) return false;
+      }
+      return true;
+    });
+    if (legacy.length > 0) {
+      const list = legacy.join(", ");
+      gitignoreIssues.push(
+        "Caddyfile в репо: " + list + " — маршруты объявляются в pegas.json (services.<name>.domains); конфиг обратного прокси в репо рассинхронизируется с контрактом. Удалите файл или перенесите правила в контракт."
+      );
+      warnings.push("Легаси-конфиг шлюза в репо: " + list + " (объявите домены через pegas.json).");
+    }
+  }
+  // 4. Свежесть артефактов: AGENTS.md-блок + docs/pegas.md против канона установленного CLI
+  let artifactIssues: string[] = [];
+  if (contract && typeof contract.projectName === "string") {
+    try {
+      const { auditProjectArtifacts } = await import("./init.js");
+      artifactIssues = await auditProjectArtifacts(projectRoot, contract.projectName);
+      warnings.push(...artifactIssues);
+    } catch {
+      // init.js недоступен — аудит артефактов пропускается тихо (не блокирует чек)
+    }
+  }
 
   const hasErrors = errors.length > 0;
-  const hasWarnings = warnings.length > 0 || legacyFiles.length > 0;
+  const hasWarnings = warnings.length > 0;
   const valid = !hasErrors;
 
   return {
@@ -225,8 +163,7 @@ export async function auditRepository(
     contract,
     secretsCheck,
     gitignoreIssues,
-    legacyFiles,
-    fixesApplied,
+    artifactIssues,
     errors,
     warnings,
   };
@@ -236,7 +173,7 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
   const cwd = options.cwd || process.cwd();
   const isJson = options.json ?? false;
 
-  const result = await auditRepository(cwd, { fix: options.fix });
+  const result = await auditRepository(cwd);
 
   if (isJson) {
     console.log(JSON.stringify(result, null, 2));
@@ -246,61 +183,49 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
     return;
   }
 
-  console.log(`\n🔍 Pegas Repository Audit — ${result.projectRoot}\n`);
+  console.log(`\n🔍 Pegas v3 Audit — ${result.projectRoot}\n`);
 
-  // Fixes section
-  if (result.fixesApplied.length > 0) {
-    console.log(`  🔧 Fixes Applied (${result.fixesApplied.length}):`);
-    for (const fix of result.fixesApplied) {
-      console.log(`     ✔ ${fix}`);
-    }
-    console.log("");
-  }
-
-  // 1. Contract section
+  // 1. Контракт
   if (result.contractExists && result.contractIssues.length === 0) {
-    console.log(`  ✔ Contract: pegas.json is valid (${Object.keys(result.contract?.services || {}).length} service(s) declared)`);
+    const svcCount = Object.keys(result.contract?.services || {}).length;
+    console.log(`  ✔ Контракт: pegas.json валиден (${svcCount} сервис(ов), сценарии: ${result.contract?.scenarios.join(", ")})`);
   } else if (!result.contractExists) {
-    console.log(`  ❌ Contract: pegas.json is MISSING`);
+    console.log(`  ❌ Контракт: pegas.json отсутствует`);
   } else {
-    console.log(`  ❌ Contract: pegas.json has ${result.contractIssues.length} issue(s):`);
+    console.log(`  ❌ Контракт: ${result.contractIssues.length} проблем(ы):`);
     for (const issue of result.contractIssues) {
       console.log(`     - [${issue.path}] ${issue.message}`);
     }
   }
 
-  // 2. Secrets section
+  // 2. Секреты
   if (result.secretsCheck) {
     const diag = formatSecretsDiagnostic(result.secretsCheck);
     console.log(`\n  ${diag.split("\n").join("\n  ")}`);
   }
 
-  // 3. Git protection section
+  // 3. Git-гигиена
   if (result.gitignoreIssues.length > 0) {
-    console.log(`\n  ⚠️  Git Protection:`);
+    console.log(`\n  ⚠️  Git-гигиена:`);
     for (const gi of result.gitignoreIssues) {
       console.log(`     - ${gi}`);
     }
   }
-
-  // 4. Legacy Clutter section
-  if (result.legacyFiles.length > 0) {
-    console.log(`\n  🧹 Legacy Clutter / Migration Opportunities (${result.legacyFiles.length} file(s)):`);
-    for (const file of result.legacyFiles) {
-      const icon = file.severity === "warn" ? "⚠️ " : "ℹ️ ";
-      console.log(`     ${icon} ${file.path}: ${file.reason}`);
+  // 4. Свежесть артефактов (AGENTS.md / docs/pegas.md)
+  if (result.artifactIssues.length > 0) {
+    console.log(`\n  ⚠️  Артефакты Pegas (pegas init обновит идемпотентно):`);
+    for (const ai of result.artifactIssues) {
+      console.log(`     - ${ai}`);
     }
-    console.log(`     💡 Pegas standard: repository root contains only pegas.json and a single .env`);
   }
 
-  // 5. Final summary
   console.log("");
   if (result.valid && !result.hasWarnings) {
-    console.log(`✨ Repository adheres perfectly to the Pegas 2-file standard!\n`);
-  } else if (result.valid && result.hasWarnings) {
-    console.log(`✅ Contract & secrets valid, with ${result.legacyFiles.length + result.warnings.length} cleanup suggestion(s).\n`);
+    console.log(`✨ Репозиторий полностью соответствует стандарту Pegas v3!\n`);
+  } else if (result.valid) {
+    console.log(`✅ Контракт и секреты валидны; предложений по гигиене: ${result.warnings.length}.\n`);
   } else {
-    console.error(`❌ Pegas audit failed with ${result.errors.length} error(s). Please fix before deploying.\n`);
+    console.error(`❌ Аудит не пройден: ${result.errors.length} ошибок(и). Исправьте перед деплоем.\n`);
     if (!options.noExit) {
       process.exit(1);
     }

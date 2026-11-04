@@ -19,8 +19,8 @@
 
 ## Руководства
 
-* [Инициализация проекта](./how-to/init.md) — `pegas init`: декларативный контракт, секреты, compose-хирургия.
-* [Локальная разработка с HTTPS](./how-to/local-https.md) — `pegas link`, доверенный CA, единый шлюз, `pegas unlink`.
+* [Инициализация проекта](./how-to/init.md) — `pegas init`: артефакты для агентов, git-гигиена, канон docs/pegas.md.
+* [Локальная разработка с HTTPS](./how-to/local-https.md) — `pegas connect`, доверенный CA, единый шлюз, `pegas disconnect`.
 
 ## Справочники
 

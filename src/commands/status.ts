@@ -9,7 +9,6 @@ import {
   runCommand,
 } from "../docker.js";
 import { renderTable } from "../table.js";
-import { interpolateServiceReferences } from "../contract.js";
 
 export interface DockerContainerInfo {
   id: string;
@@ -339,15 +338,9 @@ export function resolveInfraEndpoint(
           if (Array.isArray(dList) && dList[0]) {
             return hostPort ? `${dList[0]}:${hostPort}` : dList[0];
           }
-          if (contract.env?.PUBLIC_HOST) {
-            const pub =
-              typeof contract.env.PUBLIC_HOST === "object"
-                ? contract.env.PUBLIC_HOST.development
-                : contract.env.PUBLIC_HOST;
-            if (pub) {
-              const resolvedPub = interpolateServiceReferences(pub, contract, "development");
-              return hostPort ? `${resolvedPub}:${hostPort}` : resolvedPub;
-            }
+          const pubHost = typeof svcConf?.publicHost === "object" ? svcConf.publicHost.development : undefined;
+          if (pubHost) {
+            return hostPort ? `${pubHost}:${hostPort}` : pubHost;
           }
         }
       }
@@ -479,6 +472,20 @@ export async function handleStatus(options: { gatewayDir?: string; json?: boolea
   console.log(`  Docker Network:     ${networkOk ? "✓ 'pegas-network' exists" : "✗ 'pegas-network' missing"}`);
   console.log(`  Caddy Container:    ${isRunning ? "✓ Running" : "✗ Stopped or not found"}`);
   console.log(`  Gateway Location:   ${gatewayDir}`);
+  // TLS-доверие: CA шлюза (PKI в volume) vs системный стор. Индикатор раннего
+  // предупреждения о красном замке (расхождение возникает при пересоздании volume).
+  let tlsLine = "  Local CA Trust:     ⚠ unknown (gateway PKI not reachable)";
+  try {
+    const { readGatewayRootCert, getCaPaths, isCaTrusted } = await import("../ca.js");
+    const gwRoot = await readGatewayRootCert();
+    if (gwRoot !== null) {
+      const trusted = await isCaTrusted(process.platform, undefined, { gatewayRoot: gwRoot });
+      tlsLine = trusted
+        ? "  Local CA Trust:     ✓ trusted (https — зелёный замок)"
+        : "  Local CA Trust:     ✗ NOT trusted — браузер покажет красный замок; лечение: pegas ca install";
+    }
+  } catch {}
+  console.log(tlsLine);
   console.log(`  Active Routes:      ${routes.length} domain(s)\n`);
 
   if (items.length > 0) {

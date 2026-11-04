@@ -13,7 +13,9 @@
 |---|---|
 | [target-audience.md](./target-audience.md) | Целевая аудитория, УТП и фильтр принятия продуктовых решений |
 | [principles/artifacts.md](./principles/artifacts.md) | Закон файловых артефактов (коммитится / эфемерно / серверный рантайм) и инвентаризация «сейчас / хотим» |
-| [principles/declarative-runtime.md](./principles/declarative-runtime.md) | RFC: декларативный рантайм Pegas 2.0 — решения D1–D20, стадии S1–S5, открытые вопросы |
+| [principles/declarative-runtime.md](./principles/declarative-runtime.md) | RFC: декларативный рантайм Pegas 2.0 (реализован в 2.x) — решения D1–D20, историческая запись |
+| [rfc/RFC_CONTRACT_V3.md](./rfc/RFC_CONTRACT_V3.md) | RFC контракта v3 (реализован в 3.0.0): Zero Scalars, сценарные карты, секреты посервисно, pegas:// |
+| [rfc/RFC_UX_V3.md](./rfc/RFC_UX_V3.md) | RFC UX v3 (реализован в 3.0.0): connect/disconnect, check рид-онли, тонкий init, strict-флаги |
 
 ## Правило раздела
 

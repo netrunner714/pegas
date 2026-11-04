@@ -5,6 +5,45 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [3.0.0] — 2026-11-04
+
+Мажорный релиз: контракт Pegas v3. Пересборка декларативного слоя вокруг сценариев
+(Zero Scalars), отказ от docker-compose-легаси в репо проектов и появление Runtime SDK.
+Спецификация — docs/internal/rfc/RFC_CONTRACT_V3.md (реализован полностью).
+
+### Added
+
+- **Контракт v3**: корневые `scenarios: string[]`, `gateway` (httpPort/httpsPort/admin/acmeEmail по сценариям) и посервисные сценарные карты (`runtime`, `image`, `build`, `port`, `domains`, `cors`, `env`, `volumes`, `dependsOn`, `healthcheck`, `command`, `ports`, `publicHost`). JSON Schema — https://netrunner714.ru/schemas/pegas.json; эталон example.json генерируется из схемы.
+- **Zero Scalars**: каждое средозависимое поле — строгая карта по ключам из `scenarios`, без пропусков и дефолтов. Корневые `env`, `secrets`, `deploy`, `devGateway` удалены; секреты — посервисные (`services.<name>.secrets`).
+- **Service discovery `pegas://<имя-сервиса>`**: значения env вида `pegas://api` разворачиваются при генерации манифеста во внутренний адрес сети (`<scheme>://<project>-<scenario>-<service>:<port>`, scheme по образу целевого сервиса: redis/postgresql/http).
+- **Платформенная инъекция PORT**: манифест подставляет env `PORT` из port-карты контракта каждому docker-сервису (вместе с `PEGAS_CONTEXT`/`PEGAS_SCENARIO`) — порты читают любые рантаймы (Rust/Go/Python), ручной env-ключ `PORT` больше не нужен и перекрывается.
+- **Runtime SDK** (`@netrunner714/pegas/runtime`): типизированный доступ к контексту оркестрации — `currentService()` (порт, домены, scenario), `services()` (карта соседей с internalUrl), `secret()` (обязательный секрет с понятной ошибкой и списком ожидаемых), `optionalSecret()` (секрет, осознанно не заданный в части сценариев). Транспорт: env `PEGAS_CONTEXT` в контейнерах + файл `.pegas/context.json` для host-запусков. Дистрибутив типизирован (dist/runtime.d.ts генерируется при сборке).
+- **`pegas connect` пишет `.pegas/context.json`**: host-сервисы сценария development получают тот же discovery-контекст, что и контейнеры; `pegas disconnect` удаляет его.
+- **TLS-готовность как first-class**: `connect` и `status` сверяют CA живого шлюза (PKI в docker-volume) с хранилищами доверия ОС — обе стороны в WSL (Linux-бандл и Windows Root через certutil). При недоверии — предупреждение с готовым лечением; `ca install` синхронизирует экспорт с живым шлюзом (актуализация после пересоздания volume).
+- **`pegas llms` / llms.txt**: агентный контекст, генерируемый из кода; включает доктрину env-доступа (env — транспорт инъекции, не источник топологии).
+- **`pegas check` v3**: рид-онли аудит контракта, паритета секретов 1:1, git-гигиены и свежести артефактов (`docs/pegas.md`, блок AGENTS.md). Docker-aware детектор Caddyfile: конфиг в образе (COPY в Dockerfile) не алертится.
+
+### Changed
+
+- **Сценарии вместо окружений**: деплой строго `pegas deploy -s <scenario>`; сценарий — флаг запуска, код читает готовые значения (ветвления по NODE_ENV-like env в коде запрещены — платформа выводит их сама).
+- **`pegas init` — тонкий scaffolder**: генерирует/обновляет только артефакты (`docs/pegas.md`, блок AGENTS.md, `.gitignore`-гигиену). Контракт `pegas.json` не создаёт и не трогает — он пишется по схеме и эталону. Идемпотентен.
+- **connect/disconnect** — финальные имена (бывшие link/unlink): dev-маршруты `*.localhost` в общем шлюзе.
+- Эфемерные артефакты: compose-манифест генерируется на каждый деплой и не хранится в репо; из репо проектов исчезают docker-compose.yml, Caddyfile шлюза и ручные CORS-списки (CORS ставит шлюз по `services.<name>.cors`).
+- Документация (README, docs/) переписана под v3; реализованные RFC перенесены в docs/internal/rfc/ с шапками статуса; справочники cli.md и llms.txt генерируются из кода при сборке.
+
+### Removed
+
+- Команды `pegas dev`, `pegas link`, `pegas unlink`, `pegas migrate` (v2-инструменты перехода; миграция v2→v3 — ручная правка контракта под контролем `pegas check`).
+- Поля контракта v2: корневые `env`, `secrets`, `deploy`, `devGateway`, `bootInfra`, сервисные `role`, `envFile`, макросы `${services.<name>.<prop>}` (заменены сценарными картами и `pegas://`).
+- Харвестинг docker-compose в `pegas init` (инвентаризация сервисов, starter-Dockerfile, env-генерация).
+
+### Migration (v2 → v3)
+
+1. Переписать `pegas.json` по схеме v3 (Zero Scalars: сценарные карты, посервисные секреты) — руками, используя `pegas check` как единственный проводник.
+2. Вычистить из кода `PORT`/`APP_DOMAIN`/`CLIENT_ORIGINS`/NODE_ENV-ветвления: топология — через Runtime SDK (`currentService()`, `services()`), секреты — `secret()`/`optionalSecret()`.
+3. Удалить docker-compose.yml и Caddyfile шлюза из репо (контейнерная статика образа — легитимна).
+4. `pegas ca install` после первого `pegas connect` (CA шлюза мог смениться при пересоздании volume).
+
 ## [1.8.0] — 2026-11-01
 
 ### Added

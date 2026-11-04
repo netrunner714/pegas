@@ -3,14 +3,12 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getServiceUpstream, listAvailableEnvironments, getProjectRuntimeId, validatePegasContract, normalizeEnvironment } from "../contract.js";
-import { findPegasCompose, setupProjectCompose } from "../compose.js";
+import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getProjectRuntimeId, validatePegasContract } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
-import { hasHostNodeModules } from "../runtime-compose.js";
 import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 import { verifySecrets } from "../secrets.js";
@@ -78,7 +76,7 @@ export async function waitForContainerReadiness(
     let containerId = "";
     try {
       const dockerArgs = options.projectId
-        ? ["ps", "-q", "--filter", `label=pegas.project=${options.projectId}`, "--filter", `label=pegas.environment=${options.environment || "development"}`, "--filter", `label=pegas.service=${serviceName}`]
+        ? ["ps", "-q", "--filter", `label=pegas.project=${options.projectId}`, "--filter", `label=pegas.scenario=${options.environment || "development"}`, "--filter", `label=pegas.service=${serviceName}`]
         : [
             "compose",
             ...(options.composeFile
@@ -183,7 +181,6 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   const env = rawScenario;
-  const runtimeEnvironment = normalizeEnvironment(env);
 
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
   const contractPath = path.join(projectRoot, CONTRACT_FILENAME);
@@ -242,13 +239,13 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   const confDir = getConfDir(gatewayDir);
   await fs.mkdir(confDir, { recursive: true });
 
-  const strictDns = contract.deploy?.strictDns ?? options.strictDns ?? false;
-  const skipDnsCheck = contract.deploy?.skipDnsCheck ?? options.skipDnsCheck ?? false;
-  const skipReadiness = contract.deploy?.skipReadiness ?? options.skipReadiness ?? false;
+  const strictDns = options.strictDns ?? false;
+  const skipDnsCheck = options.skipDnsCheck ?? false;
+  const skipReadiness = options.skipReadiness ?? false;
 
   const requestedDomains: string[] = [];
   for (const [, serviceConfig] of Object.entries(contract.services || {})) {
-    for (const d of getEnvironmentDomains(serviceConfig, runtimeEnvironment)) {
+    for (const d of getEnvironmentDomains(serviceConfig, env)) {
       const norm = normalizeDomain(d);
       if (norm && norm !== "yourdomain.com") {
         if (!requestedDomains.includes(norm)) requestedDomains.push(norm);
@@ -261,7 +258,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   if (requestedDomains.length === 0) {
-    const available = listAvailableEnvironments(contract);
+    const available = contract.scenarios;
     const envHint = available.length > 0
       ? `Available environments: ${available.join(", ")}`
       : `No environments with active domains defined in '${CONTRACT_FILENAME}'.`;
@@ -274,7 +271,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     return;
   }
 
-  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, runtimeEnvironment);
+  const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, env);
   const currentProjectFileName = path.basename(projectRouteFile);
 
   // Canonical name of this project's own route files (for any environment).
@@ -289,7 +286,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     for (const file of existingFiles) {
       if (!file.endsWith(".caddy") || file === currentProjectFileName) continue;
       if (!file.startsWith(`${ownRouteFilePrefix}-`) || !file.endsWith(".caddy")) continue;
-      if (file.startsWith(`${ownRouteFilePrefix}-${runtimeEnvironment}`)) continue;
+      if (file.startsWith(`${ownRouteFilePrefix}-${env}`)) continue;
       const otherContent = await fs.readFile(path.join(confDir, file), "utf-8");
       const otherRoutes = parseCaddyProjectFile(otherContent, file);
       // The project comment carries the authoritative project name.
@@ -352,44 +349,27 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     const primaryDomain = requestedDomains[0] || "";
     const deployEnv = {
       ...process.env,
-      PEGAS_ENV: runtimeEnvironment,
-      NODE_ENV: contract.runtime === "docker" && runtimeEnvironment === "development" ? "development" : "production",
+      NODE_ENV: rawScenario === "development" ? "development" : "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
-    // Q6: host-installed dependencies do not update the Docker dependency volume.
-    if (contract.runtime === "docker" && runtimeEnvironment === "development") {
-      const hostNodeModules = hasHostNodeModules(contract, projectRoot);
-      if (hostNodeModules.length > 0 && !isJson) {
-        console.warn("⚠️  Host node_modules detected at: " + hostNodeModules.join(", ") + ".");
-        console.warn("   It is shadowed by the Docker dependency volume: installing on the host does NOT update the container.");
-      }
-    }
     let composeFile: string | null = null;
     let gatewayPrepared = false;
     try {
-      if (contract.runtime === "docker") {
-        // Verify/start the shared edge before mutating the application stack.
-        // A port conflict must fail before any project service is started.
-        const gatewayResult = await ensureGatewayContainer(gatewayDir);
-        if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
-        gatewayPrepared = true;
-        await runRuntimeCompose(contract, projectRoot, runtimeId, [
-          "up", "-d", "--remove-orphans",
-        ], deployEnv);
-      } else {
-        await setupProjectCompose(projectRoot, projectName);
-        composeFile = await findPegasCompose(projectRoot);
-        const composeCmd = composeFile
-          ? `docker compose --project-directory . -f ${composeFile} up -d`
-          : "docker compose up -d";
-        child_process.execSync(composeCmd, { stdio: "inherit", cwd: projectRoot, env: deployEnv });
-      }
+      // Verify/start the shared edge before mutating the application stack.
+      // A port conflict must fail before any project service is started.
+      const gatewayResult = await ensureGatewayContainer(gatewayDir);
+      if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
+      gatewayPrepared = true;
+      // v3: манифест содержит только driver:"docker"-сервисы сценария; host-сервисы не поднимаем
+      await runRuntimeCompose(contract, projectRoot, runtimeId, [
+        "up", "-d", "--remove-orphans",
+      ], { ...deployEnv, PEGAS_ENV: rawScenario });
     } catch (err: any) {
-      if (gatewayPrepared && contract.runtime === "docker") {
+      if (gatewayPrepared) {
         // Do not leave an otherwise unused shared Gateway running after a failed first deploy.
         await stopGatewayIfUnused(gatewayDir).catch(() => {});
       }
-      const message = contract.runtime === "docker" ? "Failed to apply the declarative Docker runtime" : "Failed to execute Docker Compose";
+      const message = "Failed to apply the declarative Docker runtime";
       if (isJson) console.log(JSON.stringify({ error: message, details: err.message }));
       else console.error(`❌ Error: ${message}:`, err.message);
       if (!options.noExit) process.exit(1);
@@ -399,7 +379,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     if (!skipReadiness) {
       const servicesToCheck: string[] = [];
       for (const [sName, sCfg] of Object.entries(contract.services || {})) {
-        if (getEnvironmentDomains(sCfg, runtimeEnvironment).length > 0) servicesToCheck.push(sName);
+        if (getEnvironmentDomains(sCfg, env).length > 0) servicesToCheck.push(sName);
       }
       if (servicesToCheck.length > 0) {
         if (!isJson) console.log(`\n⏳ Checking container readiness for: ${servicesToCheck.join(", ")}...`);
@@ -407,9 +387,8 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
           const checkRes = await waitForContainerReadiness(projectRoot, sName, {
             timeoutMs: options.readinessTimeoutMs,
             gracePeriodMs: options.gracePeriodMs,
-            composeFile: composeFile || undefined,
-            projectId: contract.runtime === "docker" ? runtimeId : undefined,
-            environment: runtimeEnvironment,
+            projectId: runtimeId,
+            environment: env,
           });
           if (!checkRes.ready) {
             const errMsg = `Service '${sName}' failed readiness check: ${checkRes.reason}`;
@@ -418,9 +397,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
               console.error(`\n❌ Error: ${errMsg}`);
               console.error("   Deployment aborted before updating Caddy routes.");
             }
-            if (contract.runtime === "docker") {
-              await stopGatewayIfUnused(gatewayDir).catch(() => {});
-            }
+            await stopGatewayIfUnused(gatewayDir).catch(() => {});
             if (!options.noExit) process.exit(1);
             return;
           }
@@ -431,12 +408,12 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   const snippets: string[] = [];
-  const deployedRoutes: { service: string; domain: string; upstream: string; routes?: Record<string, string | { to: string; websocket?: boolean }> }[] = [];
+  const deployedRoutes: { service: string; domain: string; upstream: string }[] = [];
 
-  // Collect all domains declared in runtimeEnvironment for this project to configure CORS
+  // Collect all domains declared in env for this project to configure CORS
   const allProjectDomains: string[] = [];
   for (const [_, svc] of Object.entries(contract.services || {})) {
-    const dList = getEnvironmentDomains(svc, runtimeEnvironment);
+    const dList = getEnvironmentDomains(svc, env);
     if (Array.isArray(dList)) {
       for (const d of dList) {
         const norm = normalizeDomain(d);
@@ -448,52 +425,36 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
-    if (serviceConfig.role === "infra") continue;
-    const envDomains = getEnvironmentDomains(serviceConfig, runtimeEnvironment);
-    const upstream = getServiceUpstream(serviceName, serviceConfig);
+    const envDomains = getEnvironmentDomains(serviceConfig, env);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
-    const prefix = contract.runtime === "docker" ? `${runtimeId}-${runtimeEnvironment}` : projectName;
-    const scopedUpstream = resolveScopedUpstream(
-      upstream,
-      prefix
-    );
+    // v3: upstream строится из port-карты сценария; services без port валидатор не пропустит
+    const svcPort = serviceConfig.port?.[env];
+    const upstream = `${serviceName}:${svcPort}`;
+    const prefix = `${runtimeId}-${env}`;
+    const scopedUpstream = resolveScopedUpstream(upstream, prefix);
 
+    // v3: cors — сценарная карта (boolean); по умолчанию включён для api-подобных имён
+    const corsScenario = serviceConfig.cors?.[env];
     const isCorsEnabled =
-      serviceConfig.cors !== false &&
-      (Boolean(serviceConfig.cors) ||
+      corsScenario !== false &&
+      (Boolean(corsScenario) ||
         serviceName === "api" ||
         serviceName.startsWith("api") ||
         envDomains.some((d) => d.startsWith("api.")));
 
-    let scopedRoutes: Record<string, string | { to: string; websocket?: boolean }> | undefined;
-    if (serviceConfig.routes && Object.keys(serviceConfig.routes).length > 0) {
-      scopedRoutes = {};
-      for (const [routePath, target] of Object.entries(serviceConfig.routes)) {
-        if (typeof target === "string") {
-          scopedRoutes[routePath] = resolveScopedUpstream(target, prefix);
-        } else {
-          scopedRoutes[routePath] = {
-            ...target,
-            to: resolveScopedUpstream(target.to, prefix),
-          };
-        }
-      }
-    }
     for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
       if (!normDomain || normDomain === "yourdomain.com") continue;
       snippets.push(generateCaddyfileSnippet({
         domain: normDomain,
         upstream: scopedUpstream,
-        routes: scopedRoutes,
-        cors: isCorsEnabled ? (serviceConfig.cors || true) : false,
+        cors: isCorsEnabled ? true : false,
         corsOrigins: allProjectDomains,
       }));
       deployedRoutes.push({
         service: serviceName,
         domain: normDomain,
         upstream: scopedUpstream,
-        ...(scopedRoutes ? { routes: scopedRoutes } : {}),
       });
     }
   }

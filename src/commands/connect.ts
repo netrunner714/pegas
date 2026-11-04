@@ -9,9 +9,22 @@ import {
 } from "../contract.js";
 import { ensureGatewayContainer } from "../docker.js";
 import { generateCaddyfileSnippet } from "../generator.js";
+import { buildSdkContext } from "../runtime-compose.js";
+import { isCaTrusted, getCaPaths, readGatewayRootCert } from "../ca.js";
+import crypto from "node:crypto";
+
+/** SHA-1 fingerprint PEM-сертификата (строкой PEM, не файлом). */
+function getCertSha1FromPem(pem: string): string | null {
+  try {
+    const x509 = new crypto.X509Certificate(pem);
+    return x509.fingerprint.replace(/:/g, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
 import { PegasContract } from "../types.js";
 
-export interface LinkOptions {
+export interface ConnectOptions {
   cwd?: string;
   gatewayDir?: string;
   json?: boolean;
@@ -21,7 +34,7 @@ export interface LinkOptions {
   skipReload?: boolean;
 }
 
-export async function handleLink(options: LinkOptions = {}): Promise<void> {
+export async function handleConnect(options: ConnectOptions = {}): Promise<void> {
   const isJson = options.json ?? false;
   const cwd = options.cwd || process.cwd();
   const projectRoot = (await findProjectRoot(cwd)) || cwd;
@@ -31,7 +44,7 @@ export async function handleLink(options: LinkOptions = {}): Promise<void> {
   try {
     rawContract = await fs.readFile(contractPath, "utf-8");
   } catch {
-    const msg = `Contract ${CONTRACT_FILENAME} not found in ${projectRoot}. Run 'pegas init' first.`;
+    const msg = `Contract ${CONTRACT_FILENAME} not found in ${projectRoot}. Напишите контракт v3 по схеме https://netrunner714.ru/schemas/pegas.json (контекст: pegas llms).`;
     if (isJson) console.log(JSON.stringify({ error: msg }));
     else console.error(`❌ Error: ${msg}`);
     if (!options.noExit) process.exit(1);
@@ -99,31 +112,28 @@ export async function handleLink(options: LinkOptions = {}): Promise<void> {
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
-    if (serviceConfig.role === "infra") continue;
-
     const envDomains = getEnvironmentDomains(serviceConfig, "development");
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
 
-    const servicePort = serviceConfig.port || 3000;
+    // v3: порт — сценарная карта; дефолтов нет (Zero Scalars), domains без port ловит check
+    const servicePort = serviceConfig.port?.["development"];
+    if (!servicePort) {
+      const msg = `services.${serviceName}: domains требуют port.development (см. pegas check)`;
+      if (isJson) console.log(JSON.stringify({ error: msg }));
+      else console.error(`❌ Error: ${msg}`);
+      if (!options.noExit) process.exit(1);
+      return;
+    }
     const upstream = `host.docker.internal:${servicePort}`;
 
+    // v3: cors — сценарная карта boolean
+    const corsDev = serviceConfig.cors?.["development"];
     const isCorsEnabled =
-      serviceConfig.cors !== false &&
-      (Boolean(serviceConfig.cors) ||
+      corsDev !== false &&
+      (Boolean(corsDev) ||
         serviceName === "api" ||
         serviceName.startsWith("api") ||
         envDomains.some((d) => d.startsWith("api.")));
-
-    let scopedRoutes: Record<string, string> | undefined;
-    if (serviceConfig.routes && Object.keys(serviceConfig.routes).length > 0) {
-      scopedRoutes = {};
-      for (const [routePath, target] of Object.entries(serviceConfig.routes)) {
-        const targetStr = typeof target === "string" ? target : target.to;
-        const [targetSvcName, explicitPort] = targetStr.split(":");
-        const targetPort = explicitPort || contract.services?.[targetSvcName]?.port || "3000";
-        scopedRoutes[routePath] = `host.docker.internal:${targetPort}`;
-      }
-    }
 
     for (const domain of envDomains) {
       const normDomain = normalizeDomain(domain);
@@ -134,8 +144,7 @@ export async function handleLink(options: LinkOptions = {}): Promise<void> {
         generateCaddyfileSnippet({
           domain: normDomain,
           upstream,
-          routes: scopedRoutes,
-          cors: isCorsEnabled ? (serviceConfig.cors || true) : false,
+          cors: isCorsEnabled ? true : false,
           corsOrigins: allProjectDomains,
         }),
       );
@@ -167,19 +176,70 @@ export async function handleLink(options: LinkOptions = {}): Promise<void> {
     }
   }
 
+  // 3. Host-контекст для Runtime SDK: .pegas/context.json — сервисы сценария
+  // development целиком; service = первый host-сервис (driver: bun). Контейнерам
+  // PEGAS_CONTEXT инжектится манифестом; host-запускам нужен файл. SDK кэширует.
+  let contextFile: string | null = null;
+  {
+    const hostServices = Object.entries(contract.services || {})
+      .filter(([_, svc]) => (svc.runtime?.["development"]?.driver ?? "docker") === "bun")
+      .map(([name]) => name);
+    const contextService = hostServices[0] || Object.keys(contract.services || {})[0];
+    if (contextService) {
+      const ctxJson = buildSdkContext(contract, "development", projectName, contextService);
+      contextFile = path.join(projectRoot, ".pegas", "context.json");
+      if (!options.dryRun) {
+        await fs.mkdir(path.dirname(contextFile), { recursive: true });
+        await fs.writeFile(contextFile, ctxJson, "utf-8");
+      }
+    }
+  }
+
+  // TLS-готовность: серты шлюза подписаны CA из docker-volume PKI. Если системный
+  // стор не доверяет этому CA — браузер покажет красный замок. Проверяем и предупреждаем
+  // ДО того, как пользователь столкнётся (после пересоздания volume CA меняется).
+  let tlsTrusted: boolean | null = null;
+  if (!options.dryRun) {
+    const paths = getCaPaths();
+    const gatewayRoot = await readGatewayRootCert();
+    if (gatewayRoot !== null) {
+      const gatewaySha1 = getCertSha1FromPem(gatewayRoot.toString("utf-8"));
+      const exportSha1 = await fs.readFile(paths.caCertPath, "utf-8").then((p) => getCertSha1FromPem(p)).catch(() => null);
+      if (exportSha1 !== gatewaySha1) {
+        // Экспорт разошёлся с живым шлюзом: актуализируем (ca install сделает то же,
+        // но connect — момент истины: пользователь прямо сейчас пойдёт в браузер).
+        if (!options.dryRun) {
+          await fs.mkdir(path.dirname(paths.caCertPath), { recursive: true });
+          await fs.writeFile(paths.caCertPath, gatewayRoot, { mode: 0o644 });
+        }
+      }
+      tlsTrusted = await isCaTrusted(process.platform, paths, { gatewayRoot });
+    }
+  }
+
   if (isJson) {
     console.log(
       JSON.stringify({
-        status: "linked",
+        status: "connected",
         project: projectName,
         routeFile: routeFilePath,
+        contextFile: contextFile,
+        tlsTrusted: tlsTrusted,
         urls: registeredUrls,
       }),
     );
   } else {
-    console.log(`\n🔗 \x1b[1;32mProject '${projectName}' linked to Pegas Gateway!\x1b[0m\n`);
+    console.log(`\n🔗 \x1b[1;32mProject '${projectName}' connected to Pegas Gateway!\x1b[0m\n`);
     for (const r of registeredUrls) {
       console.log(`   • \x1b[1m${r.url}\x1b[0m ➔ \x1b[90m${r.upstream}\x1b[0m`);
+    }
+    if (tlsTrusted === false) {
+      console.log();
+      console.log(`   \x1b[33m⚠ Браузер покажет красный замок: системное хранилище не доверяет CA шлюза.\x1b[0m`);
+      console.log(`     Лечение: pegas ca install   (обновит доверие; попросит sudo)\x1b[0m`);
+      if (process.platform === "linux") {
+        console.log(`     или вручную: sudo cp ~/.pegas/ca/root.crt /usr/local/share/ca-certificates/pegas-root-ca.crt && sudo update-ca-certificates`);
+      }
     }
     console.log();
   }

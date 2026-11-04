@@ -1,315 +1,798 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://netrunner714.ru/schemas/pegas.json",
-  "title": "Pegas contract",
-  "description": "Декларативный контракт окружения проекта для pegas — единственный источник истины. Подробности: https://github.com/netrunner714/pegas",
+  "title": "Pegas v3 contract",
+  "description": "Декларативный контракт окружения Pegas v3. Спецификация — RFC_CONTRACT_V3.md. Единственный источник правды: из этой схемы генерируются эталон (example.json), llms-контекст и reference-документация.",
   "type": "object",
-  "additionalProperties": true,
+  "required": [
+    "projectName",
+    "scenarios",
+    "gateway",
+    "services"
+  ],
+  "additionalProperties": false,
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "URL JSON Schema (подсказки редактора)."
+      "examples": [
+        "https://netrunner714.ru/schemas/pegas.json"
+      ]
     },
     "projectName": {
       "type": "string",
-      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]*$",
-      "description": "Slug проекта: скоуп сетевых алиасов и имя route-файла conf.d/<projectName>.caddy. По умолчанию вычисляется из package.json или имени каталога."
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Имя проекта; основа сетевых алиасов (<project>-<service>), compose-проектов и dev-доменов <project>.localhost.",
+      "examples": [
+        "tf2-trade-exchange",
+        "netrunner714",
+        "sueta"
+      ]
     },
-    "runtime": {
-      "type": "string",
-      "enum": [
-        "host",
-        "docker"
-      ],
-      "description": "Режим ранта. 'docker' — опциональный вход в декларативный Docker-рантайм; отсутствует или 'host' — прежнее поведение.",
-      "default": "host"
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Явный список всех сценариев проекта. Источник истины: каждая сценарная карта контракта обязана содержать все эти ключи и только их. Имена — lowercase [a-z0-9-]+, без канонизации (dev ≠ development).",
+      "examples": [
+        [
+          "development",
+          "stage",
+          "production"
+        ],
+        [
+          "development",
+          "production"
+        ]
+      ]
     },
-    "bootInfra": {
-      "type": "boolean",
-      "description": "При true pegas dev автоматически поднимает инфраструктурные сервисы из docker-compose.yml (host-runtime).",
-      "default": false
-    },
-    "deploy": {
+    "gateway": {
       "type": "object",
-      "description": "Настройки деплоя.",
-      "additionalProperties": false,
-      "properties": {
-        "strictDns": {
-          "type": "boolean",
-          "description": "Прервать деплой, если DNS-записи не соответствуют IP сервера."
-        },
-        "skipDnsCheck": {
-          "type": "boolean",
-          "description": "Пропустить DNS pre-flight проверку."
-        },
-        "skipReadiness": {
-          "type": "boolean",
-          "description": "Пропустить проверку readiness контейнеров."
-        }
+      "description": "Конфигурация общего шлюза по сценариям (замещает v2 devGateway).",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/gatewayScenario"
       }
     },
-    "devGateway": {
+    "services": {
       "type": "object",
-      "description": "Настройки локального dev-шлюза (host-runtime).",
+      "description": "Сервисы проекта. Ключ — имя сервиса ([a-z0-9-]+), используется в алиасах и dependsOn.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/service"
+      },
+      "examples": [
+        {
+          "redis-queue": {
+            "runtime": {
+              "development": {
+                "driver": "docker"
+              },
+              "stage": {
+                "driver": "docker"
+              },
+              "production": {
+                "driver": "docker"
+              }
+            },
+            "image": {
+              "development": "redis:7-alpine",
+              "stage": "redis:7-alpine",
+              "production": "redis:7-alpine"
+            },
+            "port": {
+              "development": 6379,
+              "stage": 6379,
+              "production": 6379
+            },
+            "healthcheck": {
+              "development": {
+                "test": [
+                  "CMD",
+                  "redis-cli",
+                  "ping"
+                ]
+              },
+              "stage": {
+                "test": [
+                  "CMD",
+                  "redis-cli",
+                  "ping"
+                ]
+              },
+              "production": {
+                "test": [
+                  "CMD",
+                  "redis-cli",
+                  "ping"
+                ]
+              }
+            },
+            "secrets": [
+              "REDIS_URL"
+            ]
+          },
+          "postgres": {
+            "runtime": {
+              "development": {
+                "driver": "docker"
+              },
+              "stage": {
+                "driver": "docker"
+              },
+              "production": {
+                "driver": "docker"
+              }
+            },
+            "image": {
+              "development": "postgres:18-alpine",
+              "stage": "postgres:18-alpine",
+              "production": "postgres:18-alpine"
+            },
+            "port": {
+              "development": 5432,
+              "stage": 5432,
+              "production": 5432
+            },
+            "volumes": {
+              "development": [
+                "pgdata:/var/lib/postgresql/data"
+              ],
+              "stage": [
+                "pgdata:/var/lib/postgresql/data"
+              ],
+              "production": [
+                "pgdata:/var/lib/postgresql/data"
+              ]
+            },
+            "healthcheck": {
+              "development": {
+                "test": [
+                  "CMD-SHELL",
+                  "pg_isready -U postgres"
+                ]
+              },
+              "stage": {
+                "test": [
+                  "CMD-SHELL",
+                  "pg_isready -U postgres"
+                ]
+              },
+              "production": {
+                "test": [
+                  "CMD-SHELL",
+                  "pg_isready -U postgres"
+                ]
+              }
+            },
+            "secrets": [
+              "DATABASE_URL"
+            ]
+          },
+          "web": {
+            "runtime": {
+              "development": {
+                "driver": "bun"
+              },
+              "stage": {
+                "driver": "docker"
+              },
+              "production": {
+                "driver": "docker"
+              }
+            },
+            "build": {
+              "development": null,
+              "stage": {
+                "context": "."
+              },
+              "production": {
+                "context": "."
+              }
+            },
+            "port": {
+              "development": 3000,
+              "stage": 3000,
+              "production": 3000
+            },
+            "domains": {
+              "development": [
+                "app.example.localhost"
+              ],
+              "stage": [
+                "app.example.dev"
+              ],
+              "production": [
+                "app.example.com"
+              ]
+            },
+            "ports": {
+              "development": [],
+              "stage": [],
+              "production": []
+            },
+            "dependsOn": {
+              "development": null,
+              "stage": {
+                "redis-queue": {
+                  "condition": "service_healthy"
+                }
+              },
+              "production": {
+                "redis-queue": {
+                  "condition": "service_healthy"
+                }
+              }
+            },
+            "secrets": [
+              "DATABASE_URL",
+              "REDIS_URL",
+              "SESSION_SECRET"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "scenarioMap": {
+      "description": "Сценарная карта: ровно по одному значению на каждый ключ из scenarios. Полнота и точность ключей проверяет pegas check (JSON Schema не знает scenarios, поэтому структурная проверка — в валидаторе).",
+      "type": "object"
+    },
+    "gatewayScenario": {
+      "type": "object",
+      "required": [
+        "httpPort",
+        "httpsPort"
+      ],
       "additionalProperties": false,
       "properties": {
         "httpPort": {
           "type": "integer",
           "minimum": 1,
           "maximum": 65535,
-          "description": "Порт локального HTTP (по умолчанию 80)."
+          "description": "Хостовый HTTP-порт шлюза.",
+          "examples": [
+            80
+          ]
         },
         "httpsPort": {
           "type": "integer",
           "minimum": 1,
           "maximum": 65535,
-          "description": "Порт локального HTTPS (по умолчанию 443; fallback 8443+)."
-        },
-        "skipInstallTrust": {
-          "type": "boolean",
-          "description": "Не устанавливать CA в системное хранилище доверия."
+          "description": "Хостовый HTTPS-порт шлюза.",
+          "examples": [
+            443
+          ]
         },
         "admin": {
           "type": "boolean",
-          "description": "Включить admin-интерфейс Caddy.",
-          "default": false
+          "description": "Включить admin-интерфейс Caddy (:2019) для сценария.",
+          "examples": [
+            false,
+            true
+          ]
         },
-        "systemCaddy": {
-          "type": "boolean",
-          "description": "Использовать системный Caddy вместо закешированного бинарника."
-        },
-        "caddyPath": {
+        "acmeEmail": {
           "type": "string",
-          "description": "Явный путь к бинарнику Caddy."
+          "format": "email",
+          "description": "Email ACME/Let's Encrypt; требуется для сценариев с боевыми доменами.",
+          "examples": [
+            "admin@example.com"
+          ]
         }
       }
     },
-    "services": {
+    "serviceRuntime": {
       "type": "object",
-      "description": "Сервисы проекта; ключ — имя сервиса.",
-      "minProperties": 1,
-      "additionalProperties": {
-        "$ref": "#/definitions/service"
-      }
-    },
-    "env": {
-      "type": "object",
-      "description": "Глобальный конфиг проекта (переносится между окружениями, коммитится). Секреты — только в envFile.",
-      "additionalProperties": {
-        "$ref": "#/definitions/envProfileValue"
-      }
-    }
-  },
-  "required": [
-    "services"
-  ],
-  "definitions": {
-    "service": {
-      "type": "object",
+      "required": [
+        "driver"
+      ],
       "additionalProperties": false,
       "properties": {
-        "port": {
-          "type": [
-            "integer",
-            "string"
-          ],
-          "description": "Порт, который сервис слушает внутри сети (1–65535)."
-        },
-        "ports": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Публикация портов на хост (Docker Compose short syntax: '5432:5432'). Для прямого внешнего доступа к СУБД, брокерам или сокетам."
-        },
-        "upstream": {
+        "driver": {
           "type": "string",
-          "description": "<сервис>:<порт> — цель проксирования во внутренней сети (host-runtime)."
-        },
-        "build": {
-          "type": "object",
-          "description": "Сборка образа из контекста проекта. Взаимоисключимо с image.",
-          "additionalProperties": false,
-          "properties": {
-            "context": {
-              "type": "string",
-              "description": "Путь build-контекста относительно проекта (без .. и абсолютных путей)."
-            },
-            "dockerfile": {
-              "type": "string",
-              "description": "Путь к Dockerfile относительно контекста."
-            },
-            "target": {
-              "type": "string",
-              "description": "Build stage (multi-target Dockerfile); передаётся в compose как есть."
-            }
-          },
-          "required": [
-            "context"
+          "enum": [
+            "docker",
+            "bun"
+          ],
+          "description": "docker — pegas поднимает контейнер; bun — host-процесс, pegas сервис не трогает (запуск через package.json).",
+          "examples": [
+            "docker",
+            "bun"
+          ]
+        }
+      }
+    },
+    "serviceBuild": {
+      "type": "object",
+      "required": [
+        "context"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string",
+          "description": "Контекст сборки относительно корня проекта.",
+          "examples": [
+            "."
           ]
         },
-        "image": {
+        "dockerfile": {
           "type": "string",
-          "description": "Готовый образ вместо сборки (взаимоисключимо с build)."
+          "description": "Dockerfile относительно корня проекта.",
+          "examples": [
+            "apps/api/Dockerfile"
+          ]
         },
-        "command": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "description": "Команда запуска контейнера (по умолчанию — команда образа)."
+        "target": {
+          "type": "string",
+          "description": "Stage multi-target Dockerfile.",
+          "examples": [
+            "runner"
+          ]
         },
-        "env": {
+        "args": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Несекретные переменные окружения. Секреты — через envFile."
-        },
-        "envFile": {
+          "description": "Build-аргументы."
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "required": [
+        "condition"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
           "type": "string",
-          "description": "Путь к gitignored env-файлу; содержимое передаётся Docker напрямую и не попадает в манифесты и логи."
-        },
-        "volumes": {
+          "enum": [
+            "service_started",
+            "service_healthy"
+          ],
+          "description": "Условие готовности зависимости (compose-семантика).",
+          "examples": [
+            "service_healthy"
+          ]
+        }
+      }
+    },
+    "dockerHealthcheck": {
+      "type": "object",
+      "required": [
+        "test"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "test": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Дополнительные тома (Docker Compose short syntax: volume:container-path)."
+          "description": "Команда healthcheck (compose-формат).",
+          "examples": [
+            [
+              "CMD",
+              "redis-cli",
+              "ping"
+            ]
+          ]
         },
-        "bindMount": {
+        "interval": {
           "type": "string",
-          "description": "Путь исходников для монтирования в контейнер (по умолчанию — корень проекта)."
+          "description": "Интервал проверок.",
+          "examples": [
+            "10s",
+            "30s"
+          ]
         },
-        "role": {
+        "timeout": {
           "type": "string",
-          "enum": [
-            "app",
-            "infra"
-          ],
-          "description": "Классификация сервиса вместо авто-детекции."
+          "description": "Таймаут проверки.",
+          "examples": [
+            "3s",
+            "5s"
+          ]
         },
-        "hmr": {
+        "retries": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Число ретраев до unhealthy.",
+          "examples": [
+            3,
+            5
+          ]
+        },
+        "startPeriod": {
+          "type": "string",
+          "description": "Отсрочка учёта падений на старте.",
+          "examples": [
+            "30s"
+          ]
+        }
+      }
+    },
+    "serviceHealthcheck": {
+      "description": "docker-сервис — объект compose-healthcheck; bun-сервис — строка HTTP ping-URL (информативна, pegas не опрашивает); null — healthcheck нет.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/dockerHealthcheck"
+        },
+        {
+          "type": "string",
+          "format": "uri",
+          "examples": [
+            "http://localhost:3000/api/health"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "runtime"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
           "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "fileWatch": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "events",
-                "polling"
-              ],
-              "description": "Режим отслеживания файлов (актуально для контейнерного dev).",
-              "default": "auto"
-            }
+          "description": "Драйвер по сценариям.",
+          "additionalProperties": {
+            "$ref": "#/$defs/serviceRuntime"
           }
         },
-        "dependsOn": {
-          "oneOf": [
-            {
-              "type": "array",
-              "items": {
-                "type": "string"
+        "image": {
+          "type": "object",
+          "description": "Docker-образ по сценариям; обязателен для docker-сервисов без build.",
+          "additionalProperties": {
+            "type": "string",
+            "examples": [
+              "redis:7-alpine",
+              "postgres:18-alpine"
+            ]
+          }
+        },
+        "build": {
+          "type": "object",
+          "description": "Сборка по сценариям; null в сценариях host-драйвера.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/serviceBuild"
               },
-              "description": "Сервисы, которые должны подняться раньше."
-            },
-            {
-              "type": "object",
-              "description": "Сервис → условие готовности.",
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "condition": {
-                    "type": "string",
-                    "enum": [
-                      "service_started",
-                      "service_healthy",
-                      "service_completed_successfully"
-                    ]
-                  }
-                }
+              {
+                "type": "null"
               }
-            }
-          ]
+            ]
+          }
         },
-        "healthcheck": {
+        "command": {
           "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "test": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "description": "Команда проверки."
+          "description": "Команда процесса в контейнере по сценариям.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
             },
-            "interval": {
-              "type": "string",
-              "description": "Интервал, напр. '10s'."
-            },
-            "timeout": {
-              "type": "string",
-              "description": "Таймаут, напр. '3s'."
-            },
-            "retries": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Число повторов."
-            },
-            "startPeriod": {
-              "type": "string",
-              "description": "Отсрочка старта, напр. '30s'."
-            }
-          },
-          "required": [
-            "test"
-          ]
+            "examples": [
+              [
+                "redis-server",
+                "--appendonly",
+                "yes"
+              ]
+            ]
+          }
         },
-        "domains": {
+        "port": {
           "type": "object",
-          "description": "Домены по окружениям (development/stage/production; алиасы dev/prod нормализуются). IDN-домены поддерживаются.",
+          "description": "Логический TCP-порт по сценариям; обязателен при domains.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "examples": [
+              3000,
+              6379
+            ]
+          }
+        },
+        "ports": {
+          "type": "object",
+          "description": "Проброс портов на хост по сценариям; [] вне development — норма (закрытый сервис). Непустой вне dev требует publicHost.",
           "additionalProperties": {
             "type": "array",
             "items": {
               "type": "string",
-              "minLength": 1
+              "pattern": "^[0-9]+:[0-9]+$"
+            },
+            "examples": [
+              [
+                "6379:6379"
+              ],
+              []
+            ]
+          }
+        },
+        "domains": {
+          "type": "object",
+          "description": "HTTP-домены шлюза по сценариям; строго для HTTP-сервисов (при host-драйвере сценария — error).",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "api.example.com"
+              ],
+              [
+                "web.my-app.localhost"
+              ]
+            ]
+          }
+        },
+        "publicHost": {
+          "type": "object",
+          "description": "Публичное DNS-имя TCP-сервиса по сценариям; Caddy не маршрутизирует, TLS — ответственность контейнера.",
+          "additionalProperties": {
+            "type": "string",
+            "examples": [
+              "pg18.example.com"
+            ]
+          }
+        },
+        "volumes": {
+          "type": "object",
+          "description": "Named-тома по сценариям (compose short syntax).",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "pgdata:/var/lib/postgresql"
+              ]
+            ]
+          }
+        },
+        "dependsOn": {
+          "type": "object",
+          "description": "Зависимости по сценариям; при host-драйвере сценария допустим только пустой объект.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/dependency"
             }
           }
-        }
-      }
-    },
-    "envProfileValue": {
-      "description": "Значение env-ключа: строка (одинаково во всех профилях) или карта профилей development/stage/production.",
-      "oneOf": [
-        {
-          "type": "string",
-          "minLength": 1
         },
-        {
+        "healthcheck": {
           "type": "object",
-          "required": [
-            "development",
-            "stage",
-            "production"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "development": {
+          "description": "Healthcheck по сценариям.",
+          "additionalProperties": {
+            "$ref": "#/$defs/serviceHealthcheck"
+          }
+        },
+        "env": {
+          "type": "object",
+          "description": "Несекретные значения конфигурации (Zero Scalars: карта сценариев на каждый ключ). Специальный формат значения: \"pegas://<имя-сервиса>\" — service discovery: pegas подставляет внутренний адрес сервиса в сети pegas-network (scheme по образу: redis -> redis, postgres -> postgresql, иначе http).",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
               "type": "string",
-              "minLength": 1
+              "examples": [
+                "pretty",
+                "json"
+              ]
+            }
+          }
+        },
+        "cors": {
+          "type": "object",
+          "description": "CORS-заголовки по сценариям.",
+          "additionalProperties": {
+            "type": "boolean",
+            "examples": [
+              true,
+              false
+            ]
+          }
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_]+$"
+          },
+          "description": "Имена секретных ключей сервиса (интерфейс зависимостей). Значения — из .env (dev) / CI (prod). Замещает v2 envFile и корневые secrets.",
+          "examples": [
+            [
+              "DATABASE_URL",
+              "REDIS_URL"
+            ],
+            [
+              "SESSION_SECRET"
+            ]
+          ]
+        }
+      },
+      "examples": [
+        {
+          "runtime": {
+            "development": {
+              "driver": "docker"
             },
             "stage": {
-              "type": "string",
-              "minLength": 1
+              "driver": "docker"
             },
             "production": {
-              "type": "string",
-              "minLength": 1
+              "driver": "docker"
             }
-          }
+          },
+          "image": {
+            "development": "redis:7-alpine",
+            "stage": "redis:7-alpine",
+            "production": "redis:7-alpine"
+          },
+          "port": {
+            "development": 6379,
+            "stage": 6379,
+            "production": 6379
+          },
+          "healthcheck": {
+            "development": {
+              "test": [
+                "CMD",
+                "redis-cli",
+                "ping"
+              ]
+            },
+            "stage": {
+              "test": [
+                "CMD",
+                "redis-cli",
+                "ping"
+              ]
+            },
+            "production": {
+              "test": [
+                "CMD",
+                "redis-cli",
+                "ping"
+              ]
+            }
+          },
+          "secrets": [
+            "REDIS_URL"
+          ]
+        },
+        {
+          "runtime": {
+            "development": {
+              "driver": "docker"
+            },
+            "stage": {
+              "driver": "docker"
+            },
+            "production": {
+              "driver": "docker"
+            }
+          },
+          "image": {
+            "development": "postgres:18-alpine",
+            "stage": "postgres:18-alpine",
+            "production": "postgres:18-alpine"
+          },
+          "port": {
+            "development": 5432,
+            "stage": 5432,
+            "production": 5432
+          },
+          "volumes": {
+            "development": [
+              "pgdata:/var/lib/postgresql/data"
+            ],
+            "stage": [
+              "pgdata:/var/lib/postgresql/data"
+            ],
+            "production": [
+              "pgdata:/var/lib/postgresql/data"
+            ]
+          },
+          "healthcheck": {
+            "development": {
+              "test": [
+                "CMD-SHELL",
+                "pg_isready -U postgres"
+              ]
+            },
+            "stage": {
+              "test": [
+                "CMD-SHELL",
+                "pg_isready -U postgres"
+              ]
+            },
+            "production": {
+              "test": [
+                "CMD-SHELL",
+                "pg_isready -U postgres"
+              ]
+            }
+          },
+          "secrets": [
+            "DATABASE_URL"
+          ]
+        },
+        {
+          "runtime": {
+            "development": {
+              "driver": "bun"
+            },
+            "stage": {
+              "driver": "docker"
+            },
+            "production": {
+              "driver": "docker"
+            }
+          },
+          "build": {
+            "development": null,
+            "stage": {
+              "context": "."
+            },
+            "production": {
+              "context": "."
+            }
+          },
+          "port": {
+            "development": 3000,
+            "stage": 3000,
+            "production": 3000
+          },
+          "domains": {
+            "development": [
+              "app.example.localhost"
+            ],
+            "stage": [
+              "app.example.dev"
+            ],
+            "production": [
+              "app.example.com"
+            ]
+          },
+          "ports": {
+            "development": [],
+            "stage": [],
+            "production": []
+          },
+          "dependsOn": {
+            "development": null,
+            "stage": {
+              "redis-queue": {
+                "condition": "service_healthy"
+              }
+            },
+            "production": {
+              "redis-queue": {
+                "condition": "service_healthy"
+              }
+            }
+          },
+          "secrets": [
+            "DATABASE_URL",
+            "REDIS_URL",
+            "SESSION_SECRET"
+          ]
         }
       ]
     }

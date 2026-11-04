@@ -8,12 +8,12 @@
 
 ### `pegas init [options]`
 
-Инициализирует проект: создаёт контракт pegas.json, документацию и скрипты (runtime определяется автоматически)
+Скаффолдер Pegas: маркерный блок AGENTS.md, docs/pegas.md, .pegas/ и записи .gitignore. Контракт pegas.json НЕ создаётся — его пишут руками рядом с проектом
 
 Флаги:
 
 ```text
---force               Сбросить контракт pegas.json на дефолты (создаёт pegas.json.bak)
+--force               Перезапустить скаффолдинг, даже если маркерный блок уже есть (идемпотентное слияние)
 --dry-run             Показать план изменений без записи на диск
 --cwd <path>          Целевой каталог проекта
 ```
@@ -28,12 +28,12 @@ pegas init --dry-run
 
 ### `pegas update [options]`
 
-Обновляет @netrunner714/pegas до актуальной версии
+Обновляет @netrunner714/pegas до актуальной версии (без --latest — только внутри мажора)
 
 Флаги:
 
 ```text
---latest              Обновляться между мажорными версиями (например, 1.x -> 2.x)
+--latest              Обновляться между мажорными версиями (например, 2.x -> 3.x)
 --cwd <path>          Целевой каталог проекта
 ```
 
@@ -44,9 +44,27 @@ pegas update
 pegas update --latest
 ```
 
-### `pegas link [options]`
+### `pegas connect [options]`
 
-Подключает проект к общему шлюзу Pegas для локальной разработки (*.localhost)
+Пробрасывает сервисы разработки через общий шлюз: host-сервисы через host.docker.internal, маршруты [service].[project].localhost
+
+Флаги:
+
+```text
+--cwd <path>          Целевой каталог проекта
+--dry-run             Показать план изменений без записи на диск
+```
+
+Примеры:
+
+```bash
+pegas connect
+pegas connect --dry-run
+```
+
+### `pegas disconnect [options]`
+
+Удаляет route-файл разработки из шлюза и останавливает шлюз, если он больше никем не используется
 
 Флаги:
 
@@ -57,28 +75,12 @@ pegas update --latest
 Примеры:
 
 ```bash
-pegas link
-```
-
-### `pegas unlink [options]`
-
-Отключает проект от шлюза Pegas и удаляет маршруты разработки
-
-Флаги:
-
-```text
---cwd <path>          Целевой каталог проекта
-```
-
-Примеры:
-
-```bash
-pegas unlink
+pegas disconnect
 ```
 
 ### `pegas logs [env] [service] [options]`
 
-Просмотр и стриминг логов контейнеров любого окружения (development, stage, production)
+Просмотр и стриминг логов контейнеров любого сценария (development, stage, production)
 
 Флаги:
 
@@ -139,24 +141,6 @@ pegas down
 pegas down --env development
 ```
 
-### `pegas uninstall [options]`
-
-Удаляет Pegas из проекта и вычищает пакет (зеркально init)
-
-Флаги:
-
-```text
---dry-run             Показать план изменений без записи на диск
---cwd <path>          Целевой каталог проекта
-```
-
-Примеры:
-
-```bash
-pegas uninstall
-pegas uninstall --dry-run
-```
-
 ### `pegas ca <install|remove> [options]`
 
 Управляет локальным Root CA для доверенного dev-HTTPS (install/remove)
@@ -176,20 +160,18 @@ pegas ca remove
 
 ### `pegas check [options]`
 
-Проверяет контракт pegas.json, паритет секретов в .env и наличие устаревших файлов конфигурации
+Read-only аудит v3-контракта: валидатор, паритет секретов, гигиена .gitignore. Ничего не меняет
 
 Флаги:
 
 ```text
 --cwd <path>          Целевой каталог проекта
---fix                 Automatically repair common issues (.gitignore, .env.example sync, starter .env)
 ```
 
 Примеры:
 
 ```bash
 pegas check
-pegas check --fix
 pegas check --json
 ```
 

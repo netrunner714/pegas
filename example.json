@@ -1,0 +1,192 @@
+{
+  "$schema": "https://netrunner714.ru/schemas/pegas.json",
+  "projectName": "tf2-trade-exchange",
+  "scenarios": [
+    "development",
+    "stage",
+    "production"
+  ],
+  "gateway": {
+    "development": {
+      "httpPort": 80,
+      "httpsPort": 443
+    },
+    "stage": {
+      "httpPort": 80,
+      "httpsPort": 443
+    },
+    "production": {
+      "httpPort": 80,
+      "httpsPort": 443
+    }
+  },
+  "services": {
+    "redis-queue": {
+      "runtime": {
+        "development": {
+          "driver": "docker"
+        },
+        "stage": {
+          "driver": "docker"
+        },
+        "production": {
+          "driver": "docker"
+        }
+      },
+      "image": {
+        "development": "redis:7-alpine",
+        "stage": "redis:7-alpine",
+        "production": "redis:7-alpine"
+      },
+      "port": {
+        "development": 6379,
+        "stage": 6379,
+        "production": 6379
+      },
+      "healthcheck": {
+        "development": {
+          "test": [
+            "CMD",
+            "redis-cli",
+            "ping"
+          ]
+        },
+        "stage": {
+          "test": [
+            "CMD",
+            "redis-cli",
+            "ping"
+          ]
+        },
+        "production": {
+          "test": [
+            "CMD",
+            "redis-cli",
+            "ping"
+          ]
+        }
+      },
+      "secrets": [
+        "REDIS_URL"
+      ]
+    },
+    "postgres": {
+      "runtime": {
+        "development": {
+          "driver": "docker"
+        },
+        "stage": {
+          "driver": "docker"
+        },
+        "production": {
+          "driver": "docker"
+        }
+      },
+      "image": {
+        "development": "postgres:18-alpine",
+        "stage": "postgres:18-alpine",
+        "production": "postgres:18-alpine"
+      },
+      "port": {
+        "development": 5432,
+        "stage": 5432,
+        "production": 5432
+      },
+      "volumes": {
+        "development": [
+          "pgdata:/var/lib/postgresql/data"
+        ],
+        "stage": [
+          "pgdata:/var/lib/postgresql/data"
+        ],
+        "production": [
+          "pgdata:/var/lib/postgresql/data"
+        ]
+      },
+      "healthcheck": {
+        "development": {
+          "test": [
+            "CMD-SHELL",
+            "pg_isready -U postgres"
+          ]
+        },
+        "stage": {
+          "test": [
+            "CMD-SHELL",
+            "pg_isready -U postgres"
+          ]
+        },
+        "production": {
+          "test": [
+            "CMD-SHELL",
+            "pg_isready -U postgres"
+          ]
+        }
+      },
+      "secrets": [
+        "DATABASE_URL"
+      ]
+    },
+    "web": {
+      "runtime": {
+        "development": {
+          "driver": "bun"
+        },
+        "stage": {
+          "driver": "docker"
+        },
+        "production": {
+          "driver": "docker"
+        }
+      },
+      "build": {
+        "development": null,
+        "stage": {
+          "context": "."
+        },
+        "production": {
+          "context": "."
+        }
+      },
+      "port": {
+        "development": 3000,
+        "stage": 3000,
+        "production": 3000
+      },
+      "domains": {
+        "development": [
+          "app.example.localhost"
+        ],
+        "stage": [
+          "app.example.dev"
+        ],
+        "production": [
+          "app.example.com"
+        ]
+      },
+      "ports": {
+        "development": [],
+        "stage": [],
+        "production": []
+      },
+      "dependsOn": {
+        "development": null,
+        "stage": {
+          "redis-queue": {
+            "condition": "service_healthy"
+          }
+        },
+        "production": {
+          "redis-queue": {
+            "condition": "service_healthy"
+          }
+        }
+      },
+      "secrets": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "SESSION_SECRET"
+      ]
+    }
+  }
+}

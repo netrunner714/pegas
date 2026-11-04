@@ -1,4 +1,4 @@
-# Локальная разработка с HTTPS (`pegas link` / `pegas unlink`)
+# Локальная разработка с HTTPS (`pegas connect` / `pegas disconnect`)
 
 > How-to: получить доверенный HTTPS на `*.localhost` без запуска тяжелых прокси в каждом проекте и без изменения скриптов разработки.
 
@@ -8,7 +8,7 @@
 * Мультидоменная маршрутизация (например, `app.localhost` и `api.localhost` с разделением кук)
 * Внешние OAuth-интеграции (Telegram WebApp, Google OAuth, VK ID), требующие HTTPS redirect URL
 
-Pegas решает эту задачу с помощью **единого общего Docker Gateway** (`pegas-gateway`) и прозрачной привязки хостовых портов (`pegas link`).
+Pegas решает эту задачу с помощью **единого общего Docker Gateway** (`pegas-gateway`) и прозрачной привязки хостовых портов (`pegas connect`).
 
 ---
 
@@ -67,12 +67,12 @@ flowchart TD
 ```
 
 ### Как это работает:
-1. `pegas link` считывает маршруты сценария `development` из файла `pegas.json`.
+1. `pegas connect` считывает маршруты сценария `development` из файла `pegas.json`.
 2. Если общий Gateway ещё не запущен, Pegas поднимает его в Docker.
 3. Маршруты текущего проекта транслируются на `host.docker.internal:<порт>` и динамически регистрируются в Gateway через Caddy Admin API.
 4. Разработчик запускает dev-сервер любимым нативным инструментом (`bun run dev`, `npm run dev`, `cargo run` и т.д.).
 5. Браузер открывает `https://web.my-app.localhost` с валидным сертификатом без указания портов.
-6. `pegas unlink` удаляет маршруты проекта из Gateway при завершении работы.
+6. `pegas disconnect` удаляет маршруты проекта из Gateway при завершении работы.
 
 ---
 
@@ -82,7 +82,7 @@ flowchart TD
 В каталоге проекта выполните:
 
 ```bash
-npx pegas link
+npx pegas connect
 ```
 
 Команда автоматически:
@@ -107,7 +107,7 @@ Dev-сервер работает нативно на хосте со станд
 Когда разработка завершена или вы переключаетесь на другую задачу:
 
 ```bash
-npx pegas unlink
+npx pegas disconnect
 ```
 
 Gateway освободит маршруты текущего проекта, не затрагивая маршруты других активных проектов.

@@ -133,7 +133,7 @@ export async function runRuntimeCompose(
  */
 export async function removeProjectContainers(projectId: string, environment?: string): Promise<void> {
   const filters = ["label=pegas.project=" + projectId];
-  if (environment) filters.push("label=pegas.environment=" + normalizeEnvironment(environment));
+  if (environment) filters.push("label=pegas.scenario=" + environment);
   const listed = child_process.execFileSync("docker", [
     "ps", "-aq", ...filters.flatMap((filter) => ["--filter", filter]),
   ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

@@ -1,6 +1,6 @@
 {
   "name": "@netrunner714/pegas",
-  "version": "2.0.5",
+  "version": "3.0.0",
   "description": "Bun-native, agent-first zero-config L7 reverse proxy orchestrator for Docker",
   "main": "dist/index.js",
   "type": "module",
@@ -8,10 +8,11 @@
     "pegas": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "scripts": {
-    "build": "bun scripts/gen-docs.ts && bun build src/index.ts --target=node --outfile=dist/index.js && chmod +x dist/index.js",
+    "build": "bun scripts/gen-example.ts && bun scripts/gen-docs.ts && bun build src/index.ts --target=node --outfile=dist/index.js && bun build src/runtime-sdk.ts --target=node --outfile=dist/runtime.js && tsc -p tsconfig.declarations.json && mv dist/runtime-sdk.d.ts dist/runtime.d.ts && rm -rf dist/src && chmod +x dist/index.js",
     "link:global": "bun run build && bun link",
     "unlink:global": "bun unlink",
     "test": "bun scripts/test-runner.ts",
@@ -51,5 +52,9 @@
   },
   "engines": {
     "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./runtime": "./dist/runtime.js"
   }
 }

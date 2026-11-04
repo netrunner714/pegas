@@ -14,6 +14,28 @@ mock.module("../docker.js", () => ({
 }));
 
 import { handleDeploy, resolveScopedUpstream, waitForContainerReadiness } from "./deploy.js";
+
+/** Дописывает v3-обязательные поля контракта (scenarios/gateway/runtime-карты). */
+function v3ify(contract: any): any {
+  const scenarios = ["development", "production"];
+  const out = {
+    ...contract,
+    projectName: contract.projectName ?? "fixture-project",
+    scenarios,
+    gateway: { development: { httpPort: 80, httpsPort: 443 }, production: { httpPort: 80, httpsPort: 443, acmeEmail: "a@b.co" } },
+  };
+  for (const [name, svc] of Object.entries<any>(contract.services || {})) {
+    const driverOf = (sc: string) => svc.runtime?.[sc]?.driver ?? "docker";
+    out.services[name] = {
+      ...svc,
+      runtime: { development: { driver: driverOf("development") }, production: { driver: driverOf("production") } },
+      port: svc.port ?? { development: 3000, production: 3000 },
+      // docker-сервисам нужен image: добавляем фиктивный, если своего нет
+      ...(svc.image || svc.build ? {} : { image: { development: "node:24", production: "node:24" } }),
+    };
+  }
+  return out;
+}
 import { CONTRACT_FILENAME } from "../contract.js";
 
 describe("pegas deploy", () => {
@@ -26,55 +48,60 @@ describe("pegas deploy", () => {
     expect(resolveScopedUpstream("127.0.0.1:3000", "my-blog")).toBe("127.0.0.1:3000");
   });
 
-  it("orchestrates caddy routes from pegas.json with scoped upstream and normalized domains", async () => {
+  it("rejects dirty domains (scheme/port/path) as invalid v3 contract — no normalization", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
-    const projectName = path.basename(tmpProj).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 
-    // Pre-create gateway Caddyfile and conf.d
-    await fs.mkdir(path.join(tmpGateway, "conf.d"), { recursive: true });
-    await fs.writeFile(path.join(tmpGateway, "Caddyfile"), "import /etc/caddy/conf.d/*.caddy\n", "utf-8");
-
-    // Create pegas.json in project with dirty domains (https://, trailing slashes, ports)
     const contract = {
-      projectName,
+      projectName: "dirty-domains",
       services: {
         web: {
-          upstream: "web:3000",
+          port: { development: 3000, production: 3000 },
           domains: {
-            dev: ["app.localhost"],
-            prod: ["https://mysite.ru/", "web.mysite.ru:443"],
+            development: ["app.localhost"],
+            production: ["https://mysite.ru/", "web.mysite.ru:443"],
           },
         },
         api: {
-          upstream: "backend:8000",
+          port: { development: 8000, production: 8000 },
           domains: {
-            dev: ["api.localhost"],
-            prod: ["http://api.mysite.ru/"],
+            development: ["api.localhost"],
+            production: ["http://api.mysite.ru/"],
           },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
-    // Run deploy in skipUp mode
+    let errorOutput: any = null;
     const origLog = console.log;
-    const origWarn = console.warn;
-    console.log = () => {};
-    console.warn = () => {};
+    console.log = (msg: any) => {
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed.error && !errorOutput) errorOutput = parsed;
+      } catch {}
+    };
+
     try {
       await handleDeploy({
         cwd: tmpProj,
         scenario: "production",
         gatewayDir: tmpGateway,
         skipUp: true,
+        json: true,
+        noExit: true,
       });
     } finally {
       console.log = origLog;
-      console.warn = origWarn;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }
+
+    expect(errorOutput).not.toBeNull();
+    expect(errorOutput.error).toContain("Invalid Pegas contract");
+    const issueText = JSON.stringify(errorOutput.details || []);
+    expect(issueText).toContain("https://mysite.ru/");
+    expect(issueText).toContain("web.mysite.ru:443");
   });
 
   it("skips placeholder domain 'yourdomain.com' and services without prod domains", async () => {
@@ -84,19 +111,17 @@ describe("pegas deploy", () => {
     const contract = {
       services: {
         web: {
-          upstream: "app:3000",
           domains: {
-            dev: ["app.localhost"],
-            prod: ["yourdomain.com", "mysite.ru"], // placeholder + valid
+            development: ["app.localhost"],
+            production: ["yourdomain.com", "mysite.ru"], // placeholder + valid
           },
         },
         app: {
-          upstream: "app:3000",
           // missing domains.prod
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract)), "utf-8");
 
     const origLog = console.log;
     const origWarn = console.warn;
@@ -170,15 +195,11 @@ describe("pegas deploy", () => {
       projectName: "project-b",
       services: {
         web: {
-          upstream: "web:3000",
-          domains: {
-            dev: ["b.localhost"],
-            prod: ["protected.com"],
-          },
+          domains: { development: ["b.localhost"], production: ["protected.com"] },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
     const errors: string[] = [];
     const origError = console.error;
@@ -223,15 +244,11 @@ describe("pegas deploy", () => {
       projectName: "project-self",
       services: {
         web: {
-          upstream: "web:3000",
-          domains: {
-            dev: ["self.localhost"],
-            prod: ["my-domain.com"],
-          },
+          domains: { development: ["self.localhost"], production: ["my-domain.com"] },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
     const errors: string[] = [];
     const origError = console.error;
@@ -274,12 +291,11 @@ describe("pegas deploy", () => {
       projectName: "live-app",
       services: {
         web: {
-          upstream: "web:3000",
-          domains: { dev: ["app.localhost"], prod: ["live.example.com"] },
+          domains: { development: ["app.localhost"], production: ["live.example.com"] },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
     const logs: string[] = [];
     const origLog = console.log;
@@ -337,12 +353,11 @@ describe("pegas deploy", () => {
       projectName: "rollback-app",
       services: {
         web: {
-          upstream: "web:3000",
-          domains: { dev: ["app.localhost"], prod: ["new.example.com"] },
+          domains: { development: ["app.localhost"], production: ["new.example.com"] },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
     const errors: string[] = [];
     const logs: string[] = [];
@@ -384,12 +399,11 @@ describe("pegas deploy", () => {
       projectName: "dev-only-app",
       services: {
         web: {
-          upstream: "web:3000",
-          domains: { dev: ["dev.localhost"], prod: [] },
+          domains: { development: ["dev.localhost"], production: [] },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
     const logs: string[] = [];
     const origLog = console.log;
@@ -484,15 +498,14 @@ describe("pegas deploy", () => {
       projectName: "dns-test-project",
       services: {
         web: {
-          upstream: "web:3000",
           domains: {
-            dev: ["test.localhost"],
-            prod: ["dns.google"], // resolves to 8.8.8.8
+            development: ["test.localhost"],
+            production: ["dns.google"], // resolves to 8.8.8.8
           },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract)), "utf-8");
 
     const errors: string[] = [];
     const origError = console.error;
@@ -537,29 +550,27 @@ describe("pegas deploy", () => {
     expect(errors.some((e) => e.includes("Scenario is required for deploy"))).toBe(true);
   });
 
-  it("resolves scoped routes and passes them to caddy generator during deploy", async () => {
+  it("route config uses port-map upstreams and skips host-driver services in the scenario", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-routes-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-routes-"));
 
+    await fs.mkdir(path.join(tmpGateway, "conf.d"), { recursive: true });
+    await fs.writeFile(path.join(tmpGateway, "Caddyfile"), "import conf.d/*.caddy\n", "utf-8");
+
     const contract = {
       projectName: "route-test",
-      runtime: "docker",
       services: {
         frontend: {
-          upstream: "web:80",
-          routes: {
-            "/api/*": "backend:3000",
-          },
-          domains: {
-            production: ["site.ru"],
-          },
+          port: { development: 3000, production: 3000 },
+          domains: { development: ["app.localhost"], production: ["site.ru"] },
         },
         backend: {
-          upstream: "backend:3000",
+          port: { development: 8000, production: 8000 },
+          domains: { development: ["api.localhost"], production: ["api.site.ru"] },
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract, null, 2), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
     let successOutput: any = null;
     const origLog = console.log;
@@ -577,9 +588,12 @@ describe("pegas deploy", () => {
         gatewayDir: tmpGateway,
         skipUp: true,
         json: true,
+        noExit: true,
       });
       expect(successOutput).not.toBeNull();
-      expect(successOutput.routes[0].routes["/api/*"]).toContain("backend:3000");
+      const upstreams = JSON.stringify(successOutput.routes || []);
+      expect(upstreams).toContain("-production-frontend:3000");
+      expect(upstreams).toContain("-production-backend:8000");
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
@@ -593,16 +607,15 @@ describe("pegas deploy", () => {
 
     const contract = {
       projectName: "sec-test",
-      runtime: "docker",
-      secrets: ["REQUIRED_KEY"],
       services: {
         web: {
-          upstream: "web:80",
-          domains: { production: ["sec.ru"] },
+          port: { development: 3000, production: 3000 },
+          domains: { development: ["app.localhost"], production: ["sec.ru"] },
+          secrets: ["REQUIRED_KEY"],
         },
       },
     };
-    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract), "utf-8");
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract)), "utf-8");
 
     let errorOutput: any = null;
     const origLog = console.log;

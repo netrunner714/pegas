@@ -44,15 +44,7 @@ export async function handleLogs(options: LogsOptions = {}): Promise<void> {
     return;
   }
 
-  if (contract.runtime !== "docker") {
-    const msg = `'pegas logs' requires a Docker runtime project ('runtime: "docker"' in ${CONTRACT_FILENAME}).`;
-    if (isJson) console.log(JSON.stringify({ error: msg }));
-    else console.error(`❌ Error: ${msg}`);
-    if (!options.noExit) process.exit(1);
-    return;
-  }
-
-  const targetEnv = normalizeEnvironment(options.env || "development");
+  const targetEnv = options.env || contract.scenarios?.[0] || "development";
   const service = options.service;
   const services = contract.services || {};
 

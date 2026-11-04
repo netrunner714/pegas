@@ -48,14 +48,14 @@ export const GLOBAL_OPTIONS: CliOptionDef[] = [
 export const COMMANDS: CliCommandDef[] = [
   {
     name: "init",
-    summary: "Create the pegas.json contract (runtime auto-detected from the project), docs and scripts",
+    summary: "Scaffold Pegas files: AGENTS.md marker block, docs/pegas.md, .pegas/, .gitignore entries (pegas.json is NOT created)",
     usage: "init [options]",
     options: [
       {
         name: "force",
         type: "boolean",
         default: false,
-        description: "Reset contract pegas.json to defaults (creates pegas.json.bak)",
+        description: "Re-scaffold even if marker block already exists (idempotent merge)",
       },
       {
         name: "dry-run",
@@ -81,7 +81,7 @@ export const COMMANDS: CliCommandDef[] = [
         name: "latest",
         type: "boolean",
         default: false,
-        description: "Upgrade across major versions (e.g. 1.x -> 2.x)",
+        description: "Upgrade across major versions (e.g. 2.x -> 3.x)",
       },
       {
         name: "cwd",
@@ -93,9 +93,9 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas update", "$ pegas update --latest"],
   },
   {
-    name: "link",
-    summary: "Link project to shared Pegas Gateway for local development (*.localhost)",
-    usage: "link [options]",
+    name: "connect",
+    summary: "Expose development services via shared gateway (routes host services through host.docker.internal)",
+    usage: "connect [options]",
     options: [
       {
         name: "cwd",
@@ -103,13 +103,19 @@ export const COMMANDS: CliCommandDef[] = [
         placeholder: "<path>",
         description: "Target project directory",
       },
+      {
+        name: "dry-run",
+        type: "boolean",
+        default: false,
+        description: "Print the route file without writing to disk",
+      },
     ],
-    examples: ["$ pegas link"],
+    examples: ["$ pegas connect", "$ pegas connect --dry-run"],
   },
   {
-    name: "unlink",
-    summary: "Unlink project from shared Pegas Gateway and clean up dev routes",
-    usage: "unlink [options]",
+    name: "disconnect",
+    summary: "Remove development route file from the gateway and stop the gateway if unused",
+    usage: "disconnect [options]",
     options: [
       {
         name: "cwd",
@@ -118,7 +124,7 @@ export const COMMANDS: CliCommandDef[] = [
         description: "Target project directory",
       },
     ],
-    examples: ["$ pegas unlink"],
+    examples: ["$ pegas disconnect"],
   },
   {
     name: "logs",
@@ -225,26 +231,6 @@ export const COMMANDS: CliCommandDef[] = [
     examples: ["$ pegas down", "$ pegas down --env development"],
   },
   {
-    name: "uninstall",
-    summary: "Remove Pegas from the project and clean the package (mirror of init)",
-    usage: "uninstall [options]",
-    options: [
-      {
-        name: "dry-run",
-        type: "boolean",
-        default: false,
-        description: "Print planned removals without writing to disk",
-      },
-      {
-        name: "cwd",
-        type: "string",
-        placeholder: "<path>",
-        description: "Target project directory",
-      },
-    ],
-    examples: ["$ pegas uninstall", "$ pegas uninstall --dry-run"],
-  },
-  {
     name: "ca",
     summary: "Manage local Root CA for trusted dev HTTPS (install/remove)",
     usage: "ca <install|remove> [options]",
@@ -260,7 +246,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "check",
-    summary: "Audit repository hygiene against Pegas 2-file standard (pegas.json + .env), secrets parity, and legacy clutter",
+    summary: "Read-only audit: validate the v3 contract, secrets parity, and .gitignore hygiene (no --fix, never mutates)",
     usage: "check [options]",
     options: [
       {
@@ -269,13 +255,8 @@ export const COMMANDS: CliCommandDef[] = [
         placeholder: "<path>",
         description: "Target project directory",
       },
-      {
-        name: "fix",
-        type: "boolean",
-        description: "Automatically repair common issues (.gitignore, .env.example sync, starter .env)",
-      },
     ],
-    examples: ["$ pegas check", "$ pegas check --fix", "$ pegas check --json"],
+    examples: ["$ pegas check", "$ pegas check --json"],
   },
   {
     name: "status",
@@ -421,8 +402,8 @@ export function generateHelpText(commandName?: string): string {
     { name: "update", options: COMMANDS.find((c) => c.name === "update")?.options || [] },
     { name: "deploy", options: COMMANDS.find((c) => c.name === "deploy")?.options || [] },
     { name: "init", options: COMMANDS.find((c) => c.name === "init")?.options || [] },
-    { name: "link", options: COMMANDS.find((c) => c.name === "link")?.options || [] },
-    { name: "unlink", options: COMMANDS.find((c) => c.name === "unlink")?.options || [] },
+    { name: "connect", options: COMMANDS.find((c) => c.name === "connect")?.options || [] },
+    { name: "disconnect", options: COMMANDS.find((c) => c.name === "disconnect")?.options || [] },
   ];
 
   for (const sec of commandOptionSections) {
@@ -439,7 +420,7 @@ export function generateHelpText(commandName?: string): string {
 
   lines.push(`EXAMPLES:`);
   lines.push(`  $ pegas init`);
-  lines.push(`  $ pegas link`);
+  lines.push(`  $ pegas connect`);
   lines.push(`  $ pegas deploy -s production`);
   lines.push(`  $ pegas logs -f`);
   lines.push(`  $ pegas status`);

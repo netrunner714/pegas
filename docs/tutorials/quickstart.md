@@ -9,69 +9,87 @@
 - VPS с установленным Docker и правами на порты 80/443;
 - домен (для прода) с A-записью на IP вашего VPS.
 
-## Шаг 1. Инициализация в проекте
+## Шаг 1. Подключить Pegas к проекту
 
-Выполните в корне проекта с `package.json` или `docker-compose.yml`:
+Выполните в корне проекта:
 
 ```bash
 npx @netrunner714/pegas init
 ```
 
-Команда создаст контракт `pegas.json`, шаблоны переменных окружения
-(`.env.example`, `.env`), добавит пакет в devDependencies и сгенерирует
-`docs/pegas.md` для ИИ-агентов. Посмотрите результат без записи на диск:
+Команда создаёт `docs/pegas.md` (правила для ИИ-агентов), добавляет блок Pegas
+в `AGENTS.md` и правит `.gitignore` (`.pegas`, `.env*`, `!.env.example`).
+Контракт `pegas.json` инициализация **не создаёт** — в v3 его пишут по
+[схеме](https://netrunner714.ru/schemas/pegas.json) и эталону `example.json`
+(разработчик или агент). Предпросмотр без записи:
 
 ```bash
 npx @netrunner714/pegas init --dry-run
 ```
 
-## Шаг 2. Локальная разработка с HTTPS
+## Шаг 2. Описать контракт
 
-Для доверенного сертификата (зелёный замок в браузере) один раз установите локальный CA:
+Минимальный `pegas.json` (два сценария, один HTTP-сервис):
+
+```jsonc
+{
+  "$schema": "https://netrunner714.ru/schemas/pegas.json",
+  "projectName": "my-app",
+  "scenarios": ["development", "production"],
+  "gateway": {
+    "development": { "httpPort": 80, "httpsPort": 443 },
+    "production":  { "httpPort": 80, "httpsPort": 443, "acmeEmail": "admin@example.com" }
+  },
+  "services": {
+    "web": {
+      "runtime": { "development": { "driver": "docker" }, "production": { "driver": "docker" } },
+      "build":   { "development": { "context": "." }, "production": { "context": "." } },
+      "port":    { "development": 3000, "production": 3000 },
+      "domains": { "development": ["my-app.localhost"], "production": ["example.com"] },
+      "secrets": []
+    }
+  }
+}
+```
+
+Правила: все сценарио-зависимые поля — карты с ключами из `scenarios` (Zero Scalars);
+секреты — только имена в `services.<name>.secrets`, значения в `.env`/CI.
 
 ```bash
+npx pegas check   # рид-онли аудит: контракт, секреты, git-гигиена
+```
+
+## Шаг 3. Локальная разработка с HTTPS
+
+```bash
+# 1. Доверенный Root CA (один раз на машину)
 npx pegas ca install
+
+# 2. Dev-маршруты проекта в общем шлюзе
+npx pegas connect
+
+# 3. Инфра-контейнеры сценария
+npx pegas deploy -s development
+
+# 4. Host-сервисы (driver: "bun") — привычной командой
+bun run dev
 ```
 
-Подключите проект к общему локальному шлюзу:
+Проект доступен по доверенному HTTPS: `https://my-app.localhost`.
+Освободить маршруты: `npx pegas disconnect`.
 
-```bash
-npx pegas link
-```
-
-Запустите локальный сервер разработки любой привычной командой (Pegas не вмешивается в процесс запуска):
-
-```bash
-npm run dev # или: bun dev, pnpm dev
-```
-
-Приложение доступно по доверенному адресу `https://<проект>.localhost`.
-После завершения работы отключите проект:
-
-```bash
-npx pegas unlink
-```
-
-## Шаг 3. Деплой на VPS
-
-Скоммитьте изменения, на сервере выполните:
+## Шаг 4. Деплой на VPS
 
 ```bash
 npx pegas deploy -s production
 ```
 
-Pegas поднимет контейнеры, дождётся их готовности (readiness), настроит
-маршруты Caddy и перезагрузит шлюз без даунтайма. SSL-сертификаты Let's
-Encrypt выпускаются автоматически при первом обращении к домену.
-
-Проверьте состояние проекта:
-
-```bash
-npx pegas status
-```
+Pegas поднимет изолированные контейнеры, дождётся readiness-проб,
+зарегистрирует маршруты, получит сертификаты Let's Encrypt и выполнит
+hot-reload без даунтайма.
 
 ## Что дальше
 
-- [Справочник CLI](../reference/cli.md) — все команды и флаги;
-- [Контракт pegas.json](../reference/contract.md) — все поля и значения;
-- [Архитектура](../explanation/architecture.md) — как это работает и почему так.
+- [Справочник контракта](../reference/contract.md) — все поля и правила;
+- [Локальный HTTPS](../how-to/local-https.md) — детали CA и шлюза;
+- [Архитектура](../explanation/architecture.md) — почему так устроено.

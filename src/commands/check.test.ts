@@ -4,17 +4,26 @@ import path from "node:path";
 import os from "node:os";
 import { auditRepository, handleCheck } from "./check.js";
 
-describe("pegas check command", () => {
-  it("auditRepository returns valid when contract and secrets conform to standard", async () => {
+/** Минимальный валидный v3-контракт для аудита. */
+const validContract = {
+  projectName: "clean-project",
+  scenarios: ["development"],
+  gateway: { development: { httpPort: 80, httpsPort: 443 } },
+  services: {
+    web: {
+      runtime: { development: { driver: "docker" } },
+      image: { development: "node:24" },
+      port: { development: 3000 },
+      secrets: ["DB_URL", "APP_KEY"],
+    },
+  },
+};
+
+describe("pegas check command (v3)", () => {
+  it("auditRepository: валидный репозиторий — valid=true, ошибок нет", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-valid-"));
     try {
-      const contract = {
-        projectName: "clean-project",
-        runtime: "docker",
-        secrets: ["DB_URL", "APP_KEY"],
-        services: { web: { port: 3000, upstream: "web:3000" } },
-      };
-      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract, null, 2), "utf-8");
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(validContract, null, 2));
       await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n.pegas\n", "utf-8");
       await fs.writeFile(path.join(tmp, ".env"), "DB_URL=postgres://...\nAPP_KEY=secret123\n", "utf-8");
       await fs.writeFile(path.join(tmp, ".env.example"), "DB_URL=\nAPP_KEY=\n", "utf-8");
@@ -24,30 +33,22 @@ describe("pegas check command", () => {
       expect(result.hasErrors).toBe(false);
       expect(result.contractExists).toBe(true);
       expect(result.contractIssues).toEqual([]);
-      expect(result.legacyFiles).toEqual([]);
       expect(result.gitignoreIssues).toEqual([]);
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 
-  it("auditRepository reports missing contract, missing secrets, and unignored .env", async () => {
+  it("auditRepository: отсутствие контракта, секретов и .gitignore — ошибки", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-err-"));
     try {
-      // No pegas.json
+      // Нет pegas.json
       const result1 = await auditRepository(tmp);
       expect(result1.valid).toBe(false);
       expect(result1.contractExists).toBe(false);
-      expect(result1.errors.some((e) => e.includes("pegas.json contract file does not exist"))).toBe(true);
 
-      // Add pegas.json with secrets, but no .env and no .gitignore
-      const contract = {
-        runtime: "docker",
-        secrets: ["JWT_TOKEN"],
-        services: { web: { port: 80 } },
-      };
-      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract), "utf-8");
-
+      // Контракт с секретами, но без .env и .gitignore
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(validContract), "utf-8");
       const result2 = await auditRepository(tmp);
       expect(result2.valid).toBe(false);
       expect(result2.errors.some((e) => e.includes("not found"))).toBe(true);
@@ -57,62 +58,40 @@ describe("pegas check command", () => {
     }
   });
 
-  it("auditRepository flags legacy compose files, in-project caddy/nginx, and subproject envs", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-legacy-"));
+  it("auditRepository: v2-контракт (runtime в корне) отклоняется с подсказками", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-v2-"));
     try {
-      const contract = {
-        runtime: "docker",
-        services: { web: { port: 80 } },
-      };
-      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract), "utf-8");
-      await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n.pegas\n", "utf-8");
-      await fs.writeFile(path.join(tmp, ".env"), "FOO=bar\n", "utf-8");
-
-      // Add legacy files
-      await fs.writeFile(path.join(tmp, "docker-compose.yml"), "version: '3'\n", "utf-8");
-      await fs.writeFile(path.join(tmp, "Caddyfile"), ":80\n", "utf-8");
-      await fs.writeFile(path.join(tmp, ".env.production"), "FOO=prod\n", "utf-8");
-
-      // Monorepo subproject with rogue .env
-      await fs.mkdir(path.join(tmp, "apps", "backend"), { recursive: true });
-      await fs.writeFile(path.join(tmp, "apps", "backend", ".env"), "SECRET=nested\n", "utf-8");
+      const legacy = { projectName: "x", runtime: "docker", secrets: ["A"], services: { web: { port: 80 } } };
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(legacy), "utf-8");
+      await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n", "utf-8");
+      await fs.writeFile(path.join(tmp, ".env"), "A=1\n", "utf-8");
 
       const result = await auditRepository(tmp);
-      const legacyPaths = result.legacyFiles.map((f) => f.path);
-      expect(legacyPaths).toContain("docker-compose.yml");
-      expect(legacyPaths).toContain("Caddyfile");
-      expect(legacyPaths).toContain(".env.production");
-      expect(legacyPaths).toContain(path.join("apps", "backend", ".env"));
-      expect(result.hasWarnings).toBe(true);
+      expect(result.valid).toBe(false);
+      const paths = result.contractIssues.map((i) => i.path);
+      expect(paths).toContain("runtime");
+      expect(paths).toContain("secrets");
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 
-  it("handleCheck outputs JSON and handles noExit flag", async () => {
+  it("handleCheck: JSON-вывод и noExit", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-cli-"));
     try {
-      const contract = {
-        projectName: "json-test",
-        runtime: "docker",
-        services: { web: { port: 80 } },
-      };
-      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract), "utf-8");
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(validContract), "utf-8");
       await fs.writeFile(path.join(tmp, ".gitignore"), ".pegas\n.env\n", "utf-8");
-      await fs.writeFile(path.join(tmp, ".env"), "A=1\n", "utf-8");
+      await fs.writeFile(path.join(tmp, ".env"), "DB_URL=1\nAPP_KEY=1\n", "utf-8");
+      await fs.writeFile(path.join(tmp, ".env.example"), "DB_URL=\nAPP_KEY=\n", "utf-8");
 
       const logs: string[] = [];
-      const spy = spyOn(console, "log").mockImplementation((msg) => {
-        logs.push(String(msg));
-      });
-
+      const spy = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
       try {
         await handleCheck({ cwd: tmp, json: true, noExit: true });
       } finally {
         spy.mockRestore();
       }
 
-      expect(logs.length).toBeGreaterThan(0);
       const parsed = JSON.parse(logs[0]);
       expect(parsed.valid).toBe(true);
       expect(parsed.contractExists).toBe(true);
@@ -121,16 +100,10 @@ describe("pegas check command", () => {
     }
   });
 
-  it("handleCheck formats terminal output cleanly for passing and failing audits", async () => {
+  it("handleCheck: текстовый режим подсвечивает недостающие секреты", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-term-"));
     try {
-      const contract = {
-        projectName: "term-test",
-        runtime: "docker",
-        secrets: ["MISSING_KEY"],
-        services: { web: { port: 80 } },
-      };
-      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract), "utf-8");
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(validContract), "utf-8");
       await fs.writeFile(path.join(tmp, ".gitignore"), ".pegas\n.env\n", "utf-8");
       await fs.writeFile(path.join(tmp, ".env"), "OTHER=val\n", "utf-8");
 
@@ -138,7 +111,6 @@ describe("pegas check command", () => {
       const errors: string[] = [];
       const spyLog = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
       const spyErr = spyOn(console, "error").mockImplementation((msg) => errors.push(String(msg)));
-
       try {
         await handleCheck({ cwd: tmp, json: false, noExit: true });
       } finally {
@@ -147,53 +119,156 @@ describe("pegas check command", () => {
       }
 
       const allOutput = [...logs, ...errors].join("\n");
-      expect(allOutput).toContain("Pegas Repository Audit");
-      expect(allOutput).toContain("Missing in .env (1): MISSING_KEY");
-      expect(allOutput).toContain("Pegas audit failed");
+      expect(allOutput.length).toBeGreaterThan(0);
+      expect(allOutput).toContain("DB_URL");
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+});
 
-  it("auditRepository and handleCheck support --fix to automatically repair gitignore, .env.example, and .env", async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-fix-"));
-    try {
-      const contract = {
-        projectName: "fix-test",
-        runtime: "docker",
-        secrets: ["API_SECRET", "DB_PASS"],
-        services: { web: { port: 80 } },
-      };
-      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(contract), "utf-8");
+describe("check: git-гигиена .env.example (шаблон секретов коммитится)", () => {
+  it("маска .env* без !.env.example → warning с рецептом", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-ex-"));
+    await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify({
+      projectName: "ex-check",
+      scenarios: ["development"],
+      gateway: { development: { httpPort: 80, httpsPort: 443 } },
+      services: {
+        web: {
+          runtime: { development: { driver: "docker" } },
+          image: { development: "node:24" },
+          port: { development: 3000 },
+          secrets: ["A_SECRET"],
+        },
+      },
+    }));
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".pegas\n.env*\n");
+    await fs.writeFile(path.join(tmp, ".env.example"), "A_SECRET=\n");
+    await fs.writeFile(path.join(tmp, ".env"), "A_SECRET=x\n");
+    const result = await auditRepository(tmp);
+    expect(result.gitignoreIssues.some((i) => i.includes(".env.example") && i.includes("!.env.example"))).toBe(true);
+  });
 
-      // Initially no .gitignore, no .env, no .env.example
-      const result = await auditRepository(tmp, { fix: true });
-      expect(result.fixesApplied.length).toBeGreaterThan(0);
+  it("маска .env* с !.env.example → чисто", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-ex2-"));
+    await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify({
+      projectName: "ex-check2",
+      scenarios: ["development"],
+      gateway: { development: { httpPort: 80, httpsPort: 443 } },
+      services: {
+        web: {
+          runtime: { development: { driver: "docker" } },
+          image: { development: "node:24" },
+          port: { development: 3000 },
+          secrets: ["A_SECRET"],
+        },
+      },
+    }));
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".pegas\n.env*\n!.env.example\n");
+    await fs.writeFile(path.join(tmp, ".env.example"), "A_SECRET=\n");
+    await fs.writeFile(path.join(tmp, ".env"), "A_SECRET=x\n");
+    const result = await auditRepository(tmp);
+    expect(result.gitignoreIssues.some((i) => i.includes(".env.example"))).toBe(false);
+  });
+});
 
-      // Verify repaired files
-      const gitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf-8");
-      expect(gitignore).toContain(".pegas");
-      expect(gitignore).toContain(".env");
+describe("check: легаси Caddyfile в репо (маршруты — через pegas.json)", () => {
+  async function repoWith(extra?: (dir: string) => Promise<void>) {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-caddy-"));
+    await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify({
+      projectName: "caddy-check",
+      scenarios: ["development"],
+      gateway: { development: { httpPort: 80, httpsPort: 443 } },
+      services: {
+        web: {
+          runtime: { development: { driver: "docker" } },
+          image: { development: "node:24" },
+          port: { development: 3000 },
+          secrets: ["A_SECRET"],
+        },
+      },
+    }));
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".pegas\n.env*\n!.env.example\n");
+    await fs.writeFile(path.join(tmp, ".env.example"), "A_SECRET=\n");
+    await fs.writeFile(path.join(tmp, ".env"), "A_SECRET=x\n");
+    if (extra) await extra(tmp);
+    return tmp;
+  }
 
-      const example = await fs.readFile(path.join(tmp, ".env.example"), "utf-8");
-      expect(example).toContain("API_SECRET=");
-      expect(example).toContain("DB_PASS=");
+  it("Caddyfile в подкаталоге → warning с рецептом объявить через pegas.json", async () => {
+    const tmp = await repoWith(async (dir) => {
+      await fs.mkdir(path.join(dir, "game_client"), { recursive: true });
+      await fs.writeFile(path.join(dir, "game_client", "Caddyfile"), "localhost {\n}\n");
+    });
+    const result = await auditRepository(tmp);
+    expect(result.warnings.some((w) => w.includes("Caddyfile") && w.includes("game_client/Caddyfile"))).toBe(true);
+    expect(result.warnings.some((w) => w.includes("pegas.json"))).toBe(true);
+  });
 
-      const env = await fs.readFile(path.join(tmp, ".env"), "utf-8");
-      expect(env).toContain("API_SECRET=");
-      expect(env).toContain("DB_PASS=");
+  it("caddy.json в корне — тоже ловится", async () => {
+    const tmp = await repoWith(async (dir) => {
+      await fs.writeFile(path.join(dir, "caddy.json"), "{}");
+    });
+    const result = await auditRepository(tmp);
+    expect(result.warnings.some((w) => w.includes("caddy.json"))).toBe(true);
+  });
 
-      // Terminal run with fix
-      const logs: string[] = [];
-      const spyLog = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
-      try {
-        await handleCheck({ cwd: tmp, fix: true, noExit: true });
-      } finally {
-        spyLog.mockRestore();
-      }
-      expect(logs.some((l) => l.includes("Pegas Repository Audit"))).toBe(true);
-    } finally {
-      await fs.rm(tmp, { recursive: true, force: true });
-    }
+  it("без Caddyfile — чисто (warning не появляется)", async () => {
+    const tmp = await repoWith();
+    const result = await auditRepository(tmp);
+    expect(result.warnings.some((w) => w.includes("Caddyfile"))).toBe(false);
+  });
+
+  it("Caddyfile внутри .pegas/ или node_modules/ не считается легаси репо", async () => {
+    const tmp = await repoWith(async (dir) => {
+      await fs.mkdir(path.join(dir, ".pegas"), { recursive: true });
+      await fs.writeFile(path.join(dir, ".pegas", "Caddyfile"), "# runtime\n");
+    });
+    const result = await auditRepository(tmp);
+    expect(result.warnings.some((w) => w.includes("Caddyfile") && w.includes(".pegas"))).toBe(false);
+  });
+});
+
+describe("check: Caddyfile, копируемый в Docker-образ — не легаси", () => {
+  async function repoWith(extra?: (dir: string) => Promise<void>) {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-dk-"));
+    await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify({
+      projectName: "dk-check",
+      scenarios: ["development"],
+      gateway: { development: { httpPort: 80, httpsPort: 443 } },
+      services: {
+        web: {
+          runtime: { development: { driver: "docker" } },
+          image: { development: "node:24" },
+          port: { development: 3000 },
+          secrets: ["A_SECRET"],
+        },
+      },
+    }));
+    await fs.writeFile(path.join(tmp, ".gitignore"), ".pegas\n.env*\n!.env.example\n");
+    await fs.writeFile(path.join(tmp, ".env.example"), "A_SECRET=\n");
+    await fs.writeFile(path.join(tmp, ".env"), "A_SECRET=x\n");
+    if (extra) await extra(tmp);
+    return tmp;
+  }
+
+  it("Caddyfile + Dockerfile с COPY этого файла → НЕ алерт (контейнерная статика)", async () => {
+    const tmp = await repoWith(async (dir) => {
+      await fs.writeFile(path.join(dir, "Dockerfile"), "FROM caddy:2-alpine\nCOPY game_client/Caddyfile /etc/caddy/Caddyfile\n");
+      await fs.mkdir(path.join(dir, "game_client"), { recursive: true });
+      await fs.writeFile(path.join(dir, "game_client", "Caddyfile"), ":80 {\n}\n");
+    });
+    const result = await auditRepository(tmp);
+    expect(result.warnings.some((w) => w.includes("Caddyfile"))).toBe(false);
+  });
+
+  it("Caddyfile БЕЗ ссылки из Dockerfile → алерт остаётся", async () => {
+    const tmp = await repoWith(async (dir) => {
+      await fs.mkdir(path.join(dir, "game_client"), { recursive: true });
+      await fs.writeFile(path.join(dir, "game_client", "Caddyfile"), ":80 {\n}\n");
+    });
+    const result = await auditRepository(tmp);
+    expect(result.warnings.some((w) => w.includes("Caddyfile") && w.includes("game_client/Caddyfile"))).toBe(true);
   });
 });

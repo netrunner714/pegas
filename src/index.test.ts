@@ -5,14 +5,7 @@ import fs from "node:fs/promises";
 import syncFs from "node:fs";
 import child_process from "node:child_process";
 import { findProjectRoot } from "./gateway.js";
-import {
-  validateNodeVersion,
-  ensureNodeVersion,
-  tryLocalDelegation,
-  main,
-  VERSION,
-  type MainDispatchers,
-} from "./index.js";
+import { validateNodeVersion, ensureNodeVersion, main, VERSION, MainDispatchers } from "./index.js";
 
 describe("validateNodeVersion", () => {
   it("validates Node version correctly", () => {
@@ -58,136 +51,6 @@ describe("ensureNodeVersion", () => {
       Object.defineProperty(process.versions, "node", { value: origNode, configurable: true });
       process.exit = origExit;
       console.error = origErr;
-    }
-  });
-});
-
-describe("tryLocalDelegation", () => {
-  it("bypasses delegation if PEGAS_DELEGATED env is set", () => {
-    const origDelegated = process.env.PEGAS_DELEGATED;
-    try {
-      process.env.PEGAS_DELEGATED = "1";
-      expect(() => tryLocalDelegation()).not.toThrow();
-    } finally {
-      if (origDelegated === undefined) {
-        delete process.env.PEGAS_DELEGATED;
-      } else {
-        process.env.PEGAS_DELEGATED = origDelegated;
-      }
-    }
-  });
-
-  it("bypasses delegation if no local pegas installation is found in cwd", () => {
-    const origDelegated = process.env.PEGAS_DELEGATED;
-    const origCwd = process.cwd();
-    const tmpEmpty = syncFs.mkdtempSync(path.join(os.tmpdir(), "pegas-empty-delegation-"));
-
-    try {
-      delete process.env.PEGAS_DELEGATED;
-      process.chdir(tmpEmpty);
-      expect(() => tryLocalDelegation()).not.toThrow();
-    } finally {
-      process.chdir(origCwd);
-      if (origDelegated !== undefined) {
-        process.env.PEGAS_DELEGATED = origDelegated;
-      }
-      syncFs.rmSync(tmpEmpty, { recursive: true, force: true });
-    }
-  });
-
-  it("delegates execution to local pegas when found in node_modules", () => {
-    const origDelegated = process.env.PEGAS_DELEGATED;
-    const origCwd = process.cwd();
-    const origSpawnSync = child_process.spawnSync;
-    const origExit = process.exit;
-
-    const tmpDir = syncFs.mkdtempSync(path.join(os.tmpdir(), "pegas-local-delegation-"));
-    const localPegasDir = path.join(tmpDir, "node_modules", "pegas", "dist");
-    syncFs.mkdirSync(localPegasDir, { recursive: true });
-    const localScript = path.join(localPegasDir, "index.js");
-    syncFs.writeFileSync(localScript, "#!/usr/bin/env node\n", "utf-8");
-
-    let spawnTarget = "";
-    let exitCode: number | null = null;
-
-    child_process.spawnSync = ((bin: string, args: string[]) => {
-      spawnTarget = args[0];
-      return { status: 0 };
-    }) as any;
-
-    process.exit = ((code?: number) => {
-      exitCode = code ?? 0;
-      throw new Error(`EXIT_${exitCode}`);
-    }) as any;
-
-    try {
-      delete process.env.PEGAS_DELEGATED;
-      process.chdir(tmpDir);
-
-      expect(() => tryLocalDelegation()).toThrow("EXIT_0");
-      expect(spawnTarget).toBe(localScript);
-      expect(exitCode).toBe(0);
-    } finally {
-      child_process.spawnSync = origSpawnSync;
-      process.exit = origExit;
-      process.chdir(origCwd);
-      if (origDelegated !== undefined) {
-        process.env.PEGAS_DELEGATED = origDelegated;
-      }
-      syncFs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("prevents self-delegation loop when current script is target script", () => {
-    const origDelegated = process.env.PEGAS_DELEGATED;
-    const origCwd = process.cwd();
-    const origArgv1 = process.argv[1];
-
-    const tmpDir = syncFs.mkdtempSync(path.join(os.tmpdir(), "pegas-self-delegation-"));
-    const localPegasDir = path.join(tmpDir, "node_modules", "pegas", "dist");
-    syncFs.mkdirSync(localPegasDir, { recursive: true });
-    const localScript = path.join(localPegasDir, "index.js");
-    syncFs.writeFileSync(localScript, "#!/usr/bin/env node\n", "utf-8");
-
-    try {
-      delete process.env.PEGAS_DELEGATED;
-      process.chdir(tmpDir);
-      process.argv[1] = localScript;
-
-      expect(() => tryLocalDelegation()).not.toThrow();
-    } finally {
-      process.argv[1] = origArgv1;
-      process.chdir(origCwd);
-      if (origDelegated !== undefined) {
-        process.env.PEGAS_DELEGATED = origDelegated;
-      }
-      syncFs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("bypasses delegation when running 'init' command", () => {
-    const origDelegated = process.env.PEGAS_DELEGATED;
-    const origCwd = process.cwd();
-
-    const tmpDir = syncFs.mkdtempSync(path.join(os.tmpdir(), "pegas-init-delegation-"));
-    const localPegasDir = path.join(tmpDir, "node_modules", "pegas", "dist");
-    syncFs.mkdirSync(localPegasDir, { recursive: true });
-    const localScript = path.join(localPegasDir, "index.js");
-    syncFs.writeFileSync(localScript, "#!/usr/bin/env node\n", "utf-8");
-
-    try {
-      delete process.env.PEGAS_DELEGATED;
-      process.chdir(tmpDir);
-
-      // Even though local pegas exists, passing ["init"] prevents delegation
-      expect(() => tryLocalDelegation(["init"])).not.toThrow();
-      expect(() => tryLocalDelegation(["update"])).not.toThrow();
-    } finally {
-      process.chdir(origCwd);
-      if (origDelegated !== undefined) {
-        process.env.PEGAS_DELEGATED = origDelegated;
-      }
-      syncFs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });
@@ -297,21 +160,9 @@ describe("main CLI command routing", () => {
       },
     };
 
-    await main(
-      [
-        "init",
-        "--gateway-dir",
-        "/etc/pegas",
-        "--force",
-        "--dry-run",
-        "--json",
-      ],
-      { dispatchers }
-    );
+    await main(["init", "--dry-run", "--json"], { dispatchers });
 
-    expect(calls.init).toEqual({
-      gatewayDir: "/etc/pegas",
-      force: true,
+    expect(calls.init).toMatchObject({
       dryRun: true,
       json: true,
     });
@@ -382,33 +233,50 @@ describe("main CLI command routing", () => {
     });
   });
 
-  it("dispatches 'link' and 'unlink' commands with parsed options", async () => {
+  it("dispatches 'connect' and 'disconnect' commands with parsed options", async () => {
     const calls: Record<string, any> = {};
     const dispatchers: MainDispatchers = {
-      handleLink: async (opts) => {
-        calls.link = opts;
+      handleConnect: async (opts) => {
+        calls.connect = opts;
       },
-      handleUnlink: async (opts) => {
-        calls.unlink = opts;
+      handleDisconnect: async (opts) => {
+        calls.disconnect = opts;
       },
     };
 
-    await main(["link", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
+    await main(["connect", "--cwd", "/tmp/x", "--dry-run"], { dispatchers });
+    await main(["disconnect", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
 
-    expect(calls.link).toEqual({
-      cwd: undefined,
-      gatewayDir: "/tmp/gw",
-      dryRun: false,
-      json: true,
-    });
+    expect(calls.connect).toMatchObject({ cwd: "/tmp/x", dryRun: true });
+    expect(calls.disconnect).toMatchObject({ gatewayDir: "/tmp/gw", json: true });
+  });
 
-    await main(["unlink", "--gateway-dir", "/tmp/gw", "--json"], { dispatchers });
-    expect(calls.unlink).toEqual({
-      cwd: undefined,
-      gatewayDir: "/tmp/gw",
-      dryRun: false,
-      json: true,
-    });
+  it("old v2 command names are rejected with replacement hints", async () => {
+    const errors: string[] = [];
+    const orig = console.error;
+    console.error = (...args: unknown[]) => errors.push(args.join(" "));
+    let exitCode: number | null = null;
+    const origExit = process.exit;
+    (process as any).exit = ((code?: number) => {
+      exitCode = code ?? 0;
+      throw new Error("EXIT");
+    }) as any;
+    try {
+      await main(["link"], { noExit: false });
+    } catch {}
+    try {
+      await main(["uninstall"], { noExit: false });
+    } catch {}
+    try {
+      await main(["migrate"], { noExit: false });
+    } catch {}
+    process.exit = origExit;
+    console.error = orig;
+    const joined = errors.join("\n");
+    expect(joined).toContain("pegas connect");
+    expect(joined).toContain("docs/how-to");
+    expect(joined).toContain("pegas check");
+    expect(exitCode).toBe(1);
   });
 
   it("dispatches 'deploy' command with parsed options", async () => {
@@ -502,22 +370,6 @@ describe("main CLI command routing", () => {
     expect(calls.ca.action).toBe("remove");
   });
 
-  it("dispatches 'uninstall' command", async () => {
-    const calls: Record<string, any> = {};
-    const dispatchers: MainDispatchers = {
-      handleUninstall: async (opts) => {
-        calls.uninstall = opts;
-      },
-    };
-
-    await main(["uninstall", "--dry-run", "--json", "--cwd", "/tmp/x"], { dispatchers });
-    expect(calls.uninstall).toEqual({
-      cwd: "/tmp/x",
-      dryRun: true,
-      json: true,
-    });
-  });
-
   it("dispatches 'llms' command", async () => {
     const calls: Record<string, any> = {};
     const dispatchers: MainDispatchers = {
@@ -546,5 +398,41 @@ describe("main CLI command routing", () => {
       json: true,
       noExit: true,
     });
+  });
+});
+
+describe("строгие флаги CLI", () => {
+  it("неизвестный флаг отклоняется с exit 1 (опечатка не выглядит как 'сработало')", async () => {
+    const out: string[] = [];
+    const origErr = console.error;
+    console.error = (...a: unknown[]) => out.push(a.join(" "));
+    let code = 0;
+    const origExit = process.exit;
+    (process as any).exit = ((c: number) => { code = c ?? 0; throw new Error("exit"); }) as any;
+    try {
+      await main(["check", "--fix"], { noExit: false });
+    } catch (e) {
+      // process.exit кинул — ожидаемо
+    } finally {
+      console.error = origErr;
+      (process as any).exit = origExit;
+    }
+    expect(code).toBe(1);
+    expect(out.join(" ")).toContain("--fix");
+    expect(out.join(" ")).toContain("Valid options");
+  });
+
+  it("известный флаг не отклоняется", async () => {
+    // --json известен: main не должен упасть на этапе флагов (дальше — обычная работа)
+    const out: string[] = [];
+    const origLog = console.log;
+    console.log = (...a: unknown[]) => out.push(a.join(" "));
+    try {
+      const dispatchers: MainDispatchers = { handleCheck: async () => {} };
+      await main(["check", "--json"], { noExit: true, dispatchers });
+    } finally {
+      console.log = origLog;
+    }
+    expect(true).toBe(true);
   });
 });

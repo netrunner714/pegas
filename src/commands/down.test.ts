@@ -162,28 +162,34 @@ describe("pegas down", () => {
     expect(logs.some((l) => l.includes("No route file found for project"))).toBe(true);
   });
 
-  it("executes docker compose down when skipComposeDown is not set", async () => {
+  it("removes project containers via docker ps/rm labels when skipComposeDown is not set", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-down-exec-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-exec-"));
 
     await fs.writeFile(
       path.join(tmpProj, CONTRACT_FILENAME),
-      JSON.stringify({ projectName: "exec-app", services: {} }),
+      JSON.stringify({
+        projectName: "exec-app",
+        scenarios: ["development"],
+        gateway: { development: { httpPort: 80, httpsPort: 443 } },
+        services: {
+          web: { runtime: { development: { driver: "docker" } }, image: { development: "node:24" }, port: { development: 3000 } },
+        },
+      }),
       "utf-8"
     );
 
-    let executedCommand = "";
-    const origExecSync = child_process.execSync;
-    child_process.execSync = ((cmd: string) => {
-      executedCommand = cmd;
-      return Buffer.from("");
-    }) as any;
+    const executed: string[] = [];
+    const origExecFile = child_process.execFileSync;
+    (child_process as any).execFileSync = (cmd: string, args: string[]) => {
+      executed.push([cmd, ...(args || [])].join(" "));
+      if (cmd === "docker" && args?.[0] === "ps") return "";
+      return "";
+    };
 
     const logs: string[] = [];
     const origLog = console.log;
-    const origError = console.error;
     console.log = (...args) => logs.push(args.join(" "));
-    console.error = () => {};
 
     try {
       await handleDown({
@@ -194,15 +200,15 @@ describe("pegas down", () => {
         noExit: true,
       });
     } finally {
-      child_process.execSync = origExecSync;
+      (child_process as any).execFileSync = origExecFile;
       console.log = origLog;
-      console.error = origError;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }
 
-    expect(executedCommand).toBe("docker compose down");
-    expect(logs.some((l) => l.includes("Stopping project containers"))).toBe(true);
+    // Тикдаун через метки: docker ps -aq --filter label=pegas.project=...
+    expect(executed.some((c) => c.startsWith("docker ps -aq") && c.includes("label=pegas.project="))).toBe(true);
+    expect(logs.some((l) => l.includes("taken down"))).toBe(true);
   });
 
   it("handles docker compose down errors in json and text modes", async () => {
@@ -211,14 +217,21 @@ describe("pegas down", () => {
 
     await fs.writeFile(
       path.join(tmpProj, CONTRACT_FILENAME),
-      JSON.stringify({ projectName: "err-app", services: {} }),
+      JSON.stringify({ ...{
+        projectName: "exec-app",
+        scenarios: ["development"],
+        gateway: { development: { httpPort: 80, httpsPort: 443 } },
+        services: {
+          web: { runtime: { development: { driver: "docker" } }, image: { development: "node:24" }, port: { development: 3000 } },
+        },
+      }, projectName: "err-app" }),
       "utf-8"
     );
 
-    const origExecSync = child_process.execSync;
-    child_process.execSync = (() => {
+    const origExecFileSync = child_process.execFileSync;
+    (child_process as any).execFileSync = () => {
       throw new Error("docker daemon not running");
-    }) as any;
+    };
 
     const logs: string[] = [];
     const errors: string[] = [];
@@ -246,7 +259,7 @@ describe("pegas down", () => {
         json: false,
       });
     } finally {
-      child_process.execSync = origExecSync;
+      (child_process as any).execFileSync = origExecFileSync;
       console.log = origLog;
       console.error = origError;
       await fs.rm(tmpProj, { recursive: true, force: true });
@@ -256,8 +269,8 @@ describe("pegas down", () => {
     const jsonLog = logs.find((l) => l.includes("docker daemon not running"));
     expect(jsonLog).toBeDefined();
     const parsed = JSON.parse(jsonLog!);
-    expect(parsed.error).toContain("Failed to execute Docker Compose down");
-    expect(errors.some((e) => e.includes("Failed to execute Docker Compose down"))).toBe(true);
+    expect(parsed.error).toContain("Failed to remove declarative runtime containers");
+    expect(errors.some((e) => e.includes("Failed to remove declarative runtime containers"))).toBe(true);
   });
 
   it("aborts when no pegas.json or compose file is found", async () => {

@@ -9,38 +9,55 @@ import { COMMANDS, GLOBAL_OPTIONS, CliOptionDef } from "../help.js";
  */
 
 const CORE_CONCEPTS = `## Core Concepts
-- Declarative environment manager for Docker multi-app setups: \`pegas.json\` is the single source of truth.
-- \`runtime: "docker"\` in pegas.json opts into the container runtime; \`init\` auto-detects it (Dockerfile or compose files present).
+- Declarative orchestrator for Docker multi-app setups: \`pegas.json\` is the single source of truth.
+- Zero scalars: every environment-dependent field is a strict scenario map keyed by the root \`scenarios: string[]\`. No root \`env\`, no role, no upstream, no replicas.
+- Per-service runtime map \`runtime: { <scenario>: { driver: "docker" | "bun" } }\` selects the driver for each scenario; host driver services run on the host.
+- \`port\` is the logical TCP port of a service; \`ports\` publishes host ports (must be empty outside development); \`publicHost\` marks public TCP exposure.
+- Secrets are declared per service (\`secrets: string[]\`, keys match \`[A-Z0-9_]+\`) and injected from the gateway at deploy time; pegas never writes .env files.
+- Roles are derived, not declared: \`domains\` => web, image without build => infra, build => app.
 - One shared Docker bridge network \`pegas-network\`; one shared Caddy Gateway container owning ports 80/443.
 - Never expose 80:80 or 443:443 in application compose files; the Gateway owns host ports and proxies by network aliases.
 - The launch manifest is generated from pegas.json and is ephemeral (passed via stdin); user compose files are not the source of truth.
-- Containers carry Docker labels: \`pegas.project\`, \`pegas.environment\`, \`pegas.service\`, \`pegas.manifest-hash\`.
-- Service aliases inside the shared network are \`<checkout-id>-<environment>-<service>\`: several checkouts and environments coexist.
-- Each project gets an isolated declarative route file \`conf.d/<projectName>.caddy\` (per environment); hot-reload with validation and rollback.
+- Containers carry Docker labels: \`pegas.project\`, \`pegas.scenario\`, \`pegas.service\`, \`pegas.manifest-hash\`.
+- Service aliases inside the shared network are \`<project-id>-<scenario>-<service>\`: several checkouts and scenarios coexist.
+- Each project gets an isolated route file \`conf.d/<project>-<scenario>.caddy\` per scenario; hot-reload with validation and rollback.
 - Auto-provisions Let's Encrypt SSL on first request.
 - View and stream container logs: \`pegas logs [env] [service] [-f] [--tail N]\`; Ctrl+C only detaches without stopping containers.
-- Local dev: \`pegas link\` attaches project routes to the shared Gateway on port 443 (\`[service].[project].localhost\`); \`pegas unlink\` removes them.
+- Development: \`pegas connect\` routes host-driver services through the Gateway (\`[service].[project].localhost\`, upstream \`host.docker.internal:<port>\`); \`pegas disconnect\` removes the route.
+- Runtime SDK: application code imports \`@netrunner714/pegas/runtime\` for typed access to the orchestration context (currentService port/domains, services map with internalUrl, secret() reader). Transport: PEGAS_CONTEXT env injected into every container.
+- Env access doctrine: env is the injection transport, never the source of topology knowledge. Code reads topology via the SDK (currentService/services), secrets via secret(), and may read process.env directly ONLY for non-secret app keys declared in services.<name>.env. Hard-banned in code: PORT, APP_DOMAIN, CLIENT_ORIGINS, NODE_ENV-style branching — the platform derives all of them.
+- Service discovery: env values of the form \`pegas://<service>\` are expanded at deploy time into the internal network address (\`<scheme>://<projectId>-<scenario>-<service>:<port>\`; scheme by target image: redis, postgresql, http).
+- \`pegas check\` is a read-only audit of the v3 contract: validator issues, secrets parity, .gitignore hygiene. It never mutates files.
+- v2 -> v3 transition is manual: edit pegas.json by hand next to the project, then use \`pegas check\` as the sole guide. There is no migrate command.
 - Local dev HTTPS: \`pegas ca install\` (one-time), clean URLs on port 443 (\`[service].[project].localhost\`).`;
 
-const CONTRACT_EXAMPLE = `## Example pegas.json (docker runtime)
+const CONTRACT_EXAMPLE = `## Example pegas.json (v3 contract)
 \`\`\`jsonc
 {
   "projectName": "my-app",
-  "runtime": "docker",
+  "scenarios": ["development", "production"],
+  "gateway": {
+    "development": { "httpPort": 80, "httpsPort": 443 },
+    "production": { "httpPort": 80, "httpsPort": 443, "acmeEmail": "ops@my-app.com" }
+  },
   "services": {
     "web": {
-      "role": "app",
-      "port": 3000,
+      "runtime": { "development": { "driver": "bun" }, "production": { "driver": "docker" } },
+      "build": { "context": "." },
+      "port": { "development": 3000, "production": 3000 },
       "domains": {
         "development": ["my-app.localhost"],
         "production": ["my-app.com"]
-      }
+      },
+      "ports": { "development": ["3000:3000"], "production": [] },
+      "secrets": ["APP_URL"]
     },
     "postgres": {
-      "role": "infra",
-      "image": "postgres:18-alpine",
-      "env": { "POSTGRES_USER": "app", "POSTGRES_PASSWORD": "see envFile" },
-      "volumes": ["pgdata:/var/lib/postgresql"]
+      "runtime": { "development": { "driver": "docker" }, "production": { "driver": "docker" } },
+      "image": { "development": "postgres:18-alpine", "production": "postgres:18-alpine" },
+      "port": { "development": 5432, "production": 5432 },
+      "volumes": { "production": ["pgdata:/var/lib/postgresql"] },
+      "publicHost": { "production": { "host": "pg.my-app.com", "port": 5432 } }
     }
   }
 }
@@ -85,10 +102,10 @@ export function buildLlmsText(): string {
       invocations.push("npx pegas logs -f");
       invocations.push("npx pegas logs production");
       invocations.push("npx pegas logs api -f");
-    } else if (cmd.name === "link") {
-      invocations.push("npx pegas link");
-    } else if (cmd.name === "unlink") {
-      invocations.push("npx pegas unlink");
+    } else if (cmd.name === "connect") {
+      invocations.push("npx pegas connect");
+    } else if (cmd.name === "disconnect") {
+      invocations.push("npx pegas disconnect");
     } else if (cmd.name === "ca") {
       invocations.push("npx pegas ca install");
       invocations.push("npx pegas ca remove");

@@ -1,22 +1,18 @@
 #!/usr/bin/env node
-import fs from "node:fs";
-import path from "node:path";
-import child_process from "node:child_process";
 import { parseArgs } from "node:util";
-import { handleInit } from "./commands/init.js";
 import { handleDeploy } from "./commands/deploy.js";
 import { handleDown } from "./commands/down.js";
 import { handleLogs } from "./commands/logs.js";
-import { handleLink } from "./commands/link.js";
-import { handleUnlink } from "./commands/unlink.js";
 import { handleStatus } from "./commands/status.js";
 import { handleLlms } from "./commands/llms.js";
-import { handleUpdate } from "./commands/update.js";
 import { handleCa } from "./commands/ca.js";
-import { handleUninstall } from "./commands/uninstall.js";
 import { handleCheck } from "./commands/check.js";
+import { handleUpdate } from "./commands/update.js";
+import { handleConnect } from "./commands/connect.js";
+import { handleInit } from "./commands/init.js";
+import { handleDisconnect } from "./commands/disconnect.js";
 
-import { VERSION, compareSemver } from "./version.js";
+import { VERSION } from "./version.js";
 import { generateHelpText, getParseArgsOptions } from "./help.js";
 export { VERSION, generateHelpText, getParseArgsOptions };
 export { getPegasAllowedOrigins, isPegasOriginAllowed } from "./cors.js";
@@ -38,78 +34,18 @@ export function ensureNodeVersion(): void {
   }
 }
 
-export function tryLocalDelegation(args = process.argv.slice(2)): void {
-  if (process.env.PEGAS_DELEGATED) {
-    return;
-  }
-
-  // Never delegate `init`, `update`, or `check` to local node_modules.
-  // Running `pegas init`, `pegas update`, or `pegas check` is intended to audit or update the project
-  // using the currently invoked CLI, avoiding entrapment in outdated node_modules.
-  if (
-    args[0] === "init" ||
-    args.includes("init") ||
-    args[0] === "update" ||
-    args.includes("update") ||
-    args[0] === "check" ||
-    args.includes("check")
-  ) {
-    return;
-  }
-
-  const scopedTarget = path.join(process.cwd(), "node_modules", "@netrunner714", "pegas", "dist", "index.js");
-  const unscopedTarget = path.join(process.cwd(), "node_modules", "pegas", "dist", "index.js");
-  const localPegas = fs.existsSync(scopedTarget) ? scopedTarget : (fs.existsSync(unscopedTarget) ? unscopedTarget : null);
-  if (!localPegas) {
-    return;
-  }
-
-  // Prevent self-delegation if this script itself is already the local target
-  try {
-    const currentScript = fs.realpathSync(process.argv[1] || "");
-    const targetScript = fs.realpathSync(localPegas);
-    if (currentScript === targetScript) {
-      return;
-    }
-  } catch {}
-
-  // Do not delegate if local version is older or same as this binary
-  try {
-    const pkgDir = path.dirname(path.dirname(localPegas));
-    const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
-    if (pkgJson.version && compareSemver(pkgJson.version, VERSION) <= 0) {
-      return;
-    }
-  } catch {}
-
-  const result = child_process.spawnSync(
-    process.execPath,
-    [localPegas, ...process.argv.slice(2)],
-    {
-      stdio: "inherit",
-      env: {
-        ...process.env,
-        PEGAS_DELEGATED: "1",
-      },
-    }
-  );
-
-  process.exit(result.status ?? (result.signal ? 1 : 0));
-}
-
 export interface MainDispatchers {
   handleInit?: typeof handleInit;
+  handleConnect?: typeof handleConnect;
+  handleDisconnect?: typeof handleDisconnect;
   handleDeploy?: typeof handleDeploy;
   handleDown?: typeof handleDown;
   handleLogs?: typeof handleLogs;
-  handleLink?: typeof handleLink;
-  handleUnlink?: typeof handleUnlink;
   handleStatus?: typeof handleStatus;
   handleLlms?: typeof handleLlms;
-  handleUpdate?: typeof handleUpdate;
   handleCa?: typeof handleCa;
-  handleUninstall?: typeof handleUninstall;
   handleCheck?: typeof handleCheck;
+  handleUpdate?: typeof handleUpdate;
 }
 
 export interface MainOptions {
@@ -124,21 +60,18 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     if (a.startsWith("-scenario=")) return "--scenario=" + a.slice(10);
     return a;
   });
-  tryLocalDelegation(normalizedArgs);
-
   const dispatch = {
     handleInit: options.dispatchers?.handleInit || handleInit,
+    handleConnect: options.dispatchers?.handleConnect || handleConnect,
+    handleDisconnect: options.dispatchers?.handleDisconnect || handleDisconnect,
     handleDeploy: options.dispatchers?.handleDeploy || handleDeploy,
     handleDown: options.dispatchers?.handleDown || handleDown,
     handleLogs: options.dispatchers?.handleLogs || handleLogs,
-    handleLink: options.dispatchers?.handleLink || handleLink,
-    handleUnlink: options.dispatchers?.handleUnlink || handleUnlink,
     handleStatus: options.dispatchers?.handleStatus || handleStatus,
     handleLlms: options.dispatchers?.handleLlms || handleLlms,
-    handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
     handleCa: options.dispatchers?.handleCa || handleCa,
-    handleUninstall: options.dispatchers?.handleUninstall || handleUninstall,
     handleCheck: options.dispatchers?.handleCheck || handleCheck,
+    handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
   };
 
   const rawArgs = normalizedArgs;
@@ -162,6 +95,37 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     strict: false,
   });
 
+  // Строгий контроль флагов: опечатка (--fxi) не должна выглядеть как "сработало".
+  // Неизвестный флаг — явная ошибка со списком валидных (кроме внутренних, после "--").
+  {
+    const known = getParseArgsOptions();
+    const longNames = new Set(Object.keys(known));
+    const shorts = new Set(Object.values(known).map((o) => o.short).filter(Boolean) as string[]);
+    const globalLongs = new Set(["--help", "--version"]);
+    for (const arg of pegasArgs) {
+      if (arg === "--") break;
+      if (arg.startsWith("--") && arg.length > 2) {
+        const name = arg.slice(2).split("=")[0];
+        if (!longNames.has(name) && !globalLongs.has("--" + name)) {
+          console.error(
+            "Unknown option: '--" + name + "'. Valid options: " +
+              Array.from(longNames).sort().map((n) => "--" + n).join(", ") +
+              ". Run 'pegas --help' for details."
+          );
+          if (!options.noExit) process.exit(1);
+          return;
+        }
+      } else if (arg.startsWith("-") && arg.length === 2 && !arg.startsWith("--")) {
+        const s = arg.slice(1);
+        if (!shorts.has(s) && s !== "h" && s !== "v") {
+          console.error("Unknown option: '-" + s + "'. Run 'pegas --help' for usage.");
+          if (!options.noExit) process.exit(1);
+          return;
+        }
+      }
+    }
+  }
+
   const command = positionals[0]?.toLowerCase();
 
   if (command === "help" || values.help || pegasArgs.includes("-h") || pegasArgs.includes("--help")) {
@@ -174,7 +138,6 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "init": {
       await dispatch.handleInit({
         cwd: values.cwd as string | undefined,
-        gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         force: values.force as boolean | undefined,
         json: values.json as boolean | undefined,
@@ -182,13 +145,40 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       break;
     }
 
-    case "update": {
-      await dispatch.handleUpdate({
+    case "connect": {
+      await dispatch.handleConnect({
         cwd: values.cwd as string | undefined,
-        latest: values.latest as boolean | undefined,
+        gatewayDir: values["gateway-dir"] as string | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
       });
       break;
+    }
+
+    case "disconnect": {
+      await dispatch.handleDisconnect({
+        cwd: values.cwd as string | undefined,
+        gatewayDir: values["gateway-dir"] as string | undefined,
+        dryRun: values["dry-run"] as boolean | undefined,
+        json: values.json as boolean | undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
+      });
+      break;
+    }
+
+    // v3: старые имена удалены без алиасов (breaking change, major 3.0.0)
+    case "link":
+    case "unlink":
+    case "uninstall":
+    case "migrate": {
+      const replacement = command === "link" ? "pegas connect"
+        : command === "unlink" ? "pegas disconnect"
+        : command === "uninstall" ? "ручной выход (docs/how-to)"
+        : "ручная правка pegas.json по подсказкам pegas check";
+      console.error(`❌ Команда '${command}' удалена в pegas v3. Используйте: ${replacement}.`);
+      if (!options.noExit) process.exit(1);
+      return;
     }
 
     case "logs": {
@@ -219,28 +209,6 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         service: targetService,
         follow: values.follow as boolean | undefined,
         tail: values.tail as string | number | undefined,
-        json: values.json as boolean | undefined,
-        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
-      });
-      break;
-    }
-
-    case "link": {
-      await dispatch.handleLink({
-        cwd: values.cwd as string | undefined,
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
-        json: values.json as boolean | undefined,
-        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
-      });
-      break;
-    }
-
-    case "unlink": {
-      await dispatch.handleUnlink({
-        cwd: values.cwd as string | undefined,
-        gatewayDir: values["gateway-dir"] as string | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
         ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
       });
@@ -292,6 +260,16 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       break;
     }
 
+    case "update": {
+      await dispatch.handleUpdate({
+        cwd: values.cwd as string | undefined,
+        latest: values.latest as boolean | undefined,
+        json: values.json as boolean | undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
+      });
+      break;
+    }
+
     case "ca": {
       const action = (positionals[1] as string | undefined)?.toLowerCase();
       await dispatch.handleCa({
@@ -302,20 +280,10 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       break;
     }
 
-    case "uninstall": {
-      await dispatch.handleUninstall({
-        cwd: values.cwd as string | undefined,
-        dryRun: values["dry-run"] as boolean | undefined,
-        json: values.json as boolean | undefined,
-      });
-      break;
-    }
-
     case "check": {
       await dispatch.handleCheck({
         cwd: values.cwd as string | undefined,
         json: values.json as boolean | undefined,
-        ...(values.fix ? { fix: true } : {}),
         noExit: options.noExit,
       });
       break;

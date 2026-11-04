@@ -1,9 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import child_process from "node:child_process";
 import { findProjectRoot, findGatewayDir, getConfDir, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeEnvironment } from "../contract.js";
-import { findPegasCompose } from "../compose.js";
+import { CONTRACT_FILENAME } from "../contract.js";
 import { getProjectRuntimeId } from "../contract.js";
 import { removeProjectContainers } from "../runtime.js";
 import { runCommand, stopGatewayIfUnused } from "../docker.js";
@@ -32,7 +30,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
     const rawContract = await fs.readFile(contractPath, "utf-8");
     contract = JSON.parse(rawContract) as PegasContract;
     if (contract.projectName) projectName = contract.projectName;
-    if (contract.runtime === "docker") runtimeId = getProjectRuntimeId(projectRoot, projectName);
+    runtimeId = getProjectRuntimeId(projectRoot, projectName);
   } catch {
     // Recover ownership from Docker labels if pegas.json was removed or corrupted.
     const defaultRuntimeId = getProjectRuntimeId(projectRoot, projectName);
@@ -57,20 +55,16 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       const labels = recovered.Config?.Labels || {};
       runtimeId = labels["pegas.project"];
       if (typeof labels["pegas.project-name"] === "string") projectName = labels["pegas.project-name"];
-      contract = { runtime: "docker", services: {} } as PegasContract;
     } else {
-      const composeFile = await findPegasCompose(projectRoot);
-      if (!composeFile) {
-        const message = "Contract " + CONTRACT_FILENAME + " not found in " + projectRoot + ", and no matching Pegas Docker containers were found."; 
-        if (isJson) console.log(JSON.stringify({ error: message }));
-        else console.error("❌ Error: " + message);
-        if (!options.noExit) process.exit(1);
-        return;
-      }
+      const message = "Contract " + CONTRACT_FILENAME + " not found in " + projectRoot + ", and no matching Pegas Docker containers were found.";
+      if (isJson) console.log(JSON.stringify({ error: message }));
+      else console.error("❌ Error: " + message);
+      if (!options.noExit) process.exit(1);
+      return;
     }
   }
 
-  const requestedEnvironment = options.env ? normalizeEnvironment(options.env) : undefined;
+  const requestedEnvironment = options.env;
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const confDir = getConfDir(gatewayDir);
   const sanitizedProject = projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
@@ -111,7 +105,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       console.log("🔄 Reloading Caddy gateway...");
     }
     let gatewayNeedsReload = true;
-    if (contract?.runtime === "docker") {
+    {
       const runningGateway = await runCommand("docker", ["ps", "-q", "--filter", "label=pegas.gateway=true"]);
       if (!runningGateway.success) {
         throw new Error(runningGateway.stderr || "Could not inspect the shared Gateway before removing routes.");
@@ -151,27 +145,16 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
   // dependency volumes are intentionally preserved.
   if (!options.skipComposeDown) {
     try {
-      if (contract?.runtime === "docker") {
+      {
         runtimeId ||= getProjectRuntimeId(projectRoot, projectName);
         await removeProjectContainers(runtimeId, requestedEnvironment);
         const gatewayResult = await stopGatewayIfUnused(gatewayDir);
         if (!gatewayResult.success) {
           throw new Error(gatewayResult.stderr || "Failed to reconcile shared Gateway lifecycle.");
         }
-      } else {
-        const composeFile = await findPegasCompose(projectRoot);
-        const composeCmd = composeFile
-          ? `docker compose --project-directory . -f ${composeFile} down`
-          : "docker compose down";
-        if (!isJson) {
-          console.log(`\n🛑 [2/2] Stopping project containers with '${composeCmd}'...\n`);
-        }
-        child_process.execSync(composeCmd, { stdio: "inherit", cwd: projectRoot });
       }
     } catch (err: any) {
-      const message = contract?.runtime === "docker"
-        ? "Failed to remove declarative runtime containers"
-        : "Failed to execute Docker Compose down";
+      const message = "Failed to remove declarative runtime containers";
       if (isJson) {
         console.log(JSON.stringify({ error: message, details: err.message }));
       } else {

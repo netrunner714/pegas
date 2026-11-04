@@ -1,6 +1,181 @@
-export interface GatewayContext {
-  gatewayDir: string;
-  networkName: string;
+/**
+ * Типы контракта Pegas v3 (breaking, major 3.0.0).
+ * Спецификация — docs/internal/rfc/RFC_CONTRACT_V3.md; эталон — example.json (генерируемый
+ * артефакт schemas/pegas.json). v2-типы удалены: обратной совместимости нет.
+ */
+
+/** Значение сценарной карты: ровно по одному значению на каждый ключ из scenarios. */
+export type ScenarioMap<T> = Record<string, T>;
+
+/** Драйвер запуска сервиса в сценарии. */
+export type ServiceDriver = "docker" | "bun";
+
+/** Рантайм сервиса в сценарии. Единственное поле — driver (см. столп 3). */
+export interface ServiceRuntime {
+  driver: ServiceDriver;
+}
+
+/** Конфигурация шлюза для сценария (замещает v2 devGateway и статический gateway). */
+export interface GatewayScenarioConfig {
+  /** Хостовый HTTP-порт шлюза (обычно 80). */
+  httpPort: number;
+  /** Хостовый HTTPS-порт шлюза (обычно 443). */
+  httpsPort: number;
+  /** Включить admin-интерфейс Caddy (:2019) для сценария. */
+  admin?: boolean;
+  /** Email для ACME/Let's Encrypt; требуется для не-dev HTTPS-сценариев. */
+  acmeEmail?: string;
+}
+
+/** Docker-healthcheck для контейнера (сценарная карта). */
+export interface DockerHealthcheck {
+  test: string[];
+  interval?: string;
+  timeout?: string;
+  retries?: number;
+  startPeriod?: string;
+}
+
+/**
+ * Healthcheck сервиса:
+ * - docker-сервисы: объект compose-healthcheck;
+ * - host-сервисы (bun): строка HTTP ping-URL — информативна для агента/доков,
+ *   pegas её не опрашивает (супервизора нет);
+ * - null — healthcheck отсутствует (воркеры без endpoint).
+ */
+export type ServiceHealthcheck = DockerHealthcheck | string | null;
+
+/** Сборка docker-образа из репозитория (сценарная карта; null в сценариях host-драйвера). */
+export interface ServiceBuild {
+  context: string;
+  dockerfile?: string;
+  /** Stage multi-target Dockerfile; передаётся в compose как есть. */
+  target?: string;
+  /** Build-аргументы; передаются в compose как есть. */
+  args?: Record<string, string>;
+}
+
+/** Условие готовности зависимости (как в compose). */
+export type DependCondition = "service_started" | "service_healthy";
+
+/** Зависимость от сервиса сценария. */
+export interface ServiceDependency {
+  condition: DependCondition;
+}
+
+/** dependsOn-карта сценария: имя сервиса → условие. Пустой объект допустим. */
+export type ScenarioDependencies = Record<string, ServiceDependency>;
+
+/**
+ * Сервис v3. Все сценарные поля — строгие карты по scenarios (Zero Scalars):
+ * отсутствие ключа или лишний ключ — ошибка валидации, не дефолт.
+ */
+export interface ServiceContract {
+  /** Драйвер запуска по сценариям. Единственное поле рантайма; "up"-поля нет. */
+  runtime: ScenarioMap<ServiceRuntime>;
+  /** Docker-образ (сценарная карта); для docker-сервисов обязателен, если нет build. */
+  image?: ScenarioMap<string>;
+  /** Сборка образа (сценарная карта; null — сценарий не собирается, host-драйвер). */
+  build?: ScenarioMap<ServiceBuild | null>;
+  /** Команда процесса внутри контейнера (сценарная карта). */
+  command?: ScenarioMap<string[]>;
+  /** Логический TCP-порт сервиса (сценарная карта); обязателен при domains. */
+  port?: ScenarioMap<number>;
+  /** Физический проброс портов на хост (сценарная карта; [] вне dev — норма). */
+  ports?: ScenarioMap<string[]>;
+  /** HTTP-домены через шлюз (сценарная карта; только для web-сервисов). */
+  domains?: ScenarioMap<string[]>;
+  /** Публичное DNS-имя TCP-сервиса (сценарная карта; требует непустого ports вне dev). */
+  publicHost?: ScenarioMap<string>;
+  /** Named-тома (сценарная карта). */
+  volumes?: ScenarioMap<string[]>;
+  /** Зависимости запуска (сценарная карта; при host-драйвере сценария — {}). */
+  dependsOn?: ScenarioMap<ScenarioDependencies>;
+  /** Healthcheck (сценарная карта). */
+  healthcheck?: ScenarioMap<ServiceHealthcheck>;
+  /** Несекретные значения конфигурации (Zero Scalars: карта сценариев на каждый ключ). */
+  env?: Record<string, ScenarioMap<string>>;
+  /** CORS-сервисов; false/undefined — без заголовков. */
+  cors?: ScenarioMap<boolean>;
+  /**
+   * Имена секретных ключей, требуемых сервисом (интерфейс зависимостей).
+   * Значения — из .env (dev) / CI-хранилища (prod). Замещает v2 envFile/root secrets.
+   */
+  secrets?: string[];
+}
+
+/** Корневой контракт v3. */
+export interface PegasContract {
+  /** URL JSON Schema; включает IDE-подсказки. */
+  $schema?: string;
+  /** Имя проекта; основа алиасов, имён compose-проектов и dev-доменов. */
+  projectName: string;
+  /**
+   * Явный список сценариев проекта — источник истины для всех сценарных карт.
+   * Минимум один; имена [a-z0-9-]+; карты обязаны совпадать байт-в-байт.
+   */
+  scenarios: string[];
+  /** Конфигурация шлюза по сценариям. */
+  gateway: ScenarioMap<GatewayScenarioConfig>;
+  services: Record<string, ServiceContract>;
+}
+
+/** Опции команд (без v2-полей). */
+export interface InitOptions {
+  cwd?: string;
+  dryRun?: boolean;
+  force?: boolean;
+  json?: boolean;
+  noExit?: boolean;
+}
+
+export interface CheckOptions {
+  cwd?: string;
+  json?: boolean;
+  noExit?: boolean;
+}
+
+export interface CaOptions {
+  action?: string;
+  json?: boolean;
+  dryRun?: boolean;
+  noExit?: boolean;
+}
+
+export interface UpdateOptions {
+  latest?: boolean;
+  json?: boolean;
+  cwd?: string;
+  noExit?: boolean;
+}
+
+/** Информация о маршруте из route-файла шлюза (модуль gateway). */
+export interface RouteInfo {
+  domain: string;
+  upstream: string;
+  filePath: string;
+  hasWwwRedirect: boolean;
+  isSpa: boolean;
+  apiUpstream?: string;
+}
+
+/** Опции генерации Caddy-сниппета (модуль generator). */
+export interface RouteSnippetOptions {
+  domain: string;
+  upstream?: string;
+  spa?: boolean;
+  apiUpstream?: string;
+  apiPrefix?: string;
+  noWww?: boolean;
+  security?: boolean;
+  routes?: Record<string, string | { to: string; websocket?: boolean }>;
+  cors?: boolean | string[] | import("./types.js").CorsConfig;
+  corsOrigins?: string[];
+  force?: boolean;
+  dryRun?: boolean;
+  gatewayDir?: string;
+  json?: boolean;
+  noExit?: boolean;
 }
 
 export interface CorsConfig {
@@ -12,197 +187,3 @@ export interface CorsConfig {
   maxAge?: number;
 }
 
-export type ServiceCorsContract = boolean | string[] | CorsConfig;
-
-export interface RouteSnippetOptions {
-  domain: string;
-  upstream?: string;
-  spa?: boolean;
-  apiUpstream?: string;
-  apiPrefix?: string;
-  noWww?: boolean;
-  security?: boolean;
-  routes?: Record<string, string | { to: string; websocket?: boolean }>;
-  cors?: boolean | string[] | CorsConfig;
-  corsOrigins?: string[];
-  force?: boolean;
-  dryRun?: boolean;
-  gatewayDir?: string;
-  json?: boolean;
-  noExit?: boolean;
-}
-
-export type AddOptions = RouteSnippetOptions;
-
-export interface InitOptions {
-  cwd?: string;
-  gatewayDir?: string;
-  dryRun?: boolean;
-  force?: boolean;
-  json?: boolean;
-  noExit?: boolean;
-}
-
-export interface UpdateOptions {
-  latest?: boolean;
-  json?: boolean;
-  cwd?: string;
-  noExit?: boolean;
-}
-
-export interface RouteInfo {
-  domain: string;
-  upstream: string;
-  filePath: string;
-  hasWwwRedirect: boolean;
-  isSpa: boolean;
-  apiUpstream?: string;
-}
-
-export interface ServiceBuildContract {
-  context: string;
-  dockerfile?: string;
-  /** Build stage (multi-target Dockerfile); forwarded to compose as-is. */
-  target?: string;
-  /** Build arguments; forwarded to compose build as-is. */
-  args?: Record<string, string>;
-}
-
-export type ServiceRole = "app" | "infra";
-export type FileWatchMode = "auto" | "events" | "polling";
-
-export interface ServiceHmrContract {
-  fileWatch?: FileWatchMode;
-}
-
-export type ServiceRouteTarget = string | { to: string; websocket?: boolean };
-
-export interface ServiceContract {
-  port?: number | string;
-  /** Host port publish mappings (e.g. ["5432:5432"]). Used for non-HTTP services like databases or daemons. */
-  ports?: string[];
-  upstream?: string;
-  /** L7 path routing for this service's domains: e.g. { "/api/*": "api:3000", "/socket.io/*": "api:3000" } */
-  routes?: Record<string, ServiceRouteTarget>;
-  /** Automatic CORS headers for cross-subdomain API access. Defaults to enabled for API services. */
-  cors?: ServiceCorsContract;
-  /** Build an image from a project-relative context. Mutually exclusive with image. */
-  build?: ServiceBuildContract;
-  /** Use a prebuilt image instead of building one. */
-  image?: string;
-  /** Container command; when omitted, the image default is used. */
-  command?: string[];
-  /** Non-secret environment variables (scalars for container invariants, or profile map). */
-  env?: Record<string, string | Record<string, string>>;
-  /** Path to a gitignored env file; values are passed to Docker without logging. */
-  envFile?: string;
-  /** Additional named or bind volumes in Docker Compose short syntax. */
-  volumes?: string[];
-  /** Host source path mounted into the app container; defaults to project root. */
-  bindMount?: string;
-  /** Explicitly classify the service instead of relying on stack detection. */
-  role?: ServiceRole;
-  hmr?: ServiceHmrContract;
-  /** Services that must be started before this service. */
-  dependsOn?: string[] | Record<string, { condition?: "service_started" | "service_healthy" | "service_completed_successfully" }>;
-  /** Docker healthcheck configuration. */
-  healthcheck?: { test: string[]; interval?: string; timeout?: string; retries?: number; startPeriod?: string };
-  domains: {
-    development?: string[];
-    stage?: string[];
-    production?: string[];
-    dev?: string[];
-    prod?: string[];
-    [environment: string]: string[] | undefined;
-  };
-}
-
-export interface UninstallOptions {
-  cwd?: string;
-  json?: boolean;
-  dryRun?: boolean;
-  noExit?: boolean;
-}
-
-export interface CheckOptions {
-  cwd?: string;
-  json?: boolean;
-  fix?: boolean;
-  noExit?: boolean;
-}
-
-export interface CaOptions {
-  action?: string;
-  json?: boolean;
-  dryRun?: boolean;
-  noExit?: boolean;
-}
-
-export interface UpOptions {
-  env?: string;
-  cwd?: string;
-  gatewayDir?: string;
-  dryRun?: boolean;
-  json?: boolean;
-  noExit?: boolean;
-  skipReadiness?: boolean;
-  readinessTimeoutMs?: number;
-  gracePeriodMs?: number;
-  strictDns?: boolean;
-  skipDnsCheck?: boolean;
-  serverIp?: string;
-  skipUp?: boolean;
-  command?: string[];
-  systemCaddy?: boolean;
-  caddyPath?: string;
-}
-
-export interface DevGatewayConfig {
-  httpPort?: number;
-  httpsPort?: number;
-  skipInstallTrust?: boolean;
-  admin?: boolean;
-  systemCaddy?: boolean;
-  caddyPath?: string;
-}
-
-export interface DeployConfig {
-  strictDns?: boolean;
-  skipDnsCheck?: boolean;
-  skipReadiness?: boolean;
-}
-
-/** Имя профиля окружения (любая текстовая строка, заданная проектом). */
-export type EnvironmentProfile = string;
-/**
- * Значение глобального env-ключа:
- * - Карта профилей проекта (development, stage, production и т.д.)
- * - Либо динамическая ссылка на сервис (${services.<name>.<property>})
- * Плоские статические скаляры без ссылок запрещены во избежание скрытого протекания настроек между средами.
- */
-export type EnvProfileValue = string | Record<string, string>;
-
-export interface PegasContract {
-  /** JSON Schema URL; enables editor hints for pegas.json. */
-  $schema?: string;
-  projectName?: string;
-  /** Opt in to the declarative Docker runtime; absent/"host" preserves legacy behavior. */
-  runtime?: "host" | "docker";
-  bootInfra?: boolean;
-  deploy?: DeployConfig;
-  devGateway?: DevGatewayConfig;
-  /**
-   * Список обязательных секретных переменных (.env), требуемых контрактом.
-   * Валидируется перед запуском/деплоем, зеркалируется в .env.example.
-   */
-  secrets?: string[];
-  /**
-   * Глобальный конфиг проекта (env-профили): переносится между
-   * окружениями и коммитится. Значение — либо строка (одинаково для всех
-   * профилей), либо карта development/stage/production со ВСЕМИ тремя
-   * ключами. Инъектируется каждому сервису при deploy/dev; сервисный env
-   * перекрывает глобальный. Секреты — только в envFile.
-   */
-  env?: Record<string, EnvProfileValue>;
-  services: Record<string, ServiceContract>;
-}

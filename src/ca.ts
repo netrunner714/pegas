@@ -531,15 +531,16 @@ function hexIncludes(output: string, sha1: string): boolean {
 export async function isCaTrusted(
   platform: string = process.platform,
   paths: CaPaths = getCaPaths(),
-  options: { linuxStoreCertPath?: string; wsl?: boolean } = {}
+  options: { linuxStoreCertPath?: string; wsl?: boolean; gatewayRoot?: Buffer | null } = {}
 ): Promise<boolean> {
-  const exported = await fs
-    .access(paths.caCertPath)
-    .then(() => true)
-    .catch(() => false);
-  if (!exported) return false;
-
-  const sha1 = getCertSha1(paths.caCertPath);
+  // Эталон доверия — CA ЖИВОГО шлюза (им подписаны реальные leaf-сертификаты).
+  // Экспорт ~/.pegas/ca/root.crt — fallback (шлюз недоступен): он синкается
+  // с шлюзом при каждом ca install/connect, но может отставать, а доверие
+  // стору должен подтверждать именно подписывающий CA (исторический баг:
+  // ложный "trusted" по устаревшему экспорту при живом другом root в сторе).
+  const sha1 = options.gatewayRoot
+    ? new crypto.X509Certificate(options.gatewayRoot.toString("utf-8")).fingerprint.replace(/:/g, "").toLowerCase()
+    : getCertSha1(paths.caCertPath);
   if (!sha1) return false;
 
   const wsl = options.wsl ?? detectWsl();
@@ -614,6 +615,23 @@ export function assertOsMutationAllowed(): void {
 /**
  * Устанавливает Root CA в доверенные ОС (исполняет команды из buildInstallTrustCommands).
  */
+
+/** Root CA живого pegas-gateway (PKI в volume caddy_data) — им подписаны реальные
+ * leaf-сертификаты *.localhost. Может не совпадать с хостовым экспортом после
+ * пересоздания volume/контейнера: тогда экспорт обновляется с контейнера.
+ */
+export async function readGatewayRootCert(): Promise<Buffer | null> {
+  const res = child_process.spawnSync(
+    "docker",
+    ["exec", "pegas-gateway", "cat", "/data/caddy/pki/authorities/local/root.crt"],
+    { encoding: "buffer", timeout: 10_000 }
+  );
+  if (res.status !== 0 || !res.stdout || res.stdout.length === 0) return null;
+  const pem = res.stdout.toString("utf-8");
+  if (!pem.includes("BEGIN CERTIFICATE")) return null;
+  return Buffer.from(pem, "utf-8");
+}
+
 export async function installCa(options: CaInstallOptions = {}): Promise<boolean> {
   const isJson = options.json ?? false;
   const paths = options.paths || getCaPaths();
@@ -628,6 +646,21 @@ export async function installCa(options: CaInstallOptions = {}): Promise<boolean
 
   const provisioned = await provisionCa(caddyPath, { paths });
   const messages: string[] = [];
+
+  // Живой pegas-gateway — источник истины об актуальном подписывающем CA
+  // (PKI в docker-volume переживает контейнеры). При расхождении экспорт
+  // обновляется с контейнера: иначе в trust store уедет root, которым leaf'ы
+  // не подписаны (красный замок после пересоздания volume).
+  const gatewayRoot = await readGatewayRootCert();
+  if (gatewayRoot !== null) {
+    const exported = await fs.readFile(paths.caCertPath).catch(() => null);
+    if (exported === null || !exported.equals(gatewayRoot)) {
+      await fs.writeFile(paths.caCertPath, gatewayRoot, { mode: 0o644 });
+      messages.push(
+        "Root CA актуализирован с живого pegas-gateway (PKI в volume): " + paths.caCertPath
+      );
+    }
+  }
   messages.push(
     provisioned.created
       ? `Создан локальный Root CA Pegas: ${paths.caCertPath}`

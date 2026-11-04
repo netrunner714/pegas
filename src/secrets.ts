@@ -104,10 +104,23 @@ export function parseEnvContent(content: string): Map<string, string> {
   return map;
 }
 
+/** v3: все секретные ключи контракта — объединение services.<name>.secrets. */
+export function getContractSecretKeys(contract?: PegasContract): string[] {
+  if (!contract?.services) return [];
+  return Array.from(
+    new Set(
+      Object.values(contract.services)
+        .flatMap((svc) => svc.secrets || [])
+        .map((k) => k.trim())
+        .filter((k) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
+    )
+  );
+}
+
 /**
  * Retrieves the list of expected secret keys for a project.
  * Priority:
- * 1. contract.secrets (authoritative declaration in pegas.json)
+ * 1. services.<name>.secrets контракта (v3: посервисная декларация)
  * 2. .env.example (fallback schema file in project root)
  * 3. none (no secrets declared)
  */
@@ -115,11 +128,19 @@ export async function getExpectedSecrets(
   projectRoot: string,
   contract?: PegasContract
 ): Promise<{ secrets: string[]; source: "contract" | "example" | "none" }> {
-  if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
-    const valid = contract.secrets
-      .map((s) => s.trim())
-      .filter((s) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(s));
-    return { secrets: Array.from(new Set(valid)), source: "contract" };
+  // v3: секреты декларируются посервисно (services.<name>.secrets), корневого списка нет.
+  const contractSecrets = contract?.services
+    ? Array.from(
+        new Set(
+          Object.values(contract.services)
+            .flatMap((svc) => svc.secrets || [])
+            .map((s) => s.trim())
+            .filter((s) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(s))
+        )
+      )
+    : [];
+  if (contractSecrets.length > 0) {
+    return { secrets: contractSecrets, source: "contract" };
   }
 
   const examplePath = path.join(projectRoot, ".env.example");
@@ -172,10 +193,23 @@ export function isIgnoredByGit(projectRoot: string, relativePath: string): boole
       const content = fsSync.readFileSync(gitignorePath, "utf-8");
       const baseName = path.basename(relativePath);
       const lines = content.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
-      return lines.some((pattern) => {
-        const cleanPattern = pattern.replace(/^\//, "").replace(/\/$/, "");
-        return cleanPattern === baseName || cleanPattern === relativePath || baseName.startsWith(cleanPattern.replace(/\*$/, ""));
-      });
+      // Gitignore-семантика: последнее подходящее правило выигрывает, отрицания (!) гасят.
+      // Паттерн с * — префикс/суффикс-маска; без * — только точное совпадение (".env" не матчит ".env.example").
+      let ignored = false;
+      for (const pattern of lines) {
+        const negated = pattern.startsWith("!");
+        const cleanPattern = pattern.replace(/^!/, "").replace(/^\//, "").replace(/\/$/, "");
+        let matched = false;
+        if (cleanPattern.includes("*")) {
+          const prefix = cleanPattern.split("*")[0];
+          const suffix = cleanPattern.split("*").pop() ?? "";
+          matched = baseName.startsWith(prefix) && baseName.endsWith(suffix) && baseName.length >= prefix.length + suffix.length;
+        } else {
+          matched = cleanPattern === baseName || cleanPattern === relativePath;
+        }
+        if (matched) ignored = !negated;
+      }
+      return ignored;
     } catch {
       return false;
     }
@@ -234,13 +268,14 @@ export async function findExtraneousEnvFiles(projectRoot: string): Promise<strin
 }
 
 /**
- * Ensures that `.env.example` strictly mirrors `contract.secrets` 1:1.
+ * Ensures that `.env.example` strictly mirrors the union of services.*.secrets 1:1.
  */
 export async function syncEnvExample(
   projectRoot: string,
   contract: PegasContract
 ): Promise<{ updated: boolean; added: string[] }> {
-  if (!contract.secrets || !Array.isArray(contract.secrets) || contract.secrets.length === 0) {
+  const secretKeys = getContractSecretKeys(contract);
+  if (secretKeys.length === 0) {
     return { updated: false, added: [] };
   }
 
@@ -255,9 +290,9 @@ export async function syncEnvExample(
 
   const parsed = parseEnvContent(existingContent);
   const existingKeys = new Set(parsed.keys());
-  const contractSet = new Set(contract.secrets);
+  const contractSet = new Set(secretKeys);
 
-  const missingFromExample = contract.secrets.filter((key) => !existingKeys.has(key));
+  const missingFromExample = secretKeys.filter((key) => !existingKeys.has(key));
   const extraInExample = Array.from(existingKeys).filter((key) => !contractSet.has(key));
   const commentedInExample = findCommentedEnvAssignments(existingContent);
 
@@ -267,7 +302,7 @@ export async function syncEnvExample(
 
   const lines = [
     "# Pegas Required Secrets (strictly mirrors pegas.json secrets)",
-    ...contract.secrets.map((sec) => `${sec}=`),
+    ...secretKeys.map((sec) => `${sec}=`),
     "",
   ];
 
@@ -343,7 +378,7 @@ export async function verifySecrets(
       commentedInExample.push(ca.key);
     }
 
-    if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
+    if (getContractSecretKeys(contract).length > 0) {
       const exampleParsed = parseEnvContent(exampleContent);
       const exampleKeySet = new Set(exampleParsed.keys());
       const contractSet = new Set(expectedSecrets);
@@ -359,7 +394,7 @@ export async function verifySecrets(
     exampleExists = false;
   }
 
-  if (contract?.secrets && Array.isArray(contract.secrets) && contract.secrets.length > 0) {
+  if (getContractSecretKeys(contract).length > 0) {
     if (!exampleExists) {
       errors.push("Missing root .env.example file. Root .env.example is required and must strictly mirror pegas.json secrets.");
     }

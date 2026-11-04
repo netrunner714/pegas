@@ -1,36 +1,25 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
-import { UpdateOptions } from "../types.js";
+import type { UpdateOptions } from "../types.js";
 import { findProjectRoot } from "../gateway.js";
 import { VERSION, compareSemver, isSameMajor } from "../version.js";
-import { checkNpmLatestVersion, checkInstalledVersion, setupAgentsMd } from "./init.js";
-import { upgradePackageJson } from "../contract.js";
 import { detectPackageManager, getUpdateCommand } from "../pm.js";
 
-const DOCS_PEGAS_MD = `# Pegas
-
-Этот проект настроен для работы со стандартизированным L7-шлюзом **Pegas**.
-Проект стандартизирован на **Bun** для локальной разработки и выполнения скриптов (\`bun run <cmd>\`).
-
-## Контракт сервисов
-Конфигурация роутинга объявлена в файле \`pegas.json\`:
-- \`port\`: порт приложения внутри контейнера (по умолчанию 3000)
-- \`devGateway\`: параметры локального шлюза дева (по умолчанию \`httpsPort: 443\`, \`httpPort: 80\` — чистые URL без порта)
-- \`domains.development\`: локальные домены разработки (\`[service].[project].localhost\`, например: \`web.my-app.localhost\`)
-- \`domains.stage\`: домены стейджинга (заглушка \`example.com\` — стейдж-домен угадать нельзя, вписать вручную)
-- \`domains.production\`: боевые домены с автоматическим SSL Let's Encrypt
-- \`env\` (глобально): переносимый конфиг проекта (строка или карта development/stage/production); профиль выбирает запуск. Секреты — только в \`envFile\`
-
-## Команды
-* Подключить проект к локальному шлюзу: \`pegas link\`
-* Отключить проект от шлюза: \`pegas unlink\`
-* Деплой сценария: \`pegas deploy -s <scenario>\` (например, \`pegas deploy -s production\`)
-* Остановка проекта: \`pegas down\`
-* Доверенный локальный HTTPS: \`pegas ca install\` (один раз на машину)
-
-Документация: https://netrunner714.ru/pegas
-`;
+/** Последняя версия в npm-registry (best-effort: null при недоступности сети). */
+async function checkNpmLatestVersion(): Promise<string | null> {
+  try {
+    const res = await fetch("https://registry.npmjs.org/@netrunner714/pegas/latest", {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { version?: string };
+    return typeof data.version === "string" ? data.version : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function resolveTargetVersion(
   currentVer: string,
@@ -111,7 +100,7 @@ export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
     pkg.dependencies?.pegas;
 
   if (!depStr) {
-    console.error(`❌ Ошибка: @netrunner714/pegas не найден в зависимостях package.json. Сначала запустите 'pegas init'.`);
+    console.error(`❌ Ошибка: @netrunner714/pegas не найден в зависимостях package.json. Установите: bun add -d @netrunner714/pegas.`);
     if (!options.noExit) process.exit(1);
     return;
   }
@@ -145,8 +134,15 @@ export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
     return;
   }
 
-  // 1. Upgrade package.json
-  await upgradePackageJson(projectRoot, targetVer, false);
+  // 1. Upgrade package.json (devDependencies: ^targetVer; имя зависимости сохраняется)
+  const depKey =
+    pkg.devDependencies?.["@netrunner714/pegas"] !== undefined ? "devDependencies.@netrunner714/pegas"
+    : pkg.devDependencies?.pegas !== undefined ? "devDependencies.pegas"
+    : pkg.dependencies?.["@netrunner714/pegas"] !== undefined ? "dependencies.@netrunner714/pegas"
+    : "dependencies.pegas";
+  const [section, name] = depKey.split(".");
+  pkg[section][name] = `^${targetVer}`;
+  await fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
   // 2. Run package manager update
   const [bin, ...binArgs] = updateCmd.split(" ");
@@ -176,13 +172,6 @@ export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
     return;
   }
 
-  // 3. Update docs/pegas.md and AGENTS.md to current standard
-  const docsDir = path.join(projectRoot, "docs");
-  const docsPath = path.join(docsDir, "pegas.md");
-  await fs.mkdir(docsDir, { recursive: true });
-  await fs.writeFile(docsPath, DOCS_PEGAS_MD, "utf-8");
-  await setupAgentsMd(projectRoot, false);
-
   if (isJson) {
     console.log(
       JSON.stringify({
@@ -202,7 +191,6 @@ export async function handleUpdate(options: UpdateOptions = {}): Promise<void> {
   console.log(`\n✨ @netrunner714/pegas успешно обновлен: v${currentVer} -> v${targetVer}!\n`);
   console.log(`  ✓ Обновлен package.json (devDependencies: ^${targetVer})`);
   console.log(`  ✓ Выполнена команда: ${updateCmd}`);
-  console.log(`  ✓ Обновлены docs/pegas.md и AGENTS.md`);
 
   if (hasNewerMajor && availableMajor) {
     console.log(`\n💡 Доступна новая мажорная версия v${availableMajor}. Для перехода запустите: pegas update --latest`);
