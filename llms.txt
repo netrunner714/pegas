@@ -33,7 +33,7 @@
 - `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
 - `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
-- `npx pegas deploy -s <scenario> [options]` (-s, --cwd, --skip-dns-check, --strict-dns, --skip-up) — Deploy a scenario from pegas.json: network, shared Gateway, containers, routes.
+- `npx pegas deploy -s <scenario> [options]` (-s, --cwd, --skip-dns-check, --strict-dns, --skip-up, --dry-run) — Deploy a scenario from pegas.json: network, shared Gateway, containers, routes.
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).

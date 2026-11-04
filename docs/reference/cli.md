@@ -114,6 +114,7 @@ pegas logs -n 50
 --skip-dns-check       Skip DNS pre-flight verification
 --strict-dns           Abort deployment if DNS does not resolve to this host
 --skip-up              Configure routes without bringing up containers
+--dry-run              Показать план изменений без записи на диск
 ```
 
 Примеры:
@@ -121,6 +122,7 @@ pegas logs -n 50
 ```bash
 pegas deploy -s production
 pegas deploy --scenario stage
+pegas deploy -s development --dry-run
 ```
 
 ### `pegas down [options]`

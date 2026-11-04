@@ -224,6 +224,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
         ...(values["skip-dns-check"] ? { skipDnsCheck: true } : {}),
         ...(values["strict-dns"] ? { strictDns: true } : {}),
         ...(values["skip-up"] ? { skipUp: true } : {}),
+        ...(values["dry-run"] ? { dryRun: true } : {}),
         json: values.json as boolean | undefined,
         ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
       });

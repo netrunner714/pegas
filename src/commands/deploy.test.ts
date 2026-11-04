@@ -644,3 +644,96 @@ describe("pegas deploy", () => {
     }
   });
 });
+
+describe("pegas deploy --dry-run (рид-онли валидация)", () => {
+  it("валидный контракт: docker compose config -q OK → статус valid, план с сервисами, host-сервисы рядом", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dry-"));
+    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
+
+    const contract = v3ify({
+      projectName: "dry-run-proj",
+      services: {
+        web: {
+          port: { development: 3000, production: 3000 },
+          domains: { development: ["dryrun.localhost"], production: ["dryrun.example.com"] },
+          secrets: ["A_SECRET"],
+        },
+        worker: {
+          // host-сервис в development: не должен попасть в манифест, но виден в плане.
+          // image только для production-сценария: host-сервис в development образа не имеет.
+          runtime: { development: { driver: "bun" }, production: { driver: "docker" } },
+          port: { development: 4000, production: 4000 },
+          image: { development: null, production: "node:24" },
+        },
+      },
+    });
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract));
+    await fs.writeFile(path.join(tmpProj, ".env"), "A_SECRET=x\n");
+    await fs.writeFile(path.join(tmpProj, ".env.example"), "A_SECRET=\n");
+    await fs.writeFile(path.join(tmpProj, ".gitignore"), ".env\n");
+
+    const spy = mock(() => ({ status: 0, stdout: "", stderr: "" }));
+    const orig = child_process.spawnSync;
+    (child_process as any).spawnSync = ((cmd: string, args: string[]) => {
+      if (cmd === "docker" && args.includes("config")) return spy();
+      return orig(cmd, args);
+    }) as any;
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = ((...a: unknown[]) => { logs.push(a.join(" ")); }) as typeof console.log;
+    try {
+      await handleDeploy({ scenario: "development", gatewayDir: tmpGateway, dryRun: true, noExit: true, json: true, cwd: tmpProj });
+    } finally {
+      console.log = origLog;
+      (child_process as any).spawnSync = orig;
+    }
+    const json = JSON.parse(logs.find((l) => l.startsWith("{")) ?? "{}");
+    expect(json.status).toBe("valid");
+    expect(json.dockerServices).toEqual(["web"]);
+    expect(json.hostServices).toEqual(["worker"]);
+    // Двухкомпонентный домен: deploy добавляет www-алиас (существующее поведение)
+    expect(json.domains).toEqual(["dryrun.localhost", "www.dryrun.localhost"]);
+    // compose config действительно вызван
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("docker compose config провален → статус invalid, exit до мутаций", async () => {
+    const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-dry2-"));
+    const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-"));
+
+    const contract = v3ify({
+      projectName: "dry-run-bad",
+      services: {
+        web: {
+          port: { development: 3000, production: 3000 },
+          domains: { development: ["drybad.localhost"], production: ["drybad.example.com"] },
+        },
+      },
+    });
+    await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(contract));
+    await fs.writeFile(path.join(tmpProj, ".env.example"), "\n");
+    await fs.writeFile(path.join(tmpProj, ".gitignore"), ".env\n");
+
+    const orig = child_process.spawnSync;
+    (child_process as any).spawnSync = ((cmd: string, args: string[]) => {
+      if (cmd === "docker" && args.includes("config")) {
+        return { status: 1, stdout: "", stderr: "services.web Additional property foo is not allowed" };
+      }
+      return orig(cmd, args);
+    }) as any;
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = ((...a: unknown[]) => { logs.push(a.join(" ")); }) as typeof console.log;
+    try {
+      await handleDeploy({ scenario: "development", gatewayDir: tmpGateway, dryRun: true, noExit: true, json: true, cwd: tmpProj });
+    } finally {
+      console.log = origLog;
+      (child_process as any).spawnSync = orig;
+    }
+    const json = JSON.parse(logs.find((l) => l.startsWith("{")) ?? "{}");
+    expect(json.status).toBe("invalid");
+    expect(json.details).toContain("Additional property");
+  });
+});

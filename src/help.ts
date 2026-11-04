@@ -204,10 +204,17 @@ export const COMMANDS: CliCommandDef[] = [
         default: false,
         description: "Configure routes without bringing up containers",
       },
+      {
+        name: "dry-run",
+        type: "boolean",
+        default: false,
+        description: "Read-only validation: contract, secrets, DNS, manifest (docker compose config -q) and a deployment plan — no mutations",
+      },
     ],
     examples: [
       "$ pegas deploy -s production",
       "$ pegas deploy --scenario stage",
+      "$ pegas deploy -s development --dry-run",
     ],
   },
   {

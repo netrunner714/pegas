@@ -9,12 +9,19 @@ import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
+import { createRuntimeCompose } from "../runtime-compose.js";
 import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 import { verifySecrets } from "../secrets.js";
 
 export interface DeployOptions {
   scenario?: string;
+  /**
+   * Рид-онли валидация сценария без мутаций Docker: контракт → секреты → DNS
+   * (не-strict) → генерация манифеста → `docker compose config -q` → план
+   * (сервисы, маршруты). Контейнеры не создаются, маршруты не пишутся.
+   */
+  dryRun?: boolean;
   gatewayDir?: string;
   skipUp?: boolean;
   skipReadiness?: boolean;
@@ -342,6 +349,66 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       if (!options.noExit) process.exit(1);
       return;
     }
+  }
+
+  if (options.dryRun) {
+    // Рид-онли валидация: манифест сценария прогоняется через docker compose config -q
+    // (валидация синтаксиса/интерполяции без создания контейнеров), затем печатается план.
+    const generated = createRuntimeCompose(contract, {
+      projectRoot,
+      projectId: runtimeId,
+      environment: env,
+    });
+    const projectName2 = `${runtimeId}-${env}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    const configArgs = [
+      "compose", "--project-name", projectName2,
+      "--project-directory", projectRoot,
+      "-f", "-", "config", "-q",
+    ];
+    const result = child_process.spawnSync("docker", configArgs, {
+      cwd: projectRoot,
+      input: generated.content,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    if (result.status !== 0) {
+      const details = (result.stderr ?? "").trim() || result.error?.message || "docker compose config failed";
+      if (isJson) console.log(JSON.stringify({ status: "invalid", env, details }));
+      else {
+        console.error(`❌ Docker Compose validation failed for scenario '${env}':
+   ${details.split("\n").join("\n   ")}`);
+      }
+      if (!options.noExit) process.exit(1);
+      return;
+    }
+
+    // План: docker-сервисы манифеста + host-сервисы (не попадают в манифест) + маршруты.
+    const dockerServices = Object.keys((generated.manifest as any).services ?? {});
+    const hostServices = Object.entries(contract.services ?? {})
+      .filter(([, svc]) => {
+        const rt = (svc as any).runtime?.[env];
+        return rt && rt.driver !== "docker";
+      })
+      .map(([name]) => name);
+    if (isJson) {
+      console.log(JSON.stringify({
+        status: "valid",
+        env,
+        project: projectName,
+        composeProject: projectName2,
+        dockerServices,
+        hostServices,
+        domains: requestedDomains,
+      }));
+    } else {
+      console.log(`\n🧪 Dry-run: сценарий '${env}' проекта '${projectName}' валиден (docker compose config -q прошёл).\n`);
+      console.log(`   Docker-сервисы (поднимутся): ${dockerServices.length > 0 ? dockerServices.join(", ") : "—"}`);
+      if (hostServices.length > 0) console.log(`   Host-сервисы (вне манифеста, запускает разработчик): ${hostServices.join(", ")}`);
+      console.log(`   Домены: ${requestedDomains.join(", ")}`);
+      console.log(`   Секреты (имена, не значения): ${Object.values(contract.services ?? {}).flatMap((s: any) => s.secrets ?? []).join(", ") || "—"}`);
+      console.log(`\nℹ️  Ничего не изменено: контейнеры не созданы, маршруты не записаны.`);
+    }
+    return;
   }
 
   if (!options.skipUp) {
