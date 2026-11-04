@@ -111,33 +111,48 @@ async function ensureDockerImage(imageName: string) {
   logSuccess(`Image '${imageName}' available in local Docker storage`);
 }
 
-/** Вписывает тестовый прод-домен всем сервисам с доменами (заглушка example.com не должна дойти до деплоя). */
-async function setContractDomains(projectDir: string, domain: string) {
-  const contractPath = path.join(projectDir, "pegas.json");
-  const contract = JSON.parse(await fs.readFile(contractPath, "utf-8")) as {
-    services?: Record<string, { domains?: Record<string, string[]> }>;
+/**
+ * v3: контракт pegas.json пишет сам e2e (init в v3 контракт не создаёт).
+ * Форма — как в v3-валидаторе: scenarios, gateway-карта, runtime-карты,
+ * image-карты, сценарные domains (производственные тест-домены).
+ */
+function writeV3Contract(projectDir: string, projectName: string, webDomain: string, extraServices: Record<string, { domain: string; port: number }> = {}) {
+  const scenarios = ["development", "stage", "production"];
+  const contract = {
+    projectName,
+    scenarios,
+    gateway: Object.fromEntries(
+      scenarios.map((s) => [s, { httpPort: 80, httpsPort: 443 }])
+    ),
+    services: {
+      web: {
+        runtime: Object.fromEntries(scenarios.map((s) => [s, { driver: "docker" }])),
+        image: Object.fromEntries(scenarios.map((s) => [s, "traefik/whoami"])),
+        port: Object.fromEntries(scenarios.map((s) => [s, 80])),
+        domains: {
+          development: [`${projectName}.localhost`],
+          stage: [`${projectName}-stage.test`],
+          production: [webDomain],
+        },
+      },
+      ...Object.fromEntries(
+        Object.entries(extraServices).map(([name, { domain, port }]) => [
+          name,
+          {
+            runtime: Object.fromEntries(scenarios.map((s) => [s, { driver: "docker" }])),
+            image: Object.fromEntries(scenarios.map((s) => [s, "traefik/whoami"])),
+            port: Object.fromEntries(scenarios.map((s) => [s, port])),
+            domains: {
+              development: [`${name}.${projectName}.localhost`],
+              stage: [`${name}-${projectName}-stage.test`],
+              production: [domain],
+            },
+          },
+        ])
+      ),
+    },
   };
-  for (const service of Object.values(contract.services || {})) {
-    if (service.domains?.production?.length) {
-      service.domains.production = [domain];
-    }
-  }
-  await fs.writeFile(contractPath, JSON.stringify(contract, null, 2) + "\n", "utf-8");
-}
-
-async function setDockerServiceImages(projectDir: string, image: string) {
-  const contractPath = path.join(projectDir, "pegas.json");
-  const contract = JSON.parse(await fs.readFile(contractPath, "utf-8")) as {
-    runtime?: string;
-    services?: Record<string, { image?: string; build?: unknown }>;
-  };
-  contract.runtime = "docker";
-  for (const service of Object.values(contract.services || {})) {
-    if (!service.image && !service.build) {
-      service.image = image;
-    }
-  }
-  await fs.writeFile(contractPath, JSON.stringify(contract, null, 2));
+  return fs.writeFile(path.join(projectDir, "pegas.json"), JSON.stringify(contract, null, 2) + "\n", "utf-8");
 }
 
 async function runUnifiedE2E() {
@@ -177,9 +192,9 @@ async function runUnifiedE2E() {
     logSuccess("Test container images verified in local Docker storage");
 
     // =========================================================================
-    // Phase 1: Local CLI Mechanics & Compose Surgery
+    // Phase 1: Local CLI Mechanics (thin init, no compose surgery)
     // =========================================================================
-    logPhase(1, "Local CLI Mechanics & Compose Surgery (init, strip ports, scope aliases)");
+    logPhase(1, "Local CLI Mechanics (init writes documentation artifacts, no manifest surgery)");
     mainSandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-e2e-unified-"));
     const surgeryDir = path.join(mainSandboxDir, "surgery-project");
     await fs.mkdir(surgeryDir, { recursive: true });
@@ -219,57 +234,35 @@ async function runUnifiedE2E() {
     }
     logSuccess("'pegas init' executed with code 0");
 
-    // Verify contract
-    const contract = JSON.parse(await fs.readFile(path.join(surgeryDir, "pegas.json"), "utf-8"));
-    if (contract.projectName !== "surgery-demo-app") {
-      throw new Error(`Contract projectName mismatch: ${contract.projectName}`);
+    // v3: init НЕ должен переписывать контракт — только писать docs/pegas.md и .gitignore-гигиену
+    const contractRaw = await fs.readFile(path.join(surgeryDir, "pegas.json"), "utf-8");
+    if (JSON.parse(contractRaw).projectName === "surgery-demo-app") {
+      throw new Error("v3 violation: pegas init mutated pegas.json (projectName was injected)");
     }
-    const webPort = contract.services?.web?.port ?? (contract.services?.web?.upstream ? parseInt(contract.services.web.upstream.split(":")[1]) : undefined);
-    if (webPort !== 80) {
-      throw new Error(`Expected port 80, got: ${webPort}`);
-    }
-    logSuccess("Contract verified: projectName='surgery-demo-app', port auto-detected: 80");
+    logSuccess("Contract preserved: init did not rewrite pegas.json (thin init semantics)");
 
-    // Verify compose surgery (.pegas/docker-compose.yml created, root untouched)
-    const rootCompose = await fs.readFile(path.join(surgeryDir, "docker-compose.yml"), "utf-8");
-    if (!rootCompose.includes('"8080:80"')) {
-      throw new Error("Root docker-compose.yml was improperly mutated");
+    // docs/pegas.md: каноничный шаблон docsPegasMd() — суть Pegas, контракт, dev-цикл; без compose-surgery
+    const docsMd = await fs.readFile(path.join(surgeryDir, "docs", "pegas.md"), "utf-8");
+    if (!docsMd.includes("# Pegas")) throw new Error("docs/pegas.md: title missing");
+    if (!docsMd.includes("## Контракт pegas.json")) throw new Error("docs/pegas.md: contract section missing");
+    if (!docsMd.includes("## Dev-цикл")) throw new Error("docs/pegas.md: dev cycle section missing");
+    // Имя в docs — из package.json проекта (pegas.json имени не содержит)
+    if (!docsMd.includes("Проект: `surgery-demo-app`")) throw new Error("docs/pegas.md: project name missing");
+    if (docsMd.includes("expose:")) {
+      throw new Error("docs/pegas.md still documents compose surgery (removed in v3)");
     }
+    logSuccess("docs/pegas.md written: canonical contract documentation, no compose-surgery references");
 
-    const patchedCompose = await fs.readFile(path.join(surgeryDir, ".pegas", "docker-compose.yml"), "utf-8");
-    if (patchedCompose.includes('"8080:80"')) {
-      throw new Error("Public web port '8080:80' was not stripped in .pegas/docker-compose.yml");
-    }
-    if (!patchedCompose.includes("expose:")) {
-      throw new Error("Expose directive was not added to web service");
-    }
-    if (!patchedCompose.includes("surgery-demo-app-web")) {
-      throw new Error("Project-scoped alias 'surgery-demo-app-web' missing from web service");
-    }
-    if (!patchedCompose.includes('"6379:6379"')) {
-      throw new Error("Infrastructure port '6379:6379' for Redis was mistakenly stripped");
-    }
-    if (!patchedCompose.includes("pegas-network:\n    external: true") && !patchedCompose.includes("pegas-network:\n  external: true")) {
-      throw new Error("External pegas-network root declaration missing");
-    }
-    logSuccess("Compose surgery verified: public port stripped, expose added, alias scoped, infra port preserved");
-
-    // Verify package.json & gitignore
-    const updatedPkg = JSON.parse(await fs.readFile(path.join(surgeryDir, "package.json"), "utf-8"));
-    const hasDevDep = !!(updatedPkg.devDependencies?.["@netrunner714/pegas"] || updatedPkg.devDependencies?.pegas);
-    if (!hasDevDep) {
-      throw new Error("devDependencies missing @netrunner714/pegas");
-    }
+    // .gitignore-гигиена: манифесты эфемерны и не коммитятся
     const gitignoreContent = await fs.readFile(path.join(surgeryDir, ".gitignore"), "utf-8");
     if (!gitignoreContent.includes(".pegas")) {
       throw new Error(".gitignore is missing '.pegas'");
     }
-    logSuccess("package.json script wrapping and .gitignore protection verified");
+    logSuccess(".gitignore protection verified (ephemeral manifests stay out of git)");
 
+    // Phase 2: No Delegation (v3 — бинарник выполняется напрямую, перехвата node_modules/pegas нет)
     // =========================================================================
-    // Phase 2: Local Delegation Pattern
-    // =========================================================================
-    logPhase(2, "Local Delegation Pattern (node_modules/pegas intercept & recursion guard)");
+    logPhase(2, "Direct Execution (v3: no node_modules/pegas interception, no recursion guard)");
     delegationDir = path.join(mainSandboxDir, "delegation-sandbox");
     const localPegasDist = path.join(delegationDir, "node_modules", "pegas", "dist");
     await fs.mkdir(localPegasDist, { recursive: true });
@@ -277,23 +270,14 @@ async function runUnifiedE2E() {
     const mockLocalCode = `console.log("MOCK_LOCAL_PEGAS_EXECUTED");\nprocess.exit(0);\n`;
     await fs.writeFile(path.join(localPegasDist, "index.js"), mockLocalCode);
 
-    const delRes = await execAsync("node", [BIN_PATH, "status"], { cwd: delegationDir });
-    if (!delRes.stdout.includes("MOCK_LOCAL_PEGAS_EXECUTED")) {
-      throw new Error(`Expected delegation to local package, got: ${delRes.stdout}`);
+    const delRes = await execAsync("node", [BIN_PATH, "--version"], { cwd: delegationDir });
+    if (delRes.stdout.includes("MOCK_LOCAL_PEGAS_EXECUTED")) {
+      throw new Error("v3 violation: primary binary delegated to local node_modules/pegas (delegation removed in v3)");
     }
-    logSuccess("Global binary intercepted call and delegated to local node_modules/pegas");
-
-    const guardRes = await execAsync("node", [BIN_PATH, "--version"], {
-      cwd: delegationDir,
-      env: { ...process.env, PEGAS_DELEGATED: "1" },
-    });
-    if (guardRes.stdout.includes("MOCK_LOCAL_PEGAS_EXECUTED")) {
-      throw new Error("Recursion guard failed: loop detected");
+    if (!delRes.stdout.includes("pegas v")) {
+      throw new Error(`Expected primary binary version, got: ${delRes.stdout}`);
     }
-    if (!guardRes.stdout.includes("pegas v")) {
-      throw new Error(`Expected primary binary version, got: ${guardRes.stdout}`);
-    }
-    logSuccess("Recursion guard verified: PEGAS_DELEGATED=1 executes primary binary safely");
+    logSuccess("Primary binary executes directly despite local node_modules/pegas (v3 semantics)");
 
     // =========================================================================
     // Phase 3: Multi-Tenant Gateway Setup (with auto_https off for hermetic HTTP)
@@ -360,11 +344,9 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8081:80"\n    environment:\n      - WHOAMI_NAME=project-alpha\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pAlphaDir });
-    // Единая заглушка example.com: тест-домены проекта уникальны
-    // (заглушки не должны дойти до деплоя — так же, как в реальном проекте).
-    await setContractDomains(pAlphaDir, "project-alpha.com");
-    await setDockerServiceImages(pAlphaDir, "traefik/whoami");
-    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir], {
+    // v3: контракт пишет e2e (thin init контракт не создаёт); домены уникальны per-tenant
+    await writeV3Contract(pAlphaDir, "project-alpha", "project-alpha.com");
+    const deployAlphaRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--skip-dns-check", "--gateway-dir", gatewayDir], {
       cwd: pAlphaDir,
     });
     if (deployAlphaRes.code !== 0) {
@@ -382,9 +364,8 @@ networks:
       `services:\n  web:\n    image: traefik/whoami\n    ports:\n      - "8082:80"\n    environment:\n      - WHOAMI_NAME=project-beta\n`
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pBetaDir });
-    await setContractDomains(pBetaDir, "project-beta.com");
-    await setDockerServiceImages(pBetaDir, "traefik/whoami");
-    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir], {
+    await writeV3Contract(pBetaDir, "project-beta", "project-beta.com");
+    const deployBetaRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--skip-dns-check", "--gateway-dir", gatewayDir], {
       cwd: pBetaDir,
     });
     if (deployBetaRes.code !== 0) {
@@ -464,26 +445,12 @@ networks:
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pMultiDir });
 
-    // Update contract for dual services
-    const multiContract = {
-      projectName: "project-multi",
-      runtime: "docker",
-      services: {
-        web: {
-          image: "traefik/whoami",
-          upstream: "web:80",
-          domains: { prod: ["multi-app.com"] },
-        },
-        api: {
-          image: "traefik/whoami",
-          upstream: "api:80",
-          domains: { prod: ["api-multi-app.com"] },
-        },
-      },
-    };
-    await fs.writeFile(path.join(pMultiDir, "pegas.json"), JSON.stringify(multiContract, null, 2));
+    // v3: контракт с двумя сервисами (web + api), сценарные карты
+    await writeV3Contract(pMultiDir, "project-multi", "multi-app.com", {
+      api: { domain: "api-multi-app.com", port: 80 },
+    });
 
-    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir], {
+    const deployMultiRes = await execAsync("node", [BIN_PATH, "deploy", "-s", "production", "--skip-dns-check", "--gateway-dir", gatewayDir], {
       cwd: pMultiDir,
     });
     if (deployMultiRes.code !== 0) {
@@ -520,23 +487,12 @@ networks:
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pHijackDir });
 
-    // Intentionally claim Project Alpha's domain
-    const hijackContract = {
-      projectName: "project-hijack",
-      runtime: "docker",
-      services: {
-        web: {
-          image: "traefik/whoami",
-          upstream: "web:80",
-          domains: { prod: ["project-alpha.com"] }, // VIOLATION: owned by Alpha
-        },
-      },
-    };
-    await fs.writeFile(path.join(pHijackDir, "pegas.json"), JSON.stringify(hijackContract, null, 2));
+    // v3: намеренно захватываем домен Alpha (VIOLATION: owned by Alpha)
+    await writeV3Contract(pHijackDir, "project-hijack", "project-alpha.com");
 
     const hijackDeployRes = await execAsync(
       "node",
-      [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir],
+      [BIN_PATH, "deploy", "-s", "production", "--skip-dns-check", "--gateway-dir", gatewayDir],
       { cwd: pHijackDir }
     );
 
@@ -575,20 +531,23 @@ networks:
     );
     await execAsync("node", [BIN_PATH, "init"], { cwd: pBrokenDir });
 
+    // v3: контракт с падающим healthcheck — readiness-проба обязана отклонить деплой
+    const brokenScenarios = ["development", "stage", "production"];
     const brokenContract = {
       projectName: "project-broken",
-      runtime: "docker",
+      scenarios: brokenScenarios,
+      gateway: Object.fromEntries(brokenScenarios.map((s) => [s, { httpPort: 80, httpsPort: 443 }])),
       services: {
         web: {
-          image: "caddy:2-alpine",
-          healthcheck: {
-            test: ["CMD-SHELL", "exit 1"],
-            interval: "1s",
-            timeout: "1s",
-            retries: 1,
+          runtime: Object.fromEntries(brokenScenarios.map((s) => [s, { driver: "docker" }])),
+          image: Object.fromEntries(brokenScenarios.map((s) => [s, "caddy:2-alpine"])),
+          port: Object.fromEntries(brokenScenarios.map((s) => [s, 80])),
+          healthcheck: Object.fromEntries(brokenScenarios.map((s) => [s, { test: ["CMD-SHELL", "exit 1"], interval: "1s", timeout: "1s", retries: 1 }])),
+          domains: {
+            development: ["broken-site.localhost"],
+            stage: ["broken-site-stage.test"],
+            production: ["broken-site.com"],
           },
-          upstream: "web:80",
-          domains: { prod: ["broken-site.com"] },
         },
       },
     };
@@ -596,7 +555,7 @@ networks:
 
     const brokenDeployRes = await execAsync(
       "node",
-      [BIN_PATH, "deploy", "-s", "production", "--gateway-dir", gatewayDir],
+      [BIN_PATH, "deploy", "-s", "production", "--skip-dns-check", "--gateway-dir", gatewayDir],
       { cwd: pBrokenDir }
     );
 
