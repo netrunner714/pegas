@@ -3,6 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import child_process from "node:child_process";
+import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 
 // Colors for terminal output
 const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
@@ -169,6 +171,9 @@ async function runUnifiedE2E() {
   let pMultiDir = "";
   let pHijackDir = "";
   let pBrokenDir = "";
+  // Момент старта: страховочный sweep чистит только pegas-контейнеры ЭТОГО прогона,
+  // не задевая чужие pegas-развёртывания на хосте (created >= runStartedAt).
+  const runStartedAt = Date.now();
 
   try {
     // =========================================================================
@@ -638,21 +643,54 @@ networks:
   } finally {
     // Teardown containers and wipe sandboxes
     logPhase(11, "Cleanup and Environment Restoration");
+    // v3: манифест compose эфемерный (stdin), `docker compose down` из каталога проекта —
+    // no-op. Контейнеры чистятся по labels pegas.*; кэтч: deploy мог упасть на readiness
+    // ДО записи маршрутов — `pegas down` для такого проекта уже не вызовешь. Гарантия:
+    // удаляем по label=pegas.project=<runtimeId> для каждой песочницы прогона.
+    const sandboxProjects: Array<[string, string]> = [
+      [pAlphaDir, "project-alpha"],
+      [pBetaDir, "project-beta"],
+      [pMultiDir, "project-multi"],
+      [pHijackDir, "project-hijack"],
+      [pBrokenDir, "project-broken"],
+    ];
+    for (const [dir, name] of sandboxProjects) {
+      if (!dir) continue;
+      const runtimeId = createHash("sha256")
+        .update(JSON.stringify({ projectRoot: path.resolve(dir), projectName: name }))
+        .digest("hex")
+        .slice(0, 10);
+      const listed = (await execAsync("docker", [
+        "ps", "-aq", "--filter", `label=pegas.project=${runtimeId}`,
+      ])).stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+      if (listed.length === 0) continue;
+      const rmRes = await execAsync("docker", ["rm", "-f", ...listed]);
+      if (rmRes.code !== 0 && rmRes.stderr) {
+        logFail(`Cleanup warning (${name}): ${rmRes.stderr}`);
+      }
+    }
+    // Страховка: не осталось ли pegas-контейнеров, созданных после старта прогона
+    // (например, при изменении схемы имени/label). Чистим только свои — по времени создания.
+    {
+      const leftovers = (await execAsync("docker", [
+        "ps", "-aq", "--filter", "label=pegas.project",
+        "--format", "{{.ID}} {{.CreatedAt}}",
+      ])).stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+      const stale = leftovers
+        .filter((line) => {
+          const created = new Date(line.split(" ").slice(1).join(" "));
+          return !Number.isNaN(created.getTime()) && created.getTime() >= runStartedAt;
+        })
+        .map((line) => line.split(" ")[0])
+        .filter(Boolean);
+      if (stale.length > 0) {
+        await execAsync("docker", ["rm", "-f", ...stale]);
+        logSuccess(`Swept ${stale.length} leftover pegas container(s) from this run`);
+      }
+    }
     if (gatewayDir) {
       await execAsync("docker", ["compose", "down", "-v"], { cwd: gatewayDir });
       logSuccess("Gateway Caddy container stopped and removed");
-    }
-    if (pAlphaDir) {
-      await execAsync("docker", ["compose", "down", "-v"], { cwd: pAlphaDir });
-    }
-    if (pBetaDir) {
-      await execAsync("docker", ["compose", "down", "-v"], { cwd: pBetaDir });
-    }
-    if (pMultiDir) {
-      await execAsync("docker", ["compose", "down", "-v"], { cwd: pMultiDir });
-    }
-    if (pBrokenDir) {
-      await execAsync("docker", ["compose", "down", "-v"], { cwd: pBrokenDir });
     }
     if (mainSandboxDir) {
       await fs.rm(mainSandboxDir, { recursive: true, force: true });
