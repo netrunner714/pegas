@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, reloadGateway } from "../gateway.js";
-import { CONTRACT_FILENAME } from "../contract.js";
+import { CONTRACT_FILENAME, getProjectRuntimeId } from "../contract.js";
 import { stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
+import { stripOwnerBlocks, writeRouteFileAtomically } from "../route-merge.js";
 
 export interface DisconnectOptions {
   cwd?: string;
@@ -29,15 +30,35 @@ export async function handleDisconnect(options: DisconnectOptions = {}): Promise
 
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const routeFilePath = getProjectRouteFilePath(gatewayDir, projectName, "development");
+  const runtimeId = getProjectRuntimeId(projectRoot, projectName);
+  const deployUpstreamPrefix = `${runtimeId}-development`;
 
   let removed = false;
+  let removedDomains: string[] = [];
+  let keptRouteFile: string | null = null;
+  let originalContent: string | null = null;
   try {
-    await fs.access(routeFilePath);
-    if (!options.dryRun) {
-      await fs.unlink(routeFilePath);
-    }
-    removed = true;
+    originalContent = await fs.readFile(routeFilePath, "utf-8");
   } catch {}
+
+  if (originalContent !== null) {
+    // issue #24: disconnect снимает только connect-блоки (upstream host.docker.internal);
+    // deploy-блоки (docker-сервисы) и внешние блоки остаются в общем файле проекта.
+    const stripped = stripOwnerBlocks(originalContent, "connect", deployUpstreamPrefix);
+    if (!options.dryRun) {
+      if (stripped.content === null) {
+        await fs.unlink(routeFilePath).catch(() => {});
+        removed = true;
+      } else {
+        await writeRouteFileAtomically(routeFilePath, stripped.content);
+        keptRouteFile = routeFilePath;
+        removed = stripped.removedDomains.length > 0;
+      }
+    } else {
+      removed = true;
+    }
+    removedDomains = stripped.removedDomains;
+  }
 
   // Host-контекст SDK больше не актуален: сессия завершена.
   if (!options.dryRun) {
@@ -66,12 +87,17 @@ export async function handleDisconnect(options: DisconnectOptions = {}): Promise
         status: "disconnected",
         project: projectName,
         removedRouteFile: removed ? routeFilePath : null,
+        removedDomains,
+        keptRouteFile,
         gatewayStopped,
       }),
     );
   } else {
     if (removed) {
-      console.log(`\n🔌 \x1b[1;33mProject '${projectName}' disconnected from Pegas Gateway.\x1b[0m`);
+      console.log(`\n🔌 [1;33mProject '${projectName}' disconnected from Pegas Gateway.[0m`);
+      if (keptRouteFile) {
+        console.log(`   [90mDeploy routes kept in ${keptRouteFile} (docker-сервисы; issue #24).[0m`);
+      }
     } else {
       console.log(`\nℹ️ Project '${projectName}' was not connected.`);
     }

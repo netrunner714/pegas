@@ -191,7 +191,7 @@ describe("connect: TLS-готовность", () => {
     const gwDir = path.join(dir, "gw");
     const spy = (await import("bun:test")).spyOn((await import("node:child_process")).default, "spawnSync").mockImplementation((() => {
       // docker exec — отказ: шлюза нет
-      return { status: 1, stdout: Buffer.alloc(0), stderr: "no container" };
+      return { status: 1, stdout: new Uint8Array(0), stderr: "no container" };
     }) as any);
     try {
       const json = await captureJson(() => handleConnect({ cwd: dir, gatewayDir: gwDir, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true }));

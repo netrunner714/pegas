@@ -14,7 +14,7 @@
 - The launch manifest is generated from pegas.json and is ephemeral (passed via stdin); user compose files are not the source of truth.
 - Containers carry Docker labels: `pegas.project`, `pegas.scenario`, `pegas.service`, `pegas.manifest-hash`.
 - Service aliases inside the shared network are `<project-id>-<scenario>-<service>`: several checkouts and scenarios coexist.
-- Each project gets an isolated route file `conf.d/<project>-<scenario>.caddy` per scenario; hot-reload with validation and rollback.
+- Each project gets an isolated route file `conf.d/<project>-<scenario>.caddy` per scenario; hot-reload with validation and rollback. The file is shared by route owners and merged per domain: `pegas connect` rewrites only blocks with upstream `host.docker.internal:<port>`, `pegas deploy` only blocks with scoped upstream `<project-id>-<scenario>-<service>:<port>`; foreign blocks are preserved verbatim (`disconnect`/`down` remove only their own blocks).
 - Auto-provisions Let's Encrypt SSL on first request.
 - View and stream container logs: `pegas logs [env] [service] [-f] [--tail N]`; Ctrl+C only detaches without stopping containers.
 - Development: `pegas connect` routes host-driver services through the Gateway (`[service].[project].localhost`, upstream `host.docker.internal:<port>`); `pegas disconnect` removes the route.

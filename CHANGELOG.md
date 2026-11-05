@@ -5,6 +5,17 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [3.1.0] — 2026-11-05
+
+### Added
+
+- **connect/deploy: merge маршрутов по доменам** ([#24](https://github.com/netrunner714/pegas/issues/24)) — файл маршрутов `conf.d/<project>-<scenario>.caddy` остаётся общим, но каждая команда перезаписывает только принадлежащие ей блоки (правило «владелец маршрута = владелец процесса» из [#23](https://github.com/netrunner714/pegas/issues/23)):
+  - `connect` владеет блоками с upstream `host.docker.internal:<port>` (bun-сервисы);
+  - `deploy` владеет блоками со scoped-upstream `<runtimeId>-<env>-<service>:<port>` (docker-сервисы);
+  - при записи существующий файл разбирается (`parseCaddyProjectFile`), свои домены заменяются, чужие блоки сохраняются дословно; в development смешанный сценарий (bun + docker) больше не теряет маршруты при повторном вызове `connect`/`deploy` в любом порядке;
+  - `disconnect` удаляет только connect-блоки (файл остаётся, если в нём есть deploy-маршруты); `down` снимает только deploy-блоки (connect-маршруты host-сервисов переживают остановку контейнеров);
+  - новый модуль `src/route-merge.ts` (сплиттер блоков, классификация владельцев, атомарная запись) — атомарная запись маршрутов вынесена сюда из `deploy.ts`.
+
 ## [3.0.1] — 2026-11-05
 
 ### Fixed

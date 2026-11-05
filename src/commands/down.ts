@@ -7,6 +7,7 @@ import { removeProjectContainers } from "../runtime.js";
 import { runCommand, stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
 import { withRuntimeLock } from "../runtime-lock.js";
+import { stripOwnerBlocks, writeRouteFileAtomically } from "../route-merge.js";
 
 export interface DownOptions {
   gatewayDir?: string;
@@ -69,7 +70,12 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
   const confDir = getConfDir(gatewayDir);
   const sanitizedProject = projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
 
+  // issue #24: down снимает только deploy-блоки (владелец маршрута = владелец
+  // процесса). Connect-блоки (host-сервисы, upstream host.docker.internal) в
+  // development-файле сохраняются — контейнеры останавливаем, dev-маршруты живы.
+  const deployUpstreamPrefix = runtimeId ? `${runtimeId}-${requestedEnvironment ?? "development"}` : "";
   const removedFiles: string[] = [];
+  const keptFiles: string[] = [];
   const previousRouteFiles = new Map<string, string>();
   try {
     const files = await fs.readdir(confDir);
@@ -79,10 +85,27 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
         ? true
         : f === `${sanitizedProject}-${requestedEnvironment}.caddy`
           || (requestedEnvironment === "production" && f === `${sanitizedProject}.caddy`);
-      if (isOwnRouteFile && isRequestedEnvironmentFile) {
-        const fullPath = path.join(confDir, f);
-        previousRouteFiles.set(fullPath, await fs.readFile(fullPath, "utf-8"));
-        await fs.unlink(fullPath);
+      if (!isOwnRouteFile || !isRequestedEnvironmentFile) continue;
+      const fullPath = path.join(confDir, f);
+      const content = await fs.readFile(fullPath, "utf-8");
+      if (runtimeId && f === `${sanitizedProject}-development.caddy`) {
+        const stripped = stripOwnerBlocks(content, "deploy", deployUpstreamPrefix);
+        if (stripped.content === null) {
+          previousRouteFiles.set(fullPath, content);
+          await fs.unlink(fullPath).catch(() => {});
+          removedFiles.push(fullPath);
+        } else if (stripped.content !== content) {
+          previousRouteFiles.set(fullPath, content);
+          await writeRouteFileAtomically(fullPath, stripped.content);
+          removedFiles.push(fullPath);
+          keptFiles.push(fullPath);
+        } else {
+          // deploy-блоков в файле нет — это чистый connect-файл, down его не трогает.
+          keptFiles.push(fullPath);
+        }
+      } else {
+        previousRouteFiles.set(fullPath, content);
+        await fs.unlink(fullPath).catch(() => {});
         removedFiles.push(fullPath);
       }
     }
@@ -171,12 +194,16 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
         status: "success",
         project: projectName,
         routeFiles: removedFiles,
+        keptRouteFiles: keptFiles,
         fileRemoved,
       })
     );
     return;
   }
 
+  if (keptFiles.length > 0) {
+    console.log(`\n⚘ Connect routes kept in ${keptFiles.join(", ")} (host-сервисы; issue #24).`);
+  }
   console.log(`\n✨ Project '${projectName}' taken down and routes cleaned up successfully.\n`);
 }
 
