@@ -77,6 +77,54 @@ describe("pegas connect v3", () => {
     expect(out.join("\n")).toContain("Домены требуют port");
   });
 
+  it("issue #23: docker-сервис с dev-доменами не маршрутизируется — connect пишет только bun", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-connect-driver-"));
+    const mixed = JSON.parse(JSON.stringify(contract)) as any;
+    // redis становится docker-сервисом С доменами — раньше connect направил бы его на host.
+    mixed.services.redis.domains = { development: ["redis.smoke-app.localhost"] };
+    await fs.writeFile(path.join(dir, "pegas.json"), JSON.stringify(mixed));
+    const gwDir = path.join(dir, "gateway");
+    await handleConnect({ cwd: dir, gatewayDir: gwDir, skipGatewayEnsure: true, skipReload: true, noExit: true });
+
+    const routePath = path.join(gwDir, "conf.d", "smoke-app-development.caddy");
+    const content = await fs.readFile(routePath, "utf-8");
+    expect(content).toContain("web.smoke-app.localhost");
+    expect(content).toContain("host.docker.internal:3000");
+    expect(content).not.toContain("redis.smoke-app.localhost");
+  });
+
+  it("issue #23: connect без единого bun-сервиса с доменами — файл маршрутов не пишется, выводится предупреждение", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-connect-nobun-"));
+    const dockerOnly = {
+      ...JSON.parse(JSON.stringify(contract)),
+      services: {
+        web: {
+          runtime: { development: { driver: "docker" } },
+          image: { development: "node:24" },
+          port: { development: 3000 },
+          domains: { development: ["web.smoke-app.localhost"] },
+        },
+      } as any,
+    };
+    await fs.writeFile(path.join(dir, "pegas.json"), JSON.stringify(dockerOnly));
+    const gwDir = path.join(dir, "gateway");
+
+    const out: string[] = [];
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = (...args: unknown[]) => out.push(args.join(" "));
+    console.error = (...args: unknown[]) => out.push(args.join(" "));
+    try {
+      await handleConnect({ cwd: dir, gatewayDir: gwDir, skipGatewayEnsure: true, skipReload: true, noExit: true });
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+    }
+    const routePath = path.join(gwDir, "conf.d", "smoke-app-development.caddy");
+    expect(await fs.access(routePath).then(() => true, () => false)).toBe(false);
+    expect(out.join("\n")).toContain("регистрировать нечего");
+  });
+
   it("json-режим: urls для каждого dev-домена", async () => {
     const dir = await tmpProject();
     const gwDir = path.join(dir, "gateway2");

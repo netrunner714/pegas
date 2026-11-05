@@ -5,6 +5,15 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Fixed
+
+- **connect/deploy: фильтрация по драйверу** ([#23](https://github.com/netrunner714/pegas/issues/23)) — правило «владелец маршрута = владелец процесса»:
+  - `connect` пишет dev-маршруты только для host-сервисов (`runtime.development.driver: "bun"`); домены docker-сервисов больше не направляются на `host.docker.internal`. Если bun-сервисов с доменами нет — предупреждение «регистрировать нечего» (connect продолжает писать `.pegas/context.json` и проверять TLS).
+  - `deploy` в readiness проверяет только контейнерные сервисы: host-сервис (bun) контейнера не имеет, манифест его не поднимает — 30-секундный таймаут и падение после подъёма инфры устранены.
+  - `deploy` не генерирует сниппеты для bun-сервисов в development и не удаляет файл маршрутов, принадлежащий `connect` (upstream `host.docker.internal`) — маршрут `host.docker.internal:<port>` переживает deploy.
+
 ## [3.0.0] — 2026-11-04
 
 Мажорный релиз: контракт Pegas v3. Пересборка декларативного слоя вокруг сценариев

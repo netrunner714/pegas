@@ -112,6 +112,9 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
+    // issue #23: владелец маршрута = владелец процесса. connect пишет маршруты только
+    // для host-сервисов (driver: bun) — домены docker-сервисов принадлежат deploy.
+    if ((serviceConfig.runtime?.["development"]?.driver ?? "docker") !== "bun") continue;
     const envDomains = getEnvironmentDomains(serviceConfig, "development");
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
 
@@ -153,6 +156,19 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
         url: `https://${normDomain}`,
         upstream: `127.0.0.1:${servicePort}`,
       });
+    }
+  }
+
+  // issue #23: connect без единого bun-сервиса в development — «регистрировать нечего».
+  // Предупреждение, не ошибка: connect продолжает писать .pegas/context.json и проверять TLS.
+  if (snippets.length === 0) {
+    const anyDevDomains = Object.values(contract.services || {}).some((svc) => {
+      const d = getEnvironmentDomains(svc, "development");
+      return Array.isArray(d) && d.length > 0;
+    });
+    if (anyDevDomains) {
+      if (isJson) console.log(JSON.stringify({ warning: "No host-driver (bun) services with development domains — routes belong to pegas deploy (docker driver). Nothing to connect." }));
+      else console.log(`   \x1b[33m⚠ В development нет host-сервисов (driver: bun) с доменами: маршруты этих доменов пишет 'pegas deploy' — connect регистрировать нечего.\x1b[0m`);
     }
   }
 

@@ -444,9 +444,14 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     }
 
     if (!skipReadiness) {
+      // issue #23: readiness проверяет только контейнерные сервисы — манифест
+      // поднимает лишь driver:"docker"; host-сервис (bun) контейнера не имеет и
+      // ждать его deploy не может (маршруты host-сервисов — зона pegas connect).
       const servicesToCheck: string[] = [];
       for (const [sName, sCfg] of Object.entries(contract.services || {})) {
-        if (getEnvironmentDomains(sCfg, env).length > 0) servicesToCheck.push(sName);
+        if (getEnvironmentDomains(sCfg, env).length > 0 && (sCfg.runtime?.[env]?.driver ?? "docker") !== "bun") {
+          servicesToCheck.push(sName);
+        }
       }
       if (servicesToCheck.length > 0) {
         if (!isJson) console.log(`\n⏳ Checking container readiness for: ${servicesToCheck.join(", ")}...`);
@@ -492,6 +497,9 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
+    // issue #23: в development маршруты host-сервисов (driver: bun) — зона pegas connect;
+    // deploy не пишет сниппеты на несуществующие контейнеры и не затирает routes connect.
+    if (env === "development" && serviceConfig.runtime?.[env]?.driver === "bun") continue;
     const envDomains = getEnvironmentDomains(serviceConfig, env);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
     // v3: upstream строится из port-карты сценария; services без port валидатор не пропустит
@@ -528,6 +536,13 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
 
   let originalContent: string | null = null;
   try { originalContent = await fs.readFile(projectRouteFile, "utf-8"); } catch {}
+  // issue #23: в development файл маршрутов может принадлежать pegas connect (host-сервисы,
+  // upstream host.docker.internal). Если deploy не сгенерировал своих сниппетов, файл connect
+  // не удаляется и не перезаписывается — маршруты bun-сервисов остаются в силе.
+  const fileOwnedByConnect =
+    env === "development" &&
+    originalContent !== null &&
+    originalContent.includes("host.docker.internal");
   let fileModified = false;
   if (snippets.length > 0) {
     const combinedCaddyfile =
@@ -540,10 +555,13 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       console.log(`\n📄 [2/3] Generated route config: ${projectRouteFile}`);
       for (const route of deployedRoutes) console.log(`  ✓ Route: https://${route.domain} -> ${route.upstream}`);
     }
-  } else if (originalContent !== null) {
+  } else if (originalContent !== null && !fileOwnedByConnect) {
     await fs.unlink(projectRouteFile).catch(() => {});
     fileModified = true;
     if (!isJson) console.log(`\n🗑️  [2/3] Removed old project route config: ${projectRouteFile}`);
+  } else if (originalContent !== null && fileOwnedByConnect) {
+    // issue #23: маршруты host-сервисов (connect) в development сохранены — deploy их не трогает.
+    if (!isJson) console.log(`\nℹ️  [2/3] Route config kept: файл принадлежит pegas connect (host-сервисы).`);
   } else if (!isJson) console.log(`\nℹ️  [2/3] No active ${env} domains found in 'pegas.json'.`);
 
   if (fileModified) {
