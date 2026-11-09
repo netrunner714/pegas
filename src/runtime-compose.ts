@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract, ScenarioMap, ServiceDriver } from "./types.js";
 import { validatePegasContract, getEnvironmentDomains, getProjectRuntimeId } from "./contract.js";
+import { composeProjectName, containerName, runtimeVolumeName } from "./naming.js";
 
 /**
  * Генерация эфемерного compose-манифеста из v3-контракта (docs/internal/rfc/RFC_CONTRACT_V3.md, столп 3):
@@ -22,6 +23,10 @@ export interface RuntimeComposeResult {
   manifest: Record<string, unknown>;
   content: string;
   serviceHashes: Record<string, string>;
+  /** Фактически использованный сценарий (после фолбэка на scenarios[0]). */
+  scenario: string;
+  /** Имя compose-проекта — `name:` манифеста, единственный источник истины. */
+  composeProject: string;
 }
 
 function stableValue(value: unknown): unknown {
@@ -230,6 +235,14 @@ export function createRuntimeCompose(
 
     const generated: Record<string, unknown> = {
       restart: "unless-stopped",
+      // issue #27: имя контейнера задаётся явно — compose больше не склеивает
+      // его из случайного хеша проекта. Порядок: pegas-<проект>-<сервис>-<сценарий>-<runtimeId>.
+      container_name: containerName({
+        projectName: contract.projectName,
+        scenario,
+        service: serviceName,
+        runtimeId: options.projectId,
+      }),
       labels: {
         "pegas.project": options.projectId,
         "pegas.scenario": scenario,
@@ -330,14 +343,33 @@ export function createRuntimeCompose(
     services[serviceName] = generated;
   }
 
+  const composeProject = composeProjectName({
+    projectName: contract.projectName,
+    scenario,
+    runtimeId: options.projectId,
+  });
   const manifest: Record<string, unknown> = {
-    name: `pegas-${options.projectId}-${scenario}`,
+    // issue #27: имя compose-проекта — `pegas-<проект>-<сценарий>-<runtimeId>`.
+    // Возвращается и в result.composeProject: вызывающий код берёт имя отсюда,
+    // а не вычисляет заново (отдельное вычисление раньше расходилось с манифестом).
+    name: composeProject,
     services,
     networks: {
       "pegas-network": { external: true, name: "pegas-network" },
     },
+    // issue #27: имена томов закреплены явно. Без `name:` compose префиксует их
+    // именем проекта, и переименование проекта осиротило бы существующие тома
+    // с данными. Явное имя повторяет историческую схему `<runtimeId>-<scenario>_<том>`:
+    // плоскость данных не меняется вместе с cosmetic-неймингом.
     ...(namedVolumes.size > 0
-      ? { volumes: Object.fromEntries([...namedVolumes].sort().map((name) => [name, {}])) }
+      ? {
+          volumes: Object.fromEntries(
+            [...namedVolumes].sort().map((name) => [
+              name,
+              { name: runtimeVolumeName({ runtimeId: options.projectId, scenario, volume: name }) },
+            ])
+          ),
+        }
       : {}),
   };
 
@@ -345,6 +377,8 @@ export function createRuntimeCompose(
     manifest,
     content: JSON.stringify(manifest, null, 2) + "\n",
     serviceHashes,
+    scenario,
+    composeProject,
   };
 }
 

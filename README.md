@@ -100,7 +100,7 @@ bunx @netrunner714/pegas init
       "runtime": { "development": { "driver": "docker" }, "stage": { "driver": "docker" }, "production": { "driver": "docker" } },
       "image":   { "development": "postgres:18-alpine", "stage": "postgres:18-alpine", "production": "postgres:18-alpine" },
       "port":     { "development": 5432, "stage": 5432, "production": 5432 },
-      "volumes":  { "development": ["pgdata:/var/lib/postgresql/data"], "stage": ["pgdata:/var/lib/postgresql/data"], "production": ["pgdata:/var/lib/postgresql/data"] },
+      "volumes":  { "development": ["pgdata:/var/lib/postgresql"], "stage": ["pgdata:/var/lib/postgresql"], "production": ["pgdata:/var/lib/postgresql"] },
       "secrets":  ["DATABASE_URL"]
     }
   }

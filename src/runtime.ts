@@ -34,14 +34,17 @@ export async function followRuntimeLogs(
 
   const targetEnv = normalizeEnvironment(env.PEGAS_ENV || "development");
   const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: targetEnv });
-  const environmentName = targetEnv.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  const composeProjectName = `${projectId}-${environmentName}`;
   const tailArg = options.tail !== undefined ? String(options.tail) : "100";
 
+  // Имя проекта берётся из манифеста, а не вычисляется заново (issue #27):
+  // отдельный пересчёт при пустом PEGAS_ENV давал "development", тогда как
+  // манифест брал scenarios[0] — имена расходились и контейнеры не находились.
+  // Флаг оставлен явно — на старых версиях Compose `name:` из stdin-манифеста
+  // мог игнорироваться.
   const args = [
     "compose",
     "--project-name",
-    composeProjectName,
+    generated.composeProject,
     "--project-directory",
     projectRoot,
     "-f",
@@ -82,6 +85,38 @@ export async function followRuntimeLogs(
 }
 
 /**
+ * Миграция нейминга (issue #27): контейнеры, созданные схемой до 3.2.0,
+ * принадлежат compose-проекту `${runtimeId}-${scenario}`. Новый deploy
+ * поднимает проект `pegas-<проект>-<сценарий>-<runtimeId>`, и старые
+ * контейнеры остались бы сиротами (compose --remove-orphans чужой проект
+ * не видит). Снимаем их точечно: по метке compose-проекта старого имени
+ * плюс pegas-меткам — чужие развёртывания не затрагиваются.
+ */
+export function removeLegacyComposeContainers(projectId: string, scenario: string): void {
+  const legacyProject = `${projectId}-${scenario}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  const filters = [
+    `label=pegas.project=${projectId}`,
+    `label=pegas.scenario=${scenario}`,
+    `label=com.docker.compose.project=${legacyProject}`,
+  ];
+  let ids: string[] = [];
+  try {
+    const listed = child_process.execFileSync("docker", [
+      "ps", "-aq", ...filters.flatMap((filter) => ["--filter", filter]),
+    ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    ids = listed.trim().split(/\s+/).filter(Boolean);
+  } catch {
+    // Docker недоступен — последующий compose up сообщит об этом явно.
+    return;
+  }
+  if (ids.length === 0) return;
+  child_process.execFileSync("docker", ["rm", "-f", ...ids], {
+    encoding: "utf8",
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+}
+
+/**
  * Apply a declarative runtime operation using an ephemeral Compose document.
  * The manifest is passed over stdin: no generated Compose file is persisted
  * in the project or in .pegas.
@@ -99,11 +134,15 @@ export async function runRuntimeCompose(
     if (!networkReady) {
       throw new Error("Could not create or inspect the shared Docker network 'pegas-network'.");
     }
+    // Одноразовая миграция со старой схемы имён: сироты старого compose-проекта
+    // снимаются до up, чтобы новый проект занял их место без дублей.
+    // Сценарий — из манифеста: при пустом PEGAS_ENV отдельное вычисление
+    // давало "development" вместо scenarios[0] и чистило не тот проект.
+    removeLegacyComposeContainers(projectId, generated.scenario);
   }
 
-  const environmentName = normalizeEnvironment(env.PEGAS_ENV).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-  const composeProjectName = `${projectId}-${environmentName}`;
-  const args = ["compose", "--project-name", composeProjectName, "--project-directory", projectRoot, "-f", "-", ...composeArgs];
+  // Имя проекта — из манифеста (issue #27): флаг и `name:` не могут разойтись.
+  const args = ["compose", "--project-name", generated.composeProject, "--project-directory", projectRoot, "-f", "-", ...composeArgs];
   // stdout живёт в терминале (inherit), stderr захватывается в pipe:
   // при провале он попадает в текст ошибки, при успехе — пробрасывается в
   // process.stderr, чтобы warning'и Compose не терялись.
