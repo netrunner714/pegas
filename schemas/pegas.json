@@ -139,13 +139,13 @@
             },
             "volumes": {
               "development": [
-                "pgdata:/var/lib/postgresql/data"
+                "pgdata:/var/lib/postgresql"
               ],
               "stage": [
-                "pgdata:/var/lib/postgresql/data"
+                "pgdata:/var/lib/postgresql"
               ],
               "production": [
-                "pgdata:/var/lib/postgresql/data"
+                "pgdata:/var/lib/postgresql"
               ]
             },
             "healthcheck": {
@@ -553,7 +553,7 @@
         },
         "volumes": {
           "type": "object",
-          "description": "Named-тома по сценариям (compose short syntax).",
+          "description": "Named-тома по сценариям (compose short syntax). Для образов postgres:18+ точка монтирования — /var/lib/postgresql (не /var/lib/postgresql/data): с 18-й версии данные хранятся в каталогах по мажорным версиям, монтирование в .../data приводит к рестарт-лупу контейнера.",
           "additionalProperties": {
             "type": "array",
             "items": {
@@ -700,13 +700,13 @@
           },
           "volumes": {
             "development": [
-              "pgdata:/var/lib/postgresql/data"
+              "pgdata:/var/lib/postgresql"
             ],
             "stage": [
-              "pgdata:/var/lib/postgresql/data"
+              "pgdata:/var/lib/postgresql"
             ],
             "production": [
-              "pgdata:/var/lib/postgresql/data"
+              "pgdata:/var/lib/postgresql"
             ]
           },
           "healthcheck": {

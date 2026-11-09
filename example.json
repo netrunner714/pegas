@@ -94,13 +94,13 @@
       },
       "volumes": {
         "development": [
-          "pgdata:/var/lib/postgresql/data"
+          "pgdata:/var/lib/postgresql"
         ],
         "stage": [
-          "pgdata:/var/lib/postgresql/data"
+          "pgdata:/var/lib/postgresql"
         ],
         "production": [
-          "pgdata:/var/lib/postgresql/data"
+          "pgdata:/var/lib/postgresql"
         ]
       },
       "healthcheck": {

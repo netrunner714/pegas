@@ -43,7 +43,7 @@
 | `cors` | map | CORS-заголовки: `true` (все домены проекта) или объект `{ origins, methods, credentials }` |
 | `env` | map | **Несекретные** значения конфигурации: на каждый ключ — карта сценариев. Значение `pegas://<имя-сервиса>` разворачивается во внутренний адрес при деплое |
 | `secrets` | string[] | **не карта**. Имена секретных ключей (интерфейс зависимостей); значения — из `.env`/CI-хранилища, паритет 1:1 проверяет `pegas check` |
-| `volumes` | map | Named-тома по сценариям (compose short syntax) |
+| `volumes` | map | Named-тома по сценариям (compose short syntax). Для `postgres:18+` том монтируется в `/var/lib/postgresql`: образы 18+ хранят данные в каталогах по мажорным версиям, монтирование в `/var/lib/postgresql/data` приводит к рестарт-лупу контейнера |
 | `dependsOn` | map | Зависимости: `{ "<имя>": { "condition": "service_healthy" \| "service_started" } }`; в host-сценариях — только пустой объект |
 | `healthcheck` | map | Проба: `{ test, interval, timeout, retries }` (compose-формат) |
 
