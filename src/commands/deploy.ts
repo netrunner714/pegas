@@ -347,9 +347,11 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       projectId: runtimeId,
       environment: env,
     });
-    const projectName2 = `${runtimeId}-${env}`.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    // issue #27: имя compose-проекта — из генератора манифеста (единый источник
+    // истины; отдельное вычисление `${runtimeId}-${env}` расходилось с ним).
+    const composeProject = generated.composeProject;
     const configArgs = [
-      "compose", "--project-name", projectName2,
+      "compose", "--project-name", composeProject,
       "--project-directory", projectRoot,
       "-f", "-", "config", "-q",
     ];
@@ -378,19 +380,30 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
         return rt && rt.driver !== "docker";
       })
       .map(([name]) => name);
+    // issue #27: имена контейнеров читаемы — показываем их в плане, чтобы агент
+    // заранее видел, как сервисы будут называться в `docker ps`.
+    const containerNames: Record<string, string> = {};
+    for (const [svcName, svcDef] of Object.entries<any>((generated.manifest as any).services ?? {})) {
+      if (svcDef?.container_name) containerNames[svcName] = svcDef.container_name;
+    }
     if (isJson) {
       console.log(JSON.stringify({
         status: "valid",
         env,
         project: projectName,
-        composeProject: projectName2,
+        composeProject,
         dockerServices,
+        containerNames,
         hostServices,
         domains: requestedDomains,
       }));
     } else {
       console.log(`\n🧪 Dry-run: сценарий '${env}' проекта '${projectName}' валиден (docker compose config -q прошёл).\n`);
+      console.log(`   Compose-проект: ${composeProject}`);
       console.log(`   Docker-сервисы (поднимутся): ${dockerServices.length > 0 ? dockerServices.join(", ") : "—"}`);
+      if (dockerServices.length > 0) {
+        console.log(`   Имена контейнеров: ${dockerServices.map((s) => containerNames[s] ?? s).join(", ")}`);
+      }
       if (hostServices.length > 0) console.log(`   Host-сервисы (вне манифеста, запускает разработчик): ${hostServices.join(", ")}`);
       console.log(`   Домены: ${requestedDomains.join(", ")}`);
       console.log(`   Секреты (имена, не значения): ${Object.values(contract.services ?? {}).flatMap((s: any) => s.secrets ?? []).join(", ") || "—"}`);

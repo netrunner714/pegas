@@ -56,7 +56,8 @@ describe("runtime compose execution", () => {
     fs.rmSync(logFile, { force: true });
     await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["ps", "services"], { ...process.env, PEGAS_ENV: "development" });
     const calls = dockerCalls();
-    expect(calls.some((c) => c.startsWith("compose") && c.includes("rt-abc123-development"))).toBe(true);
+    // issue #27: имя compose-проекта — pegas-<проект>-<сценарий>-<runtimeId>
+    expect(calls.some((c) => c.startsWith("compose") && c.includes("pegas-rt-development-rt-abc123"))).toBe(true);
     expect(calls.some((c) => c.startsWith("network"))).toBe(false);
     // no compose manifest is written to the project
     expect(fs.readdirSync(projectRoot).filter((f) => f.includes("compose")).length).toBe(0);
@@ -67,7 +68,26 @@ describe("runtime compose execution", () => {
     await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["up", "-d"], { ...process.env, PEGAS_ENV: "production" });
     const calls = dockerCalls();
     expect(calls.some((c) => c.startsWith("network inspect") || c.startsWith("network create"))).toBe(true);
-    expect(calls.some((c) => c.startsWith("compose") && c.includes("rt-abc123-production"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("compose") && c.includes("pegas-rt-production-rt-abc123"))).toBe(true);
+  });
+
+  it("up снимает сирот старой схемы имён compose-проекта (миграция issue #27)", async () => {
+    fs.rmSync(logFile, { force: true });
+    await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["up", "-d"], { ...process.env, PEGAS_ENV: "production" });
+    const calls = dockerCalls();
+    // Фильтр по метке compose-проекта старого имени — только свой projectId/scenario
+    expect(calls.some((c) => c.startsWith("ps") && c.includes("label=com.docker.compose.project=rt-abc123-production"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("ps") && c.includes("label=pegas.project=rt-abc123"))).toBe(true);
+    // Без контейнеров-сирот (fake docker возвращает "container-1") — rm вызывается точечно
+    expect(calls.some((c) => c.startsWith("rm -f"))).toBe(true);
+  });
+
+  it("миграция сирот не запускается для операций, отличных от up", async () => {
+    fs.rmSync(logFile, { force: true });
+    await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["ps", "services"], { ...process.env, PEGAS_ENV: "production" });
+    const calls = dockerCalls();
+    expect(calls.some((c) => c.includes("label=com.docker.compose.project="))).toBe(false);
+    expect(calls.some((c) => c.startsWith("rm -f"))).toBe(false);
   });
 
   it("surfaces docker compose stderr on failure", async () => {
@@ -102,7 +122,7 @@ describe("runtime compose execution", () => {
     const logsCall = calls.find((c) => c.startsWith("compose") && c.includes("logs"));
     expect(logsCall).toBeDefined();
     expect(logsCall).toContain("--follow");
-    expect(logsCall).toContain("rt-abc123-development");
+    expect(logsCall).toContain("pegas-rt-development-rt-abc123");
     // nothing destructive was spawned
     expect(calls.some((c) => c.startsWith("rm") || c.includes(" down"))).toBe(false);
   });
@@ -122,6 +142,6 @@ describe("runtime compose execution", () => {
     expect(logsCall).not.toContain("--follow");
     expect(logsCall).toContain("--tail 42");
     expect(logsCall).toContain("web");
-    expect(logsCall).toContain("rt-abc123-production");
+    expect(logsCall).toContain("pegas-rt-production-rt-abc123");
   });
 });

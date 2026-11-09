@@ -113,6 +113,36 @@ describe("runtime-compose v3: манифест сценария", () => {
     ).toThrow(/preview/);
   });
 
+  it("issue #27: имя compose-проекта — pegas-<проект>-<сценарий>-<runtimeId>", () => {
+    const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "0a1b0e24d9", environment: "development" });
+    expect(manifest.name).toBe("pegas-my-app-development-0a1b0e24d9");
+  });
+
+  it("issue #27: container_name каждого сервиса — pegas-<проект>-<сервис>-<сценарий>-<runtimeId>", () => {
+    const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "0a1b0e24d9", environment: "development" });
+    expect((manifest.services as any).redis.container_name).toBe("pegas-my-app-redis-development-0a1b0e24d9");
+    expect((manifest.services as any).api.container_name).toBe("pegas-my-app-api-development-0a1b0e24d9");
+    // имена уникальны в пределах проекта и читаемы в docker ps
+    const names = Object.values<any>(manifest.services).map((s) => s.container_name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const name of names) expect(name).toMatch(/^pegas-[a-z0-9_-]+$/);
+  });
+
+  it("issue #27: явные имена томов закрепляют исторический префикс <runtimeId>-<scenario>", () => {
+    const c = contract();
+    c.services.redis.volumes = { development: ["pgdata:/var/lib/postgresql"], stage: [], production: [] };
+    const { manifest } = createRuntimeCompose(c, { projectRoot, projectId: "0a1b0e24d9", environment: "development" });
+    expect((manifest.volumes as any).pgdata).toEqual({ name: "0a1b0e24d9-development_pgdata" });
+    // short syntax сервиса не меняется — только объявление тома
+    expect((manifest.services as any).redis.volumes).toEqual(["pgdata:/var/lib/postgresql"]);
+  });
+
+  it("issue #27: сетевые алиасы не меняются (upstream'ы маршрутов и pegas:// стабильны)", () => {
+    const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "0a1b0e24d9", environment: "development" });
+    const redis = (manifest.services as any).redis;
+    expect(redis.networks["pegas-network"].aliases).toEqual(["0a1b0e24d9-development-redis"]);
+  });
+
   it("все сервисы в shared pegas-network, gateway не в сервисах", () => {
     const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "myapp", environment: "stage" });
     expect(Object.keys(manifest.services).sort()).toEqual(["api", "redis", "web"]);
