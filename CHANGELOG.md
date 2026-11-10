@@ -5,6 +5,12 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [3.5.1] — 2026-11-10
+
+### Removed
+
+- **Скрипты `link:global` и `unlink:global` из `package.json`** — удалены намеренно: линковка локального checkout в глобальную установку (`bun link`) не является поддерживаемым способом установки pegas ни для пользователей, ни для разработки. Глобальный pegas ставится только из npm: `bun add -g @netrunner714/pegas` или `npm install -g @netrunner714/pegas`, а обновляется командой `pegas upgrade`. Для разработки самого pegas checkout запускается из исходников (`bun run src/index.ts <команда>`, `bun run build`), без глобального линка: иначе `pegas upgrade` и проверка версии работают против случайного checkout, а не против опубликованной версии.
+
 ## [3.5.0] — 2026-11-10
 
 ### Added

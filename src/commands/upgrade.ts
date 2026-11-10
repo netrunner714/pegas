@@ -20,7 +20,7 @@ export interface GlobalInstallation {
   pm: GlobalPackageManager;
   packageDir: string;
   version: string;
-  /** true — глобальный пакет это symlink на checkout (dev-линк link:global), а не установка из npm. */
+  /** true — глобальный пакет это symlink на checkout (dev-линк через bun link), а не установка из npm. */
   linked: boolean;
 }
 
@@ -104,7 +104,7 @@ export async function handleUpgrade(options: UpgradeOptions = {}): Promise<void>
 
   if (installation.linked) {
     const target = await fs.realpath(installation.packageDir).catch(() => installation.packageDir);
-    fail("❌ Ошибка: глобальный pegas — это dev-линк на checkout (" + target + "), а не установка из npm. Обновите checkout (git pull), затем в нём: bun run link:global. Или сначала bun unlink, затем bun add -g @netrunner714/pegas.");
+    fail("❌ Ошибка: глобальный pegas — это dev-линк на checkout (" + target + "), а не установка из npm. Линковка checkout в глобальную установку намеренно не поддерживается и в проект не возвращается: удалите линк (bun unlink в checkout) и установите pegas из npm: bun add -g @netrunner714/pegas.");
     return;
   }
 
