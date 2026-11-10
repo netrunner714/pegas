@@ -40,6 +40,14 @@ jobs:
       - name: Audit dependencies
         run: bun audit -p
 
+      - name: Secret scan
+        run: |
+          PATTERN='(-----BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY-----|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk-[A-Za-z0-9]{20,}|bot[0-9]{6,}:[A-Za-z0-9_-]{30,})'
+          if git grep -nEI "$PATTERN" -- . ':!bun.lock' ':!*.md'; then
+            echo "Potential secret detected"
+            exit 1
+          fi
+
       - name: Checks
         run: bun run check
 
