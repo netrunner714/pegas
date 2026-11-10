@@ -9,10 +9,11 @@ import { validateNodeVersion, ensureNodeVersion, main, VERSION, MainDispatchers 
 
 describe("validateNodeVersion", () => {
   it("validates Node version correctly", () => {
-    expect(validateNodeVersion("24.0.0")).toBe(true);
-    expect(validateNodeVersion("24.19.0")).toBe(true);
-    expect(validateNodeVersion("25.0.0")).toBe(true);
     expect(validateNodeVersion("26.0.0")).toBe(true);
+    expect(validateNodeVersion("26.13.0")).toBe(true);
+    expect(validateNodeVersion("27.0.0")).toBe(true);
+    expect(validateNodeVersion("24.19.0")).toBe(false);
+    expect(validateNodeVersion("25.0.0")).toBe(false);
 
     expect(validateNodeVersion("22.0.0")).toBe(false);
     expect(validateNodeVersion("20.10.0")).toBe(false);
@@ -46,7 +47,7 @@ describe("ensureNodeVersion", () => {
       Object.defineProperty(process.versions, "node", { value: "22.5.0", configurable: true });
       expect(() => ensureNodeVersion()).toThrow("EXIT_1");
       expect(exitCode).toBe(1);
-      expect(errors.some((e) => e.includes("requires Node.js >= 24"))).toBe(true);
+      expect(errors.some((e) => e.includes("requires Node.js >= 26"))).toBe(true);
     } finally {
       Object.defineProperty(process.versions, "node", { value: origNode, configurable: true });
       process.exit = origExit;

@@ -9,7 +9,7 @@
 [![CI](https://github.com/netrunner714/pegas/actions/workflows/ci.yml/badge.svg)](https://github.com/netrunner714/pegas/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
-[![Bun](https://img.shields.io/badge/bun-%3E%3D1.2-black.svg)](package.json)
+[![Bun](https://img.shields.io/badge/bun-%3E%3D1.4.4-black.svg)](package.json)
 
 ---
 

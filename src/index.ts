@@ -23,14 +23,14 @@ export function validateNodeVersion(current = process.versions.node): boolean {
   if (!current) return true;
   const major = parseInt(current.split(".")[0], 10);
   if (isNaN(major)) return true;
-  return major >= 24;
+  return major >= 26;
 }
 
 export function ensureNodeVersion(): void {
   const current = process.versions.node;
   if (!validateNodeVersion(current)) {
-    console.error(`\x1b[31m❌ Error: Pegas requires Node.js >= 24.0.0 (detected v${current || "unknown"}).\x1b[0m`);
-    console.error(`Please upgrade Node.js to version 24 or newer: https://nodejs.org/\n`);
+    console.error(`\x1b[31m❌ Error: Pegas requires Node.js >= 26.0.0 (detected v${current || "unknown"}).\x1b[0m`);
+    console.error(`Please upgrade Node.js to version 26 or newer: https://nodejs.org/\n`);
     process.exit(1);
   }
 }

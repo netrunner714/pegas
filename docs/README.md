@@ -15,7 +15,7 @@
 
 ## Обучение
 
-* [Быстрый старт](./tutorials/quickstart.md) — `init` → `ca install` → `link` → `deploy -s <scenario>`.
+* [Быстрый старт](./tutorials/quickstart.md) — `init` → `ca install` → `connect` → `deploy -s <scenario>`.
 
 ## Руководства
 
