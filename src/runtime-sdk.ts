@@ -32,6 +32,8 @@ export interface SdkContext {
   scenario: string;
   service: string;
   services: Record<string, SdkServiceInfo>;
+  /** Несекретный конфиг текущего сервиса из services.<name>.env контракта, уже развёрнутый по сценарию. */
+  env?: Record<string, string>;
 }
 
 /** Информация о текущем сервисе — собственный port, домены и их производные. */
@@ -167,6 +169,37 @@ export function secret(name: string): string {
     throw new PegasRuntimeError(
       'Секрет "' + name + '" не задан.' +
         (expected ? " Ожидались: " + expected + "." : " Проверьте .pegas или CI-хранилище.")
+    );
+  }
+  return value;
+}
+
+/**
+ * Типизированный доступ к несекретному конфигу из services.<name>.env контракта.
+ * Источник — PEGAS_CONTEXT.env (уже развёрнут по сценарию, pegas:// — во внутренний
+ * адрес); для старых манифестов без env в контексте — фолбэк на process.env,
+ * куда манифест тоже инжектит env-карту. Секреты через config() не читают.
+ */
+export function optionalConfig(name: string): string | undefined {
+  try {
+    const ctx = getContext();
+    if (ctx.env !== undefined) {
+      const v = ctx.env[name];
+      return v === undefined || v === "" ? undefined : v;
+    }
+  } catch {
+    // нет контекста — фолбэк на process.env ниже
+  }
+  const value = process.env[name];
+  return value === undefined || value === "" ? undefined : value;
+}
+
+/** Читает несекретный конфиг с понятной ошибкой, если ключ не объявлен в контракте. */
+export function config(name: string): string {
+  const value = optionalConfig(name);
+  if (value === undefined) {
+    throw new PegasRuntimeError(
+      'Конфиг "' + name + '" не задан. Объявите его в pegas.json (services.<сервис>.env) для текущего сценария.'
     );
   }
   return value;

@@ -147,6 +147,8 @@ export interface SdkContext {
   /** Имя текущего сервиса (в контейнере которого исполняется SDK). */
   service: string;
   services: Record<string, SdkServiceContext>;
+  /** Несекретный конфиг текущего сервиса из services.<name>.env, развёрнутый по сценарию. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -184,12 +186,29 @@ export function buildSdkContext(
     }
     services[name] = entry;
   }
+  // Несекретный конфиг текущего сервиса из services.<name>.env, развёрнутый
+  // по сценарию (pegas:// — во внутренний адрес). Тот же резолвинг, что
+  // в манифесте, чтобы config() читал контракт, а не process.env.
+  const env: Record<string, string> = {};
+  const currentSvc = contract.services[serviceName];
+  if (currentSvc?.env) {
+    for (const [key, valueMap] of Object.entries(currentSvc.env)) {
+      const v = valueMap[scenario];
+      if (v === undefined) continue;
+      if (typeof v === "string" && v.startsWith("pegas://")) {
+        env[key] = resolveInternalUrl(contract, scenario, v.slice("pegas://".length), projectId, "services." + serviceName + ".env." + key);
+      } else {
+        env[key] = v;
+      }
+    }
+  }
   const context: SdkContext = {
     project: contract.projectName,
     projectId,
     scenario,
     service: serviceName,
     services,
+    ...(Object.keys(env).length > 0 ? { env } : {}),
   };
   return JSON.stringify(context);
 }

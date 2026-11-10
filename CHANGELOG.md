@@ -5,6 +5,17 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [3.4.0] — 2026-11-10
+
+### Added
+
+- **Детектор ветвлений по среде в `pegas check`** — сканирует исходники проекта и предупреждает о ветвлениях по `NODE_ENV`/`PEGAS_ENV`/`PEGAS_SCENARIO` и о чтении `PORT`, `HOST`, `APP_DOMAIN`, `CLIENT_ORIGINS`. Предупреждение не влияет на валидность контракта и содержит рецепт перехода на Runtime SDK.
+- **Runtime SDK: `config()` и `optionalConfig()`** — типизированный доступ к несекретному конфигу из `services.<name>.env`. `PEGAS_CONTEXT` несёт env текущего сервиса, развёрнутый по сценарию: значения `pegas://` подставляются внутренними адресами; для контекстов без env сохраняется fallback на `process.env`.
+
+### Changed
+
+- **Доктрина доступа к конфигурации** — в каноне `docs/pegas.md` и в `llms.txt` зафиксировано: сценарий — флаг запуска, а не ветвление в коде; значение сценария допустимо только для логов и меток. При импорте `@netrunner714/pegas/runtime` пакет обязан находиться в `dependencies`, без импорта — только в `devDependencies`.
+
 ## [3.3.0] — 2026-11-10
 
 ### Added
