@@ -8,6 +8,7 @@ import { runCommand, stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
 import { withRuntimeLock } from "../runtime-lock.js";
 import { stripOwnerBlocks, writeRouteFileAtomically } from "../route-merge.js";
+import { createSharedInfraDeps, releaseProjectSharedPools } from "../shared-infra.js";
 
 export interface DownOptions {
   gatewayDir?: string;
@@ -171,6 +172,22 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       {
         runtimeId ||= getProjectRuntimeId(projectRoot, projectName);
         await removeProjectContainers(runtimeId, requestedEnvironment);
+        // issue #29: освобождаем аренды проекта в разделяемых пулах и
+        // останавливаем опустевшие инстансы. Данные арендаторов не удаляются:
+        // том пула сохраняется, из реестра уходит только ссылка на проект.
+        const sharedRelease = await releaseProjectSharedPools(
+          createSharedInfraDeps(),
+          runtimeId,
+          requestedEnvironment
+        );
+        if (!isJson && sharedRelease.released > 0) {
+          console.log(
+            `   ♻️  Shared pools: released ${sharedRelease.released} tenant lease(s)` +
+            (sharedRelease.stoppedPools.length > 0
+              ? `, stopped empty pool(s): ${sharedRelease.stoppedPools.join(", ")}`
+              : "")
+          );
+        }
         const gatewayResult = await stopGatewayIfUnused(gatewayDir);
         if (!gatewayResult.success) {
           throw new Error(gatewayResult.stderr || "Failed to reconcile shared Gateway lifecycle.");

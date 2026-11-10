@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { validatePegasContract, type ContractValidationIssue } from "../contract.js";
+import { getEnvironmentDomains, validatePegasContract, type ContractValidationIssue } from "../contract.js";
+import { auditNextjsDevOrigins, type NextjsAuditFinding } from "../nextjs-audit.js";
 import { verifySecrets, formatSecretsDiagnostic, isIgnoredByGit } from "../secrets.js";
 import type { CheckOptions, PegasContract } from "../types.js";
 
@@ -20,8 +21,33 @@ export interface RepoAuditResult {
   gitignoreIssues: string[];
   /** Свежесть AGENTS.md-блока и docs/pegas.md против канона установленного пегаса (детектор, не мутатор). */
   artifactIssues: string[];
+  /**
+   * Dev-конфигурация Next.js: покрытие доменов шлюза в `allowedDevOrigins`
+   * (issue #28). Предупреждения, не ошибки: на валидность контракта не влияют.
+   */
+  nextjsIssues: string[];
+  /** Детали аудита Next.js для машиночитаемого вывода (--json); null, если аудит не сработал. */
+  nextjsAudit?: NextjsAuditFinding | null;
   errors: string[];
   warnings: string[];
+}
+
+/**
+ * Dev-домены сценария `development` из контракта — все сервисы, без дублей.
+ * Пустой массив, если контракта нет: аудитор Next.js трактует его как
+ * «проект не публикует dev-сервисы на доменах шлюза» и молчит.
+ */
+function collectDevelopmentDomains(contract: PegasContract | undefined): string[] {
+  const out: string[] = [];
+  if (!contract || typeof contract !== "object") return out;
+  const services = contract.services && typeof contract.services === "object" ? contract.services : {};
+  for (const svc of Object.values(services)) {
+    if (!svc || typeof svc !== "object") continue;
+    for (const domain of getEnvironmentDomains(svc, "development")) {
+      if (typeof domain === "string" && domain && !out.includes(domain)) out.push(domain);
+    }
+  }
+  return out;
 }
 
 export async function auditRepository(
@@ -149,6 +175,22 @@ export async function auditRepository(
     }
   }
 
+  // 5. Next.js: allowedDevOrigins против dev-доменов шлюза (issue #28).
+  // Предупреждение, не ошибка: контракт от этого не становится невалидным.
+  // Без контракта dev-домены неизвестны — передаём undefined, и аудитор
+  // проверяет канонические формы <project>.localhost / <svc>.<project>.localhost.
+  const nextjsIssues: string[] = [];
+  let nextjsAudit: NextjsAuditFinding | null = null;
+  try {
+    const devDomains = contract ? collectDevelopmentDomains(contract) : undefined;
+    nextjsAudit = await auditNextjsDevOrigins(projectRoot, { devDomains });
+    if (nextjsAudit.warning) nextjsIssues.push(nextjsAudit.warning);
+    else if (nextjsAudit.hint) nextjsIssues.push(nextjsAudit.hint);
+    warnings.push(...nextjsIssues);
+  } catch {
+    // аудит Next.js не обязан ронять check: пропускаем тихо
+  }
+
   const hasErrors = errors.length > 0;
   const hasWarnings = warnings.length > 0;
   const valid = !hasErrors;
@@ -164,6 +206,8 @@ export async function auditRepository(
     secretsCheck,
     gitignoreIssues,
     artifactIssues,
+    nextjsIssues,
+    nextjsAudit,
     errors,
     warnings,
   };
@@ -216,6 +260,13 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
     console.log(`\n  ⚠️  Артефакты Pegas (pegas init обновит идемпотентно):`);
     for (const ai of result.artifactIssues) {
       console.log(`     - ${ai}`);
+    }
+  }
+  // 5. Next.js: allowedDevOrigins против доменов шлюза (issue #28)
+  if (result.nextjsIssues.length > 0) {
+    console.log(`\n  ⚠️  Next.js (dev-ресурсы на доменах шлюза):`);
+    for (const ni of result.nextjsIssues) {
+      console.log(`     - ${ni}`);
     }
   }
 

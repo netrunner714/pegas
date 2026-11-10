@@ -352,3 +352,102 @@ describe("v3: publicHost — строка, не объект", () => {
     expect(issues.some((i: any) => i.path.includes("publicHost") && i.message.includes("DNS-имя"))).toBe(true);
   });
 });
+
+describe("v3 валидатор: scope/shared — разделяемый пул (issue #29)", () => {
+  function sharedRedis(): PegasContract {
+    const c = validContract();
+    (c.services.redis as any).scope = { development: "shared", stage: "isolated", production: "isolated" };
+    (c.services.redis as any).shared = { development: { name: "myapp_cache" }, stage: null, production: null };
+    return c;
+  }
+
+  it("валидный shared redis — без issues", () => {
+    expect(validatePegasContract(sharedRedis())).toEqual([]);
+  });
+
+  it("валидный shared postgres с объявленным секретом — без issues", () => {
+    const c = validContract();
+    (c.services as any).db = {
+      runtime: { development: { driver: "docker" }, stage: { driver: "docker" }, production: { driver: "docker" } },
+      image: { development: "postgres:18-alpine", stage: "postgres:18-alpine", production: "postgres:18-alpine" },
+      port: { development: 5432, stage: 5432, production: 5432 },
+      scope: { development: "shared", stage: "isolated", production: "isolated" },
+      shared: { development: { name: "myapp_db", secret: "DB_PASSWORD" }, stage: null, production: null },
+      secrets: ["DB_PASSWORD"],
+    };
+    expect(validatePegasContract(c)).toEqual([]);
+  });
+
+  it("неизвестное значение scope — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis as any).scope.development = "cluster";
+    expect(validatePegasContract(c).some((i) => i.message.includes("других значений нет"))).toBe(true);
+  });
+
+  it("shared без shared-объекта — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis as any).shared = { development: null, stage: null, production: null };
+    expect(validatePegasContract(c).some((i) => i.message.includes("требует объект"))).toBe(true);
+  });
+
+  it("shared без scope — ошибка", () => {
+    const c = validContract();
+    (c.services.redis as any).shared = { development: { name: "myapp_cache" }, stage: null, production: null };
+    expect(validatePegasContract(c).some((i) => i.message.includes("без scope"))).toBe(true);
+  });
+
+  it("имя арендатора вне [a-z_][a-z0-9_]* — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis as any).shared.development.name = "My-App";
+    expect(validatePegasContract(c).some((i) => i.message.includes("Имя арендатора"))).toBe(true);
+  });
+
+  it("shared с bun-драйвером — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis.runtime as any).development = { driver: "bun" };
+    expect(validatePegasContract(c).some((i) => i.message.includes('несовместим с driver: "bun"'))).toBe(true);
+  });
+
+  it("shared с build — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis as any).build = { development: { context: "." }, stage: null, production: null };
+    expect(validatePegasContract(c).some((i) => i.message.includes("build несовместим"))).toBe(true);
+  });
+
+  it("shared с неподдерживаемым образом и без образа — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis.image as any).development = "nginx:1";
+    expect(validatePegasContract(c).some((i) => i.message.includes("не является поддерживаемой разделяемой инфраструктурой"))).toBe(true);
+    const noImage = sharedRedis();
+    delete (noImage.services.redis.image as any).development;
+    expect(validatePegasContract(noImage).some((i) => i.message.includes("требует публичный образ"))).toBe(true);
+  });
+
+  it("shared без port — ошибка", () => {
+    const c = sharedRedis();
+    delete (c.services.redis.port as any).development;
+    expect(validatePegasContract(c).some((i) => i.message.includes("требует port"))).toBe(true);
+  });
+
+  it("shared с volumes и dependsOn — ошибка", () => {
+    const c = sharedRedis();
+    (c.services.redis as any).volumes = { development: ["data:/data"], stage: [], production: [] };
+    expect(validatePegasContract(c).some((i) => i.message.includes("volumes несовместимы"))).toBe(true);
+    const d = sharedRedis();
+    (d.services.redis as any).dependsOn = { development: { web: { condition: "service_started" } }, stage: {}, production: {} };
+    expect(validatePegasContract(d).some((i) => i.message.includes("dependsOn несовместим"))).toBe(true);
+  });
+
+  it("shared.secret: необъявленный и плохой формат — ошибка, объявленный — ок", () => {
+    const undeclared = sharedRedis();
+    (undeclared.services.redis as any).shared.development.secret = "REDIS_PASSWORD";
+    expect(validatePegasContract(undeclared).some((i) => i.message.includes("не объявлен в services.redis.secrets"))).toBe(true);
+    const badFormat = sharedRedis();
+    (badFormat.services.redis as any).shared.development.secret = "lowercase";
+    expect(validatePegasContract(badFormat).some((i) => i.message.includes("имя секретного ключа"))).toBe(true);
+    const ok = sharedRedis();
+    (ok.services.redis as any).shared.development.secret = "REDIS_PASSWORD";
+    (ok.services.redis as any).secrets = ["REDIS_PASSWORD"];
+    expect(validatePegasContract(ok)).toEqual([]);
+  });
+});

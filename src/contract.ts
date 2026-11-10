@@ -8,6 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract, ScenarioMap } from "./types.js";
+import { classifySharedImage } from "./shared-infra.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
@@ -20,10 +21,19 @@ const SCENARIO_NAME_REGEX = /^[a-z0-9-]+$/;
 /** Паттерн имени сервиса (как compose service name). */
 const SERVICE_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
+/**
+ * Паттерн имени арендатора разделяемого пула (issue #29).
+ * Ограничен алфавитом SQL-идентификаторов: значение становится именем базы и
+ * роли PostgreSQL, а также частью имени compose-сервиса, поэтому только нижний
+ * регистр, цифры и подчёркивание.
+ */
+const SHARED_TENANT_NAME_REGEX = /^[a-z_][a-z0-9_]*$/;
+
 /** Сценарные поля сервиса: каждое обязано быть картой по scenarios. */
 const SCENARIO_FIELDS = [
   "runtime", "image", "build", "command", "port", "ports", "domains",
   "publicHost", "volumes", "dependsOn", "healthcheck", "cors",
+  "scope", "shared",
 ] as const;
 
 export interface ContractValidationIssue {
@@ -391,6 +401,66 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
         if (isDocker && (typeof hc === "string" || !Array.isArray((hc as any)?.test))) {
           add(`${prefix} healthcheck`, 'Для docker-сервиса healthcheck — объект { test: [...] } (compose-формат) или null.');
         }
+      }
+
+      // scope / shared (issue #29): разделяемый инфраструктурный пул
+      const scope = (svc.scope as ScenarioMap<unknown> | undefined)?.[sc];
+      const shared = (svc.shared as ScenarioMap<unknown> | undefined)?.[sc];
+
+      if (scope !== undefined && scope !== "isolated" && scope !== "shared") {
+        add(`${prefix} scope`, 'scope: "isolated" | "shared" — других значений нет.');
+      }
+
+      if (scope === "shared") {
+        if (isHost) {
+          add(`${prefix} scope`, 'scope: "shared" несовместим с driver: "bun" — пул это контейнер, host-процесс разделить нельзя.');
+        }
+        const image = (svc.image as ScenarioMap<string> | undefined)?.[sc];
+        const build = (svc.build as ScenarioMap<unknown> | undefined)?.[sc];
+        if (build) {
+          add(`${prefix} build`, 'build несовместим с scope: "shared" — содержимое собранного образа принадлежит проекту, разделять его нельзя.');
+        }
+        if (!image) {
+          add(`${prefix} image`, 'scope: "shared" требует публичный образ инфраструктуры (postgres:18-alpine, redis:7-alpine).');
+        } else if (!classifySharedImage(image)) {
+          add(`${prefix} image`, `Образ "${image}" не является поддерживаемой разделяемой инфраструктурой. Поддерживаются postgres, pgvector, timescaledb, postgis, redis, valkey; для прочего используйте scope: "isolated".`);
+        }
+        if (typeof (svc.port as ScenarioMap<number> | undefined)?.[sc] !== "number") {
+          add(`${prefix} port`, 'scope: "shared" требует port: по нему формируется адрес пула в сети pegas-network.');
+        }
+
+        if (shared === undefined || shared === null) {
+          add(`${prefix} shared`, 'scope: "shared" требует объект { name } — имя базы/роли (postgres) или префикса ключей (redis).');
+        } else if (typeof shared !== "object" || Array.isArray(shared)) {
+          add(`${prefix} shared`, "shared — объект { name, secret? } (или null для изолированного сценария).");
+        } else {
+          const tenantName = (shared as { name?: unknown }).name;
+          if (typeof tenantName !== "string" || !SHARED_TENANT_NAME_REGEX.test(tenantName)) {
+            add(`${prefix} shared.name`, "Имя арендатора: [a-z_][a-z0-9_]* — оно становится именем базы и роли PostgreSQL, поэтому другие символы недопустимы.");
+          }
+          const secretName = (shared as { secret?: unknown }).secret;
+          if (secretName !== undefined) {
+            if (typeof secretName !== "string" || !/^[A-Z0-9_]+$/.test(secretName)) {
+              add(`${prefix} shared.secret`, "secret — имя секретного ключа [A-Z0-9_]+ (значение берётся из .env).");
+            } else if (!Array.isArray(svc.secrets) || !svc.secrets.includes(secretName)) {
+              add(`${prefix} shared.secret`, `Секрет "${secretName}" не объявлен в services.${name}.secrets: значение не будет доступно при подготовке арендатора.`);
+            }
+          }
+        }
+
+        // Пул поднимается с готовым томом: собственные тома сервиса привели бы к
+        // двум источникам данных, поэтому в разделяемом сценарии они запрещены.
+        const volumes = (svc.volumes as ScenarioMap<string[]> | undefined)?.[sc];
+        if (Array.isArray(volumes) && volumes.length > 0) {
+          add(`${prefix} volumes`, 'volumes несовместимы с scope: "shared" — данные хранятся в томе пула, который pegas создаёт и сохраняет сам.');
+        }
+        // Пул живёт вне compose-проекта: dependsOn от него не сработает.
+        const depends = (svc.dependsOn as ScenarioMap<Record<string, unknown>> | undefined)?.[sc];
+        if (depends && Object.keys(depends).length > 0) {
+          add(`${prefix} dependsOn`, 'dependsOn несовместим с scope: "shared" — pegas поднимает пул до compose-проекта и ожидает его готовности.');
+        }
+      } else if (shared !== undefined && shared !== null) {
+        add(`${prefix} shared`, `shared без scope: "shared" в этом сценарии — уберите поле или объявите scope: "shared".`);
       }
     }
   }

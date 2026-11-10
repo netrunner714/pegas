@@ -150,6 +150,16 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
           upstream,
           cors: isCorsEnabled ? true : false,
           corsOrigins: allProjectDomains,
+          // issue #30: метаданные маршрута. connect владеет только host-сервисами,
+          // поэтому driver всегда "bun", а owner — "connect".
+          meta: {
+            project: projectName,
+            service: serviceName,
+            env: "development",
+            driver: "bun",
+            owner: "connect",
+            port: servicePort,
+          },
         }),
       );
       registeredUrls.push({

@@ -109,7 +109,8 @@ bunx @netrunner714/pegas init
 
 `scenarios` — открытый список: имён может быть сколько угодно, имена произвольны (`^[a-z0-9-]+$`); три выше — конвенция, не ограничение. Каждая сценарная карта (runtime, port, domains…) обязана содержать ровно эти ключи.
 
-Проверка: `pegas check` — рид-онли аудит (контракт, паритет секретов, git-гигиена, свежесть артефактов).
+Проверка: `pegas check` — рид-онли аудит (контракт, паритет секретов, git-гигиена, свежесть артефактов,
+dev-конфигурация Next.js на доменах `*.localhost`).
 
 ### 3. Локальная разработка с HTTPS
 
@@ -199,7 +200,7 @@ const key = secret("DATABASE_URL");      // секрет с понятной о�
 | Раздел | Содержание |
 |---|---|
 | [Быстрый старт](docs/tutorials/quickstart.md) | Пошагово от init до деплоя |
-| [Руководства](docs/how-to/) | [init](docs/how-to/init.md), [локальный HTTPS](docs/how-to/local-https.md) |
+| [Руководства](docs/how-to/) | [init](docs/how-to/init.md), [локальный HTTPS](docs/how-to/local-https.md), [Next.js](docs/how-to/nextjs.md) |
 | [Справочники](docs/reference/) | [CLI](docs/reference/cli.md) (генерируется), [контракт](docs/reference/contract.md) |
 | [Архитектура](docs/explanation/architecture.md) | Устройство и обоснование решений |
 | [Контекст для агентов](llms.txt) | Полный контекст для ИИ-ассистентов |

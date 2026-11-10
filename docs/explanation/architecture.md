@@ -109,9 +109,18 @@ upstream'ы маршрутов шлюза и значений `pegas://` — о�
   вектор повышения привилегий исключён.
 - Дефолтные security-заголовки: HSTS, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy`.
-- Локальный dev — user-space: без sudo, Caddy из `~/.pegas/bin`.
+- Локальный dev — user-space: Caddy из `~/.pegas/bin`, порты `:80/:443`
+  привязываются без sudo (macOS/Windows; на Linux — при
+  `CAP_NET_BIND_SERVICE` или `net.ipv4.ip_unprivileged_port_start=0`).
 - Ротация логов контейнеров (`max-size: 50m`, `max-file: 3`) — диск не
   переполняется.
+
+## Единственный Caddy
+
+В Pegas нет отдельного «gateway-движка»: `pegas-gateway` — это тот же
+user-space Caddy из `~/.pegas/bin`, запущенный как контейнер. Один бинарник,
+одна модель конфигурации (JSON), один способ работы с сертификатами — и локально
+(`pegas serve`/`pegas up`), и внутри шлюза.
 
 ## Ноль зависимостей
 

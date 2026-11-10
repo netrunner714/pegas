@@ -11,7 +11,16 @@ import { runRuntimeCompose } from "../runtime.js";
 import { createRuntimeCompose } from "../runtime-compose.js";
 import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
-import { verifySecrets } from "../secrets.js";
+import { parseEnvContent, verifySecrets } from "../secrets.js";
+import {
+  classifySharedImage,
+  createSharedInfraDeps,
+  ensureSharedPool,
+  provisionSharedTenant,
+  sharedPoolKey,
+  waitForSharedPoolReady,
+  type SharedInfraDeps,
+} from "../shared-infra.js";
 import { mergeRouteFile, writeRouteFileAtomically, stripOwnerBlocks } from "../route-merge.js";
 
 export interface DeployOptions {
@@ -158,6 +167,55 @@ export function resolveScopedUpstream(upstream: string, projectName: string): st
   if (host.startsWith(`${projectName}-`)) return upstream;
   if (host === "localhost" || host === "127.0.0.1" || /^(\d{1,3}\.){3}\d{1,3}$/.test(host)) return upstream;
   return `${projectName}-${host}:${port}`;
+}
+
+/**
+ * Разделяемые пулы сценария (issue #29): поднимает инстансы и готовит арендаторов
+ * до compose up, чтобы pegas:// в манифесте уже указывал на живой пул.
+ * Идемпотентно; секреты читаются из .env в память и никуда не записываются.
+ */
+async function ensureSharedPoolsForDeploy(args: {
+  contract: PegasContract;
+  projectRoot: string;
+  projectName: string;
+  runtimeId: string;
+  env: string;
+  deps?: SharedInfraDeps;
+}): Promise<void> {
+  const { contract, projectRoot, projectName, runtimeId, env } = args;
+  const deps = args.deps ?? createSharedInfraDeps();
+  const sharedServices = Object.entries(contract.services ?? {}).filter(
+    ([, svc]) => svc.scope?.[env] === "shared"
+  );
+  if (sharedServices.length === 0) return;
+  let envValues = new Map<string, string>();
+  try {
+    envValues = parseEnvContent(await fs.readFile(path.join(projectRoot, ".env"), "utf-8"));
+  } catch {}
+  for (const [serviceName, svc] of sharedServices) {
+    const tenant = svc.shared?.[env];
+    if (!tenant) throw new Error(`services.${serviceName}: scope: "shared" требует shared в сценарии "${env}".`);
+    const profile = classifySharedImage(svc.image?.[env]);
+    if (!profile) throw new Error(`services.${serviceName}: образ не является поддерживаемой разделяемой инфраструктурой.`);
+    const port = svc.port?.[env];
+    const ensured = await ensureSharedPool(deps, {
+      profile,
+      scenario: env,
+      publishHostPort: env === "development",
+      ...(typeof port === "number" ? { hostPort: port, port } : {}),
+    });
+    if (ensured.created) await waitForSharedPoolReady(deps, profile, env);
+    const secretValue = tenant.secret ? envValues.get(tenant.secret) : undefined;
+    await provisionSharedTenant(
+      deps,
+      sharedPoolKey(profile, env),
+      profile,
+      env,
+      { project: runtimeId, projectName, scenario: env, service: serviceName, name: tenant.name },
+      tenant,
+      secretValue
+    );
+  }
 }
 
 async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> {
@@ -428,6 +486,9 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       const gatewayResult = await ensureGatewayContainer(gatewayDir);
       if (!gatewayResult.success) throw new Error(gatewayResult.stderr || "Failed to ensure shared Gateway.");
       gatewayPrepared = true;
+      // issue #29: разделяемые пулы живут вне compose-проекта и должны быть
+      // готовы до up — потребители резолвят pegas:// на алиас пула.
+      await ensureSharedPoolsForDeploy({ contract, projectRoot, projectName, runtimeId, env });
       // v3: манифест содержит только driver:"docker"-сервисы сценария; host-сервисы не поднимаем
       await runRuntimeCompose(contract, projectRoot, runtimeId, [
         "up", "-d", "--remove-orphans",
@@ -526,6 +587,16 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
         upstream: scopedUpstream,
         cors: isCorsEnabled ? true : false,
         corsOrigins: allProjectDomains,
+        // issue #30: метаданные маршрута — status определяет сервис/сценарий/драйвер
+        // по ним, а не эвристикой по имени файла и upstream.
+        meta: {
+          project: projectName,
+          service: serviceName,
+          env,
+          driver: "docker",
+          owner: "deploy",
+          ...(typeof svcPort === "number" ? { port: svcPort } : {}),
+        },
       }));
       deployedRoutes.push({
         service: serviceName,
