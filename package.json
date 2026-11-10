@@ -1,5 +1,6 @@
 {
   "name": "@netrunner714/pegas",
+  "packageManager": "bun@1.4.4",
   "version": "3.5.1",
   "description": "Bun-native, agent-first zero-config L7 reverse proxy orchestrator for Docker",
   "main": "dist/index.js",
@@ -49,7 +50,7 @@
     "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=26.0.0"
   },
   "exports": {
     ".": "./dist/index.js",
