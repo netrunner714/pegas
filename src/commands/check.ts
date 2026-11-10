@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getEnvironmentDomains, validatePegasContract, type ContractValidationIssue } from "../contract.js";
 import { auditNextjsDevOrigins, type NextjsAuditFinding } from "../nextjs-audit.js";
+import { auditEnvBranches, type EnvBranchFinding } from "../env-branch-audit.js";
 import { verifySecrets, formatSecretsDiagnostic, isIgnoredByGit } from "../secrets.js";
 import type { CheckOptions, PegasContract } from "../types.js";
 
@@ -28,6 +29,13 @@ export interface RepoAuditResult {
   nextjsIssues: string[];
   /** Детали аудита Next.js для машиночитаемого вывода (--json); null, если аудит не сработал. */
   nextjsAudit?: NextjsAuditFinding | null;
+  /**
+   * Доктрина: ветвления по среде в коде (NODE_ENV/PEGAS_ENV/PEGAS_SCENARIO,
+   * PORT/HOST/APP_DOMAIN/CLIENT_ORIGINS). Предупреждения, не ошибки.
+   */
+  envBranchIssues: string[];
+  /** Детали аудита ветвлений для машиночитаемого вывода (--json); null, если аудит не сработал. */
+  envBranchAudit?: EnvBranchFinding | null;
   errors: string[];
   warnings: string[];
 }
@@ -191,6 +199,18 @@ export async function auditRepository(
     // аудит Next.js не обязан ронять check: пропускаем тихо
   }
 
+  // 6. Доктрина: ветвления по среде в коде. Предупреждение, не ошибка:
+  // сценарий — флаг запуска, код читает готовые значения через runtime.
+  const envBranchIssues: string[] = [];
+  let envBranchAudit: EnvBranchFinding | null = null;
+  try {
+    envBranchAudit = await auditEnvBranches(projectRoot);
+    if (envBranchAudit.warning) envBranchIssues.push(envBranchAudit.warning);
+    warnings.push(...envBranchIssues);
+  } catch {
+    // детектор не обязан ронять check: пропускаем тихо
+  }
+
   const hasErrors = errors.length > 0;
   const hasWarnings = warnings.length > 0;
   const valid = !hasErrors;
@@ -208,6 +228,8 @@ export async function auditRepository(
     artifactIssues,
     nextjsIssues,
     nextjsAudit,
+    envBranchIssues,
+    envBranchAudit,
     errors,
     warnings,
   };
@@ -267,6 +289,13 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
     console.log(`\n  ⚠️  Next.js (dev-ресурсы на доменах шлюза):`);
     for (const ni of result.nextjsIssues) {
       console.log(`     - ${ni}`);
+    }
+  }
+  // 6. Доктрина: ветвления по среде в коде
+  if (result.envBranchIssues.length > 0) {
+    console.log(`\n  ⚠️  Доктрина (сценарий — флаг запуска, а не ветвление в коде):`);
+    for (const ei of result.envBranchIssues) {
+      console.log(`     - ${ei.split("\n").join("\n       ")}`);
     }
   }
 

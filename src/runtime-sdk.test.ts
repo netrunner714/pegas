@@ -23,6 +23,7 @@ const ctx = {
       internalUrl: "postgresql://exogram-996be8f985fb-development-db:5432",
     },
   },
+  env: { SESSION_COOKIE_SECURE: "false", FEATURE_X: "on" },
 };
 
 describe("@netrunner714/pegas/runtime", () => {
@@ -89,6 +90,30 @@ describe("@netrunner714/pegas/runtime", () => {
     const { getContext, _resetForTests } = await import("./runtime-sdk.js");
     _resetForTests();
     expect(() => getContext()).toThrow(/невалидный JSON/);
+  });
+
+  it("config(): значение из PEGAS_CONTEXT.env; нет ключа — понятная ошибка", async () => {
+    const { config, optionalConfig, PegasRuntimeError } = await import("./runtime-sdk.js");
+    expect(config("FEATURE_X")).toBe("on");
+    expect(config("SESSION_COOKIE_SECURE")).toBe("false");
+    expect(optionalConfig("FEATURE_X")).toBe("on");
+    expect(optionalConfig("NO_SUCH_KEY")).toBeUndefined();
+    expect(() => config("NO_SUCH_KEY")).toThrow(PegasRuntimeError);
+    expect(() => config("NO_SUCH_KEY")).toThrow(/pegas\.json/);
+  });
+
+  it("config(): контекст без env (старый манифест) — фолбэк на process.env", async () => {
+    const { config, _resetForTests } = await import("./runtime-sdk.js");
+    const legacy = JSON.parse(JSON.stringify(ctx));
+    delete legacy.env;
+    process.env.PEGAS_CONTEXT = JSON.stringify(legacy);
+    process.env.FEATURE_X = "from-env";
+    _resetForTests();
+    try {
+      expect(config("FEATURE_X")).toBe("from-env");
+    } finally {
+      delete process.env.FEATURE_X;
+    }
   });
 });
 

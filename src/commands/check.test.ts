@@ -438,3 +438,41 @@ describe("check: Next.js allowedDevOrigins (issue #28)", () => {
     }
   });
 });
+
+describe("check: доктрина — ветвления по среде в коде", () => {
+  async function doctrineRepo(code: string): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-doctrine-"));
+    await fs.writeFile(path.join(dir, "pegas.json"), JSON.stringify(validContract, null, 2));
+    await fs.writeFile(path.join(dir, ".gitignore"), ".pegas\n.env*\n!.env.example\n");
+    await fs.writeFile(path.join(dir, ".env"), "DB_URL=1\nAPP_KEY=1\n", "utf-8");
+    await fs.writeFile(path.join(dir, ".env.example"), "DB_URL=\nAPP_KEY=\n", "utf-8");
+    await fs.mkdir(path.join(dir, "src"), { recursive: true });
+    await fs.writeFile(path.join(dir, "src", "app.ts"), code);
+    return dir;
+  }
+
+  it("NODE_ENV-ветвление → warning в envBranchIssues, valid остаётся true", async () => {
+    const dir = await doctrineRepo(`if (process.env.NODE_ENV === "development") { console.log(1); }\n`);
+    try {
+      const result = await auditRepository(dir);
+      expect(result.valid).toBe(true);
+      expect(result.envBranchIssues.length).toBe(1);
+      expect(result.envBranchAudit?.status).toBe("found");
+      expect(result.envBranchAudit?.issues[0].file).toBe("src/app.ts");
+      expect(result.warnings).toEqual(expect.arrayContaining(result.envBranchIssues));
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("код без ветвлений → envBranchIssues пуст", async () => {
+    const dir = await doctrineRepo(`import { config } from "@netrunner714/pegas/runtime";\nconst v = config("MY_KEY");\n`);
+    try {
+      const result = await auditRepository(dir);
+      expect(result.envBranchIssues).toEqual([]);
+      expect(result.envBranchAudit?.status).toBe("ok");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

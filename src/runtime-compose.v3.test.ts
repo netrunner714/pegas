@@ -274,6 +274,23 @@ describe("v3: инжект PEGAS_CONTEXT (Runtime SDK, столп 6)", () => {
     expect(ctx.services.api.url).toBe("https://api.disc-app.ru");
     expect(ctx.services.api.internalUrl).toBe("http://prj123-production-api:4000");
   });
+
+  it("контекст несёт env текущего сервиса, развёрнутый по сценарию (pegas:// — адресом)", () => {
+    const withEnv = JSON.parse(JSON.stringify(discContract));
+    withEnv.services.api.env = {
+      REDIS_QUEUE_URL: { development: "pegas://redis-queue", production: "pegas://redis-queue" },
+      MODE: { development: "dev", production: "prod" },
+    };
+    const { manifest } = createRuntimeCompose(withEnv as any, {
+      projectRoot: os.tmpdir(),
+      projectId: "prj123",
+      environment: "production",
+    });
+    const ctx = contextOf(manifest, "api");
+    expect(ctx.env.MODE).toBe("prod");
+    expect(ctx.env.REDIS_QUEUE_URL).toBe("redis://prj123-production-redis-queue:6379");
+    expect(contextOf(manifest, "redis-queue").env).toBeUndefined();
+  });
 });
 
 describe("runtime-compose v3: платформенная инъекция PORT", () => {
