@@ -8,6 +8,7 @@ import { handleLlms } from "./commands/llms.js";
 import { handleCa } from "./commands/ca.js";
 import { handleCheck } from "./commands/check.js";
 import { handleUpdate } from "./commands/update.js";
+import { handleUpgrade } from "./commands/upgrade.js";
 import { handleConnect } from "./commands/connect.js";
 import { handleInit } from "./commands/init.js";
 import { handleDisconnect } from "./commands/disconnect.js";
@@ -46,6 +47,7 @@ export interface MainDispatchers {
   handleCa?: typeof handleCa;
   handleCheck?: typeof handleCheck;
   handleUpdate?: typeof handleUpdate;
+  handleUpgrade?: typeof handleUpgrade;
 }
 
 export interface MainOptions {
@@ -72,6 +74,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     handleCa: options.dispatchers?.handleCa || handleCa,
     handleCheck: options.dispatchers?.handleCheck || handleCheck,
     handleUpdate: options.dispatchers?.handleUpdate || handleUpdate,
+    handleUpgrade: options.dispatchers?.handleUpgrade || handleUpgrade,
   };
 
   const rawArgs = normalizedArgs;
@@ -265,6 +268,15 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "update": {
       await dispatch.handleUpdate({
         cwd: values.cwd as string | undefined,
+        latest: values.latest as boolean | undefined,
+        json: values.json as boolean | undefined,
+        ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),
+      });
+      break;
+    }
+
+    case "upgrade": {
+      await dispatch.handleUpgrade({
         latest: values.latest as boolean | undefined,
         json: values.json as boolean | undefined,
         ...(options.noExit !== undefined ? { noExit: options.noExit } : {}),

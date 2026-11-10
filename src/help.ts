@@ -74,7 +74,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "update",
-    summary: "Update @netrunner714/pegas to latest version",
+    summary: "Update local @netrunner714/pegas dependency in the current project",
     usage: "update [options]",
     options: [
       {
@@ -91,6 +91,20 @@ export const COMMANDS: CliCommandDef[] = [
       },
     ],
     examples: ["$ pegas update", "$ pegas update --latest"],
+  },
+  {
+    name: "upgrade",
+    summary: "Upgrade the global pegas installation on this machine (bun add -g / npm install -g)",
+    usage: "upgrade [options]",
+    options: [
+      {
+        name: "latest",
+        type: "boolean",
+        default: false,
+        description: "Upgrade across major versions (e.g. 2.x -> 3.x)",
+      },
+    ],
+    examples: ["$ pegas upgrade", "$ pegas upgrade --latest"],
   },
   {
     name: "connect",
