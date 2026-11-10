@@ -5,6 +5,13 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [3.5.0] — 2026-11-10
+
+### Added
+
+- **Команда `pegas upgrade`** — обновление глобальной установки pegas на машине (`bun add -g` / `npm install -g`). Отличие от `pegas update`: update меняет локальную зависимость внутри проекта, upgrade — глобальный CLI; локальные версии в проектах upgrade не трогает. Если глобальный пакет — dev-линк на checkout (`bun link`), upgrade отказывается и подсказывает обновить checkout.
+- **Разделение update / upgrade в help** — `update` описан как обновление локальной зависимости проекта, `upgrade` — как обновление глобальной установки.
+
 ## [3.4.0] — 2026-11-10
 
 ### Added

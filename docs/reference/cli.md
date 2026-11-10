@@ -44,6 +44,23 @@ pegas update
 pegas update --latest
 ```
 
+### `pegas upgrade [options]`
+
+Upgrade the global pegas installation on this machine (bun add -g / npm install -g)
+
+Флаги:
+
+```text
+--latest              Обновляться между мажорными версиями (например, 2.x -> 3.x)
+```
+
+Примеры:
+
+```bash
+pegas upgrade
+pegas upgrade --latest
+```
+
 ### `pegas connect [options]`
 
 Пробрасывает сервисы разработки через общий шлюз: host-сервисы через host.docker.internal, маршруты [service].[project].localhost

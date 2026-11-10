@@ -192,6 +192,17 @@ export interface UpdateOptions {
   noExit?: boolean;
 }
 
+export interface UpgradeOptions {
+  latest?: boolean;
+  json?: boolean;
+  noExit?: boolean;
+  /** Внутренний override для тестов: каталог fake-глобальной установки. */
+  globalDir?: string;
+  /** Внутренние overrides для тестов: корни npm и home для детекции. */
+  npmRoot?: string | null;
+  homeDir?: string | null;
+}
+
 /** Информация о маршруте из route-файла шлюза (модуль gateway). */
 export interface RouteInfo {
   domain: string;
