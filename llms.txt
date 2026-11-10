@@ -32,15 +32,15 @@
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update @netrunner714/pegas to latest version.
 - `npx pegas connect` (--cwd, --dry-run) — Expose development services via shared gateway (routes host services through host.docker.internal).
 - `npx pegas disconnect` (--cwd) — Remove development route file from the gateway and stop the gateway if unused.
-- `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
-- `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
-- `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for any environment (development, stage, production).
+- `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for development, stage, and production environments.
+- `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for development, stage, and production environments.
+- `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for development, stage, and production environments.
 - `npx pegas deploy -s <scenario> [options]` (-s, --cwd, --skip-dns-check, --strict-dns, --skip-up, --dry-run) — Deploy a scenario from pegas.json: network, shared Gateway, containers, routes.
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas check [options]` (--cwd) — Read-only audit: validate the v3 contract, secrets parity, and .gitignore hygiene (no --fix, never mutates).
-- `npx pegas status [options]` — Check gateway health and active project routes.
+- `npx pegas status [options]` (--cwd) — Unified dashboard: gateway health plus every Pegas service with real process health.
 - `npx pegas llms [options]` — Print machine-readable LLM context.
 
 ## Global Options

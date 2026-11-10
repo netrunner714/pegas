@@ -93,7 +93,7 @@ site.example.com {
     expect(output).toContain("Gateway Location");
   });
 
-  it("matchContainerForRoute correctly matches containers by compose, exact name, or prefix", () => {
+  it("matchContainerForRoute сопоставляет по меткам, а не по эвристике имён (issue #9)", () => {
     const containers = [
       {
         id: "1",
@@ -108,40 +108,51 @@ site.example.com {
       },
       {
         id: "2",
-        name: "/exact-service",
-        image: "exact:latest",
+        name: "/pegas-myapp-api-production-abc123",
+        image: "api:latest",
         state: "running",
         status: "Up",
-        networks: [],
+        networks: ["pegas-network"],
         ports: "",
+        pegasProject: "abc123",
+        pegasProjectName: "myapp",
+        pegasScenario: "production",
+        pegasService: "api",
       },
       {
         id: "3",
-        name: "/proj2-worker",
-        image: "worker:latest",
+        name: "/pegas-myapp-db-development-abc123",
+        image: "postgres:18",
         state: "running",
         status: "Up",
-        networks: [],
-        ports: "",
+        networks: ["pegas-network"],
+        ports: "5432",
+        pegasProject: "abc123",
+        pegasProjectName: "myapp",
+        pegasScenario: "development",
+        pegasService: "db",
       },
     ];
 
-    // Host dev routes return undefined
+    // Host-маршруты (driver: bun) не имеют контейнера
     expect(matchContainerForRoute("host.docker.internal:3000", "proj1", containers)).toBeUndefined();
     expect(matchContainerForRoute("127.0.0.1:3000", "proj1", containers)).toBeUndefined();
     expect(matchContainerForRoute("localhost:3000", "proj1", containers)).toBeUndefined();
 
-    // Compose match
+    // 1. Метки Pegas + метаданные маршрута (точный путь)
+    expect(matchContainerForRoute("x:1", "myapp", containers, { service: "api", env: "production" })?.id).toBe("2");
+
+    // 2. Сетевой алиас <runtimeId>-<scenario>-<service> сверяется с тройкой меток
+    expect(matchContainerForRoute("abc123-development-db:5432", "myapp", containers)?.id).toBe("3");
+
+    // 3. Метки compose (контейнеры не из манифеста v3)
     expect(matchContainerForRoute("web:3000", "proj1", containers)?.id).toBe("1");
 
-    // Exact name match
-    expect(matchContainerForRoute("exact-service:8080", "other", containers)?.id).toBe("2");
-
-    // Prefix match
-    expect(matchContainerForRoute("worker:5000", "proj2", containers)?.id).toBe("3");
-
-    // No match
-    expect(matchContainerForRoute("unknown:9999", "other", containers)).toBeUndefined();
+    // Критерий приёмки #9: отсутствующий сервис НЕ сопоставляется с контейнером другого проекта
+    expect(matchContainerForRoute("web:3000", "other", containers)).toBeUndefined();
+    expect(matchContainerForRoute("api:8000", "myapp", containers, { service: "api", env: "development" })).toBeUndefined();
+    // Имя сервиса из другого проекта не матчится: сервис 'db' есть только в myapp/development
+    expect(matchContainerForRoute("db:5432", "other", containers, { service: "db", env: "development" })).toBeUndefined();
   });
 
   it("formatDockerStatus formats various container states and host dev properly", () => {
@@ -216,7 +227,8 @@ site.example.com {
       )
     ).toBe("pg.example.com");
 
-    // 4. Default hostPort fallback
+    // 4. Порт проброшен на хост, меток нет: фактический адрес, а не выдуманный
+    //    домен (issue #30: `<svc>.<proj>.localhost` не существует ни в DNS, ни в Caddy)
     expect(
       resolveInfraEndpoint(
         {} as any,
@@ -224,9 +236,9 @@ site.example.com {
         "redis",
         "6379->6379"
       )
-    ).toBe("redis.myproj.localhost:6379");
+    ).toBe("localhost:6379");
 
-    // 5. No port fallback
+    // 5. Порт не проброшен: сервис доступен только внутри сети pegas-network
     expect(
       resolveInfraEndpoint(
         {} as any,
@@ -234,6 +246,6 @@ site.example.com {
         "redis",
         "-"
       )
-    ).toBe("-");
+    ).toBe("(internal)");
   });
 });

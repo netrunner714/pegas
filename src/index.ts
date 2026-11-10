@@ -250,6 +250,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       await dispatch.handleStatus({
         gatewayDir: values["gateway-dir"] as string | undefined,
         json: values.json as boolean | undefined,
+        cwd: values.cwd as string | undefined,
       });
       break;
     }

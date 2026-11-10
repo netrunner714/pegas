@@ -21,6 +21,7 @@
 
 * [Инициализация проекта](./how-to/init.md) — `pegas init`: артефакты для агентов, git-гигиена, канон docs/pegas.md.
 * [Локальная разработка с HTTPS](./how-to/local-https.md) — `pegas connect`, доверенный CA, единый шлюз, `pegas disconnect`.
+* [Next.js и домены шлюза](./how-to/nextjs.md) — `allowedDevOrigins`: HMR и dev-ресурсы Next.js на доменах `*.localhost`.
 
 ## Справочники
 

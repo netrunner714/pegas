@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseCaddyTopLevelBlocks } from "./commands/status.js";
+import { parseRouteMeta, serializeRouteMeta, type RouteMeta } from "./route-meta.js";
 
 /**
  * issue #24: merge маршрутов по доменам в общем файле проекта.
@@ -24,10 +25,16 @@ export interface RouteBlock {
   body: string;
   /** Полный исходный текст блока, включая скобки. */
   raw: string;
+  /** Комментарий метаданных `# pegas:...`, прикреплённый к блоку (null — его нет). */
+  metaComment: string | null;
+  /** Текст блока вместе с комментарием метаданных — то, что переносится дословно. */
+  rawWithMeta: string;
   /** Домены из заголовка блока. */
   domains: string[];
   /** Первый upstream `reverse_proxy` из тела. */
   upstream: string | null;
+  /** Разобранные метаданные маршрута (issue #30); null — строки метаданных нет. */
+  meta: RouteMeta | null;
 }
 
 /** Разбивает содержимое route-файла на топ-левел блоки с исходным текстом. */
@@ -44,12 +51,21 @@ export function splitRouteBlocks(content: string): RouteBlock[] {
       .map((d) => d.trim())
       .filter((d) => Boolean(d) && !d.startsWith("#"));
     const proxyMatch = bodyReverseProxy(block.body);
+    const raw = `${block.header} {${block.body}}`;
+    const meta = parseRouteMeta(block.leadingComments);
+    // К блоку переносится только его собственная строка метаданных. Прочие
+    // ведущие комментарии (шапка файла, рукописные пометки) принадлежат файлу:
+    // mergeRouteFile пишет шапку заново, и их перенос дал бы дубликаты.
+    const metaComment = meta ? serializeRouteMeta(meta) : null;
     blocks.push({
       header: block.header,
       body: block.body,
-      raw: `${block.header} {${block.body}}`,
+      raw,
+      metaComment,
+      rawWithMeta: metaComment ? `${metaComment}\n${raw}` : raw,
       domains,
       upstream: proxyMatch,
+      meta,
     });
   }
   return blocks;
@@ -134,7 +150,9 @@ export function mergeRouteFile(
   if (own.length > 0) parts.push(own.join("\n\n"));
   for (const block of otherBlocks) {
     if (parts.length > 0 && parts[parts.length - 1] !== "") parts.push("");
-    parts.push(block.raw);
+    // rawWithMeta: метаданные маршрута (`# pegas:...`) принадлежат блоку и
+    // обязаны переживать merge — иначе status теряет сервис/сценарий/драйвер.
+    parts.push(block.rawWithMeta);
   }
   let content = parts.join("\n");
   if (!content.endsWith("\n")) content += "\n";
@@ -178,6 +196,6 @@ export function stripOwnerBlocks(
     kept.push(block);
   }
   if (kept.length === 0) return { content: null, removedDomains };
-  const content = kept.map((b) => b.raw).join("\n\n") + "\n";
+  const content = kept.map((b) => b.rawWithMeta).join("\n\n") + "\n";
   return { content, removedDomains };
 }

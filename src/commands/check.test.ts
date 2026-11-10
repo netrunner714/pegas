@@ -272,3 +272,169 @@ describe("check: Caddyfile, копируемый в Docker-образ — не �
     expect(result.warnings.some((w) => w.includes("Caddyfile") && w.includes("game_client/Caddyfile"))).toBe(true);
   });
 });
+
+describe("check: Next.js allowedDevOrigins (issue #28)", () => {
+  /**
+   * Валидный репозиторий с dev-доменами зоны .localhost и проектом на Next.js.
+   * Секреты не объявлены: аудит проверяет только предупреждение о Next.js,
+   * поэтому .env не нужен и ошибки секретов не шумят.
+   */
+  async function nextjsRepo(opts: {
+    domains: string[];
+    configName?: string;
+    configText?: string;
+    next?: string;
+  }): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-next-"));
+    const web: Record<string, unknown> = {
+      runtime: { development: { driver: "bun" } },
+      build: { development: null },
+      port: { development: 3000 },
+    };
+    if (opts.domains.length > 0) web.domains = { development: opts.domains };
+    await fs.writeFile(path.join(dir, "pegas.json"), JSON.stringify({
+      projectName: "next-app",
+      scenarios: ["development"],
+      gateway: { development: { httpPort: 80, httpsPort: 443 } },
+      services: { web },
+    }, null, 2));
+    await fs.writeFile(path.join(dir, ".gitignore"), ".pegas\n.env*\n!.env.example\n");
+    await fs.writeFile(path.join(dir, ".env.example"), "");
+    await fs.writeFile(path.join(dir, "package.json"), JSON.stringify({
+      name: "next-app",
+      dependencies: { next: opts.next ?? "15.5.0", react: "19.0.0" },
+    }));
+    if (opts.configName) await fs.writeFile(path.join(dir, opts.configName), opts.configText ?? "");
+    return dir;
+  }
+
+  it("непокрытые dev-домены → warning и nextjsIssues, valid остаётся true", async () => {
+    const dir = await nextjsRepo({
+      domains: ["next-app.localhost", "api.next-app.localhost"],
+      configName: "next.config.ts",
+      configText: "export default { reactStrictMode: true };",
+    });
+    try {
+      const result = await auditRepository(dir);
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(result.nextjsIssues.length).toBe(1);
+      expect(result.warnings).toEqual(expect.arrayContaining(result.nextjsIssues));
+      expect(result.nextjsIssues[0]).toContain("allowedDevOrigins");
+      expect(result.nextjsIssues[0]).toContain("api.next-app.localhost");
+      expect(result.nextjsAudit?.status).toBe("missing-option");
+      expect(result.hasWarnings).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("покрытие настроено → ни warning, ни nextjsIssues", async () => {
+    const dir = await nextjsRepo({
+      domains: ["next-app.localhost", "api.next-app.localhost"],
+      configName: "next.config.ts",
+      configText: "export default { allowedDevOrigins: ['next-app.localhost', '**.next-app.localhost'] };",
+    });
+    try {
+      const result = await auditRepository(dir);
+      expect(result.nextjsIssues).toEqual([]);
+      expect(result.nextjsAudit?.status).toBe("ok");
+      expect(result.warnings.some((w) => w.includes("allowedDevOrigins"))).toBe(false);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("без Next.js в package.json → аудит молчит, nextjsIssues пустой массив", async () => {
+    const dir = await nextjsRepo({
+      domains: ["next-app.localhost"],
+      configName: "next.config.ts",
+      configText: "export default {};",
+    });
+    try {
+      await fs.writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "plain", dependencies: { express: "^5" } }));
+      const result = await auditRepository(dir);
+      expect(result.nextjsIssues).toEqual([]);
+      expect(result.nextjsAudit?.nextjsDetected).toBe(false);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dev-домены вне зоны .localhost → предупреждение о Next.js не выдаётся", async () => {
+    const dir = await nextjsRepo({
+      domains: ["dev.example.com"],
+      configName: "next.config.ts",
+      configText: "export default {};",
+    });
+    try {
+      const result = await auditRepository(dir);
+      expect(result.nextjsIssues).toEqual([]);
+      expect(result.nextjsAudit?.status).toBe("not-applicable");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("битый package.json не роняет аудит репозитория", async () => {
+    const dir = await nextjsRepo({ domains: ["next-app.localhost"] });
+    try {
+      await fs.writeFile(path.join(dir, "package.json"), "{ не json");
+      const result = await auditRepository(dir);
+      expect(result.valid).toBe(true);
+      expect(result.nextjsIssues).toEqual([]);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleCheck: текстовый вывод показывает блок предупреждения Next.js", async () => {
+    const dir = await nextjsRepo({
+      domains: ["next-app.localhost", "api.next-app.localhost"],
+      configName: "next.config.js",
+      configText: "module.exports = { allowedDevOrigins: ['*.localhost'] };",
+    });
+    try {
+      const logs: string[] = [];
+      const spy = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
+      try {
+        await handleCheck({ cwd: dir, json: false, noExit: true });
+      } finally {
+        spy.mockRestore();
+      }
+      const out = logs.join("\n");
+      expect(out).toContain("Next.js");
+      expect(out).toContain("allowedDevOrigins");
+      expect(out).toContain("**.next-app.localhost");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleCheck --json: nextjsAudit и nextjsIssues сериализуются", async () => {
+    const dir = await nextjsRepo({
+      domains: ["api.next-app.localhost"],
+      configName: "next.config.mjs",
+      configText: "export default { allowedDevOrigins: originsFromEnv };",
+    });
+    try {
+      const logs: string[] = [];
+      const spy = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
+      try {
+        await handleCheck({ cwd: dir, json: true, noExit: true });
+      } finally {
+        spy.mockRestore();
+      }
+      const parsed = JSON.parse(logs[0]);
+      expect(parsed.valid).toBe(true);
+      expect(Array.isArray(parsed.nextjsIssues)).toBe(true);
+      expect(parsed.nextjsAudit.status).toBe("indeterminate");
+      expect(parsed.nextjsAudit.warning).toBeNull();
+      expect(parsed.nextjsAudit.hint).toContain("вычисляется динамически");
+      // Подсказка (не ложное обвинение) тоже попадает в warnings и nextjsIssues.
+      expect(parsed.nextjsIssues.length).toBe(1);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -15,6 +15,39 @@ export interface ServiceRuntime {
   driver: ServiceDriver;
 }
 
+/**
+ * Область жизненного цикла сервиса в сценарии (issue #29).
+ *
+ * - `isolated` (по умолчанию): собственный контейнер проекта — прежнее поведение;
+ * - `shared`: разделяемый инфраструктурный пул Pegas. Один инстанс на профиль
+ *   образа обслуживает арендаторов (отдельная база/ключи на проект), поэтому
+ *   N проектов занимают память одного процесса, а не N процессов.
+ *
+ * Применяется только к docker-сервисам с публичным образом (инфраструктура):
+ * приложение с `build` не разделяемо — его код принадлежит проекту.
+ */
+export type ServiceScope = "isolated" | "shared";
+
+/** Профиль разделяемого пула: какие инстансы поддерживать. */
+export type SharedPoolKind = "postgres" | "redis";
+
+/**
+ * Параметры аренды в разделяемом пуле (сценарная карта).
+ *
+ * Имя базы/пользователя или префикс ключей должно различать проекты внутри
+ * одного инстанса. Значение берётся из контракта, поэтому аренда идемпотентна
+ * между деплоями и не требует ручного SQL.
+ */
+export interface SharedTenantConfig {
+  /** Имя базы данных и роли (postgres) либо префикс ключей (redis). */
+  name: string;
+  /**
+   * Имя секрета из `.env` со значением пароля/токена арендатора. Значение
+   * передаётся через stdin `docker exec` и не сохраняется на диск.
+   */
+  secret?: string;
+}
+
 /** Конфигурация шлюза для сценария (замещает v2 devGateway и статический gateway). */
 export interface GatewayScenarioConfig {
   /** Хостовый HTTP-порт шлюза (обычно 80). */
@@ -102,6 +135,16 @@ export interface ServiceContract {
    * Значения — из .env (dev) / CI-хранилища (prod). Замещает v2 envFile/root secrets.
    */
   secrets?: string[];
+  /**
+   * Область жизненного цикла сервиса по сценариям (issue #29).
+   * Отсутствие поля — `isolated` (прежнее поведение: собственный контейнер).
+   */
+  scope?: ScenarioMap<ServiceScope>;
+  /**
+   * Параметры аренды в разделяемом пуле по сценариям (issue #29).
+   * Обязательно для сценариев с `scope: "shared"`; null — сценарий изолирован.
+   */
+  shared?: ScenarioMap<SharedTenantConfig | null>;
 }
 
 /** Корневой контракт v3. */
@@ -171,6 +214,12 @@ export interface RouteSnippetOptions {
   routes?: Record<string, string | { to: string; websocket?: boolean }>;
   cors?: boolean | string[] | import("./types.js").CorsConfig;
   corsOrigins?: string[];
+  /**
+   * Метаданные маршрута (issue #30): записываются комментарием `# pegas:...`
+   * перед блоком домена. По ним `pegas status` определяет сервис, сценарий и
+   * драйвер маршрута без эвристики по имени файла.
+   */
+  meta?: import("./route-meta.js").RouteMeta;
   force?: boolean;
   dryRun?: boolean;
   gatewayDir?: string;

@@ -437,6 +437,30 @@
         }
       ]
     },
+    "sharedTenant": {
+      "description": "Параметры аренды в разделяемом пуле (issue #29): имя базы и роли (postgres) или префикс ключей (redis); secret — имя ключа из .env, объявленного также в services.<name>.secrets.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "examples": [
+            "alpha_db"
+          ]
+        },
+        "secret": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]+$",
+          "examples": [
+            "DATABASE_PASSWORD"
+          ]
+        }
+      }
+    },
     "service": {
       "type": "object",
       "required": [
@@ -624,6 +648,31 @@
               "SESSION_SECRET"
             ]
           ]
+        },
+        "scope": {
+          "type": "object",
+          "description": "Область жизненного цикла по сценариям (issue #29): isolated — собственный контейнер проекта (по умолчанию); shared — аренда в общем инфраструктурном пуле Pegas. Shared допустим только для поддерживаемых образов (postgres, redis и производные), без build, volumes и dependsOn.",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "isolated",
+              "shared"
+            ]
+          }
+        },
+        "shared": {
+          "type": "object",
+          "description": "Параметры аренды в разделяемом пуле по сценариям (issue #29); объект обязателен в сценариях со scope: \"shared\", в остальных — null.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/sharedTenant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       "examples": [

@@ -1,4 +1,5 @@
 import { RouteSnippetOptions } from "./types.js";
+import { serializeRouteMeta } from "./route-meta.js";
 
 export function buildCorsOriginRegex(domains: string[] = [], customOrigins?: string[]): string {
   const parts: string[] = [];
@@ -71,6 +72,7 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
     routes,
     cors,
     corsOrigins,
+    meta,
   } = options;
 
   const lines: string[] = [];
@@ -81,6 +83,14 @@ export function generateCaddyfileSnippet(options: RouteSnippetOptions): string {
     lines.push(`    redir https://${domain}{uri} permanent`);
     lines.push(`}`);
     lines.push(``);
+  }
+
+  // Метаданные маршрута (issue #30) — комментарий непосредственно перед основным
+  // блоком: `pegas status` читает из него сервис, сценарий и драйвер. Ставится
+  // ПОСЛЕ www-редиректа, чтобы комментарий принадлежал блоку с reverse_proxy.
+  if (meta) {
+    const metaLine = serializeRouteMeta(meta);
+    if (metaLine) lines.push(metaLine);
   }
 
   // Main domain block

@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract, ScenarioMap, ServiceDriver } from "./types.js";
 import { validatePegasContract, getEnvironmentDomains, getProjectRuntimeId } from "./contract.js";
 import { composeProjectName, containerName, runtimeVolumeName } from "./naming.js";
+import { classifySharedImage, sharedPoolName } from "./shared-infra.js";
 
 /**
  * Генерация эфемерного compose-манифеста из v3-контракта (docs/internal/rfc/RFC_CONTRACT_V3.md, столп 3):
@@ -107,6 +108,15 @@ export function resolveInternalUrl(
   }
   const image = svc.image?.[scenario];
   const scheme = schemeForImage(image);
+  // issue #29: shared-сервис живёт в общем пуле вне compose-проекта:
+  // адрес — сетевой алиас пула, а не алиас сервиса проекта.
+  if (svc.scope?.[scenario] === "shared") {
+    const profile = classifySharedImage(image);
+    if (!profile) {
+      throw new Error(errorPath + ": pegas://" + serviceName + ' — сервис в сценарии "' + scenario + '" объявлен shared, но его образ не является поддерживаемой разделяемой инфраструктурой.');
+    }
+    return scheme + "://" + sharedPoolName(profile, scenario) + ":" + port;
+  }
   return scheme + "://" + projectId + "-" + scenario + "-" + serviceName + ":" + port;
 }
 
@@ -155,7 +165,12 @@ export function buildSdkContext(
     const port = svc.port?.[scenario];
     const image = svc.image?.[scenario];
     const scheme = schemeForImage(image);
-    const alias = driver === "docker" ? projectId + "-" + scenario + "-" + name : undefined;
+    const sharedProfile = svc.scope?.[scenario] === "shared" ? classifySharedImage(image) : null;
+    const alias = sharedProfile
+      ? sharedPoolName(sharedProfile, scenario)
+      : driver === "docker"
+        ? projectId + "-" + scenario + "-" + name
+        : undefined;
     const domains = svc.domains?.[scenario];
     const entry: SdkServiceContext = { driver, scheme };
     if (typeof port === "number") entry.port = port;
@@ -204,6 +219,9 @@ export function createRuntimeCompose(
   for (const [serviceName, service] of Object.entries(contract.services)) {
     // Фильтр по драйверу: host-сервисы pegas не поднимает (столп 3)
     if (at(service.runtime, scenario)?.driver !== "docker") continue;
+    // issue #29: shared-сервисы живут в общем пуле вне compose-проекта —
+    // их поднимает deploy до compose up, в манифест они не попадают.
+    if (at(service.scope, scenario) === "shared") continue;
 
     const image = at(service.image, scenario);
     const build = at(service.build, scenario);

@@ -128,7 +128,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "logs",
-    summary: "Stream or view container logs for any environment (development, stage, production)",
+    summary: "Stream or view container logs for development, stage, and production environments",
     usage: "logs [env] [service] [options]",
     options: [
       {
@@ -143,7 +143,7 @@ export const COMMANDS: CliCommandDef[] = [
         type: "boolean",
         short: "f",
         default: false,
-        description: "Follow log output (stream real-time changes)",
+        description: "Follow log output in real time",
       },
       {
         name: "tail",
@@ -267,8 +267,16 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "status",
-    summary: "Check gateway health and active project routes",
+    summary: "Unified dashboard: gateway health plus every Pegas service with real process health",
     usage: "status [options]",
+    options: [
+      {
+        name: "cwd",
+        type: "string",
+        placeholder: "<path>",
+        description: "Project directory whose rows are marked with ★ in the dashboard",
+      },
+    ],
     examples: ["$ pegas status", "$ pegas status --json"],
   },
   {
