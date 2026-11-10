@@ -5,7 +5,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    types: [opened, ready_for_review, reopened]
   workflow_dispatch:
     inputs:
       publish:
@@ -18,11 +17,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Lint, Test & E2E
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    runs-on: ubuntu-26.04
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -33,7 +35,7 @@ jobs:
           bun-version: 1.4.4
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Typecheck
         run: bun run typecheck
@@ -54,7 +56,8 @@ jobs:
     name: Build, Release & Publish
     needs: test
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.publish == true))
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
       id-token: write
@@ -77,7 +80,7 @@ jobs:
           bun-version: 1.4.4
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Check version bump
         id: check_version

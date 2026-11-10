@@ -78,6 +78,8 @@ bun run build
 
 Текущее покрытие — 87,1 % при пороге 80 %.
 
+CI: [.github/workflows/ci.yml](.github/workflows/ci.yml) — на push в `main` и PR: typecheck, tests, docs:check, build, e2e; job `publish` публикует новую версию.
+
 ## Известные особенности
 
 1. **Порог Node.** `validateNodeVersion` в `src/index.ts` пропускает Node >=24, хотя
