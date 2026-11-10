@@ -21,7 +21,8 @@
     "test:e2e": "bun scripts/e2e.ts",
     "test:e2e:init": "bun scripts/e2e-init.ts",
     "typecheck": "tsc --noEmit",
-    "docs:check": "bun scripts/docs-check.ts"
+    "docs:check": "bun scripts/docs-check.ts",
+    "check": "bun run typecheck && bun run test && bun run docs:check && bun run build"
   },
   "keywords": [
     "docker",

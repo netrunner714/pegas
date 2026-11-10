@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { PegasContract, ServiceContract, ScenarioMap, ServiceDriver } from "./types.js";
+import { PegasContract, ScenarioMap, ServiceDriver } from "./types.js";
 import { validatePegasContract, getEnvironmentDomains, getProjectRuntimeId } from "./contract.js";
 import { composeProjectName, containerName, runtimeVolumeName } from "./naming.js";
 import { classifySharedImage, sharedPoolName } from "./shared-infra.js";

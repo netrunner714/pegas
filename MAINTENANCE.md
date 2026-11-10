@@ -39,6 +39,7 @@ site/               исходники промо-страницы и генер
 bun install --frozen-lockfile
 bun run build          # example + docs + dist + declarations
 bun run typecheck
+bun run check          # typecheck + tests + docs:check + build, как в CI
 bun run test           # только через runner: изоляция моков, порог покрытия 80 %
 bun run test:gate      # проверка покрытия
 bun run test:e2e

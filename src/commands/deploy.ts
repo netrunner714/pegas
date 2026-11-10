@@ -478,7 +478,6 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       NODE_ENV: rawScenario === "development" ? "development" : "production",
       ...(primaryDomain ? { APP_DOMAIN: primaryDomain } : {}),
     };
-    let composeFile: string | null = null;
     let gatewayPrepared = false;
     try {
       // Verify/start the shared edge before mutating the application stack.

@@ -465,7 +465,6 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
     const remainingLines: string[] = [];
     const exposedPorts: string[] = [];
     let hasNetworks = false;
-    let hasPegasNetwork = false;
 
     // Detect indentation of keys inside this service
     let propIndent = entry.indent + 2;
@@ -566,14 +565,6 @@ export function patchExistingCompose(content: string, projectName = "app"): stri
             continue;
           }
           if (nextIndent > propIndent) {
-            if (nextTrimmed.startsWith("-")) {
-              const netName = nextTrimmed.replace(/^-\s*/, "").trim();
-              if (netName === "pegas-network") {
-                hasPegasNetwork = true;
-              }
-            } else if (nextTrimmed.startsWith("pegas-network:")) {
-              hasPegasNetwork = true;
-            }
             remainingLines.push(nextLine);
             i++;
           } else {

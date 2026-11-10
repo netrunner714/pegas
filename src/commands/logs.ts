@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
 import { findProjectRoot } from "../gateway.js";
-import { CONTRACT_FILENAME, normalizeEnvironment, getProjectRuntimeId } from "../contract.js";
+import { CONTRACT_FILENAME, getProjectRuntimeId } from "../contract.js";
 import { PegasContract } from "../types.js";
 import { followRuntimeLogs } from "../runtime.js";
 
