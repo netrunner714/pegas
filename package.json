@@ -47,7 +47,8 @@
   "homepage": "https://netrunner714.ru/pegas",
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "typescript": "6.0.3"
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "@typescript/native": "npm:typescript@7.0.2"
   },
   "engines": {
     "node": ">=26.0.0"

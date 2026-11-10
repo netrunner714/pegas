@@ -11,12 +11,14 @@
 | Компонент | Версия |
 |---|---|
 | Bun / Node | 1.4.4 / >=26.0.0 |
-| TypeScript | 6.0.3 |
+| TypeScript | 7.0.2 (CLI) + API 6.0.3 (тулинг) |
 | @types/node | ^26.6.6 |
 | Runtime-зависимости | нет (только `node:*`) |
 
 Сборка: `bun build src/index.ts --target=node` → `dist/index.js`, отдельный
 `dist/runtime.js` для Runtime SDK. Пакет содержит `dist` и `schemas`.
+
+TypeScript подключён двумя алиасами: `@typescript/native` (CLI 7.0.2) и `typescript` → `@typescript/typescript6` (API 6.0.3 для инструментов, которым нужен Compiler API). Причина и порядок обновления — в [корневом MAINTENANCE.md](../MAINTENANCE.md), раздел 2.1.
 
 ## Структура
 
