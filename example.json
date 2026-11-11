@@ -1,5 +1,5 @@
 {
-  "$schema": "https://netrunner714.ru/schemas/pegas.json",
+  "$schema": "https://pegas.netrunner714.ru/schemas/pegas.json",
   "projectName": "tf2-trade-exchange",
   "scenarios": [
     "development",

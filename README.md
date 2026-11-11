@@ -71,13 +71,13 @@ bunx @netrunner714/pegas init
 `init` — тонкий scaffolder: создаёт `docs/pegas.md` (правила для агентов),
 блок Pegas в AGENTS.md, правит `.gitignore` (`.env*` + `!.env.example` + `.pegas`).
 Контракт `pegas.json` **не создаётся и не трогается** — его пишет разработчик
-или агент по [схеме](https://netrunner714.ru/schemas/pegas.json) и эталону `example.json`.
+или агент по [схеме](https://pegas.netrunner714.ru/schemas/pegas.json) и эталону `example.json`.
 
 ### 2. Написать контракт
 
 ```jsonc
 {
-  "$schema": "https://netrunner714.ru/schemas/pegas.json",
+  "$schema": "https://pegas.netrunner714.ru/schemas/pegas.json",
   "projectName": "my-app",
   "scenarios": ["development", "stage", "production"],
   "gateway": {

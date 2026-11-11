@@ -5,13 +5,19 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
-## [4.0.1] — 2026-11-11
+## [4.0.2] — 2026-11-11
 
 ### Changed
 
 - **`pegas status` без колонки `★`.** Первый столбец с отметкой проекта текущего каталога убран: он не нёс полезной информации.
 - **«Connected, но не запущено» больше не проблема.** Host-сервис без слушающего порта и docker-сервис без контейнера показываются как `⚪ Not started` и не попадают в блок «Обнаружено проблем». Проблемой остаётся только реально больной запущенный контейнер (например, `unhealthy`).
 - **Остановленный контейнер** показывается нейтрально (`⚪ Not running`), а не как ошибка: это может быть осознанный `down`.
+- **JSON Schema переехала на `https://pegas.netrunner714.ru/schemas/pegas.json`.** Старый адрес на `netrunner714.ru` остаётся только как 308-редирект. `init` и генерируемая документация используют новый адрес; `pegas init` доносит его до проектов.
+- **Канон `init` приведён к 4.0.0:** `connect -s` объявляет маршруты всех сервисов, `deploy -s` поднимает только docker, `down -s` не снимает connect-маршруты.
+
+### Fixed
+
+- **Пустой `volumes` при `driver: "bun"` больше не ошибка.** Сценарная карта должна содержать `development`, но объявить его пустым было нельзя: валидатор считал пустой массив наличием томов. Теперь проверяется `volumes.length > 0`.
 
 ## [4.0.0] — 2026-11-11
 
@@ -132,7 +138,7 @@
 
 ### Added
 
-- **Контракт v3**: корневые `scenarios: string[]`, `gateway` (httpPort/httpsPort/admin/acmeEmail по сценариям) и посервисные сценарные карты (`runtime`, `image`, `build`, `port`, `domains`, `cors`, `env`, `volumes`, `dependsOn`, `healthcheck`, `command`, `ports`, `publicHost`). JSON Schema — https://netrunner714.ru/schemas/pegas.json; эталон example.json генерируется из схемы.
+- **Контракт v3**: корневые `scenarios: string[]`, `gateway` (httpPort/httpsPort/admin/acmeEmail по сценариям) и посервисные сценарные карты (`runtime`, `image`, `build`, `port`, `domains`, `cors`, `env`, `volumes`, `dependsOn`, `healthcheck`, `command`, `ports`, `publicHost`). JSON Schema — https://pegas.netrunner714.ru/schemas/pegas.json; эталон example.json генерируется из схемы.
 - **Zero Scalars**: каждое средозависимое поле — строгая карта по ключам из `scenarios`, без пропусков и дефолтов. Корневые `env`, `secrets`, `deploy`, `devGateway` удалены; секреты — посервисные (`services.<name>.secrets`).
 - **Service discovery `pegas://<имя-сервиса>`**: значения env вида `pegas://api` разворачиваются при генерации манифеста во внутренний адрес сети (`<scheme>://<project>-<scenario>-<service>:<port>`, scheme по образу целевого сервиса: redis/postgresql/http).
 - **Платформенная инъекция PORT**: манифест подставляет env `PORT` из port-карты контракта каждому docker-сервису (вместе с `PEGAS_CONTEXT`/`PEGAS_SCENARIO`) — порты читают любые рантаймы (Rust/Go/Python), ручной env-ключ `PORT` больше не нужен и перекрывается.

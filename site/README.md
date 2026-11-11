@@ -63,5 +63,5 @@ export async function GET() {
 }
 ```
 
-После этого `$schema: "https://netrunner714.ru/schemas/pegas.json"` в
+После этого `$schema: "https://pegas.netrunner714.ru/schemas/pegas.json"` в
 `pegas.json` включит автодополнение и валидацию в VS Code/WebStorm.

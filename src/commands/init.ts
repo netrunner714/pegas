@@ -18,7 +18,7 @@ export const PEGAS_AGENT_RULES = `<!-- BEGIN:pegas-rules -->
 - Контракт — единственный источник истины о топологии: не клонировать в код и не обходить. Изменил топологию — правь pegas.json, \`pegas check\` обязан быть зелёным.
 - Секреты: только имена в \`services.<name>.secrets\`, значения — в .env. Секрет в контракте или в git — инцидент.
 - Домены — только HTTP-сервисы; не-HTTP наружу — \`ports\` + \`publicHost\`. Ветвления по средам в коде запрещены: сценарий выбирает запуск, код читает готовые значения.
-- Схема контракта: https://netrunner714.ru/schemas/pegas.json
+- Схема контракта: https://pegas.netrunner714.ru/schemas/pegas.json
 <!-- END:pegas-rules -->`;
 
 export const PEGAS_AGENT_RULES_MARKER_REGEX = /<!-- BEGIN:pegas-rules -->[\s\S]*?<!-- END:pegas-rules -->/;
@@ -45,7 +45,7 @@ Pegas заменяет собой всю инфраструктурную обв
 
 ## Контракт pegas.json
 
-- Схема (с IDE-подсказками): https://netrunner714.ru/schemas/pegas.json
+- Схема (с IDE-подсказками): https://pegas.netrunner714.ru/schemas/pegas.json
 - Сервисы, драйверы (\`docker\`/\`bun\`), порты, домены, сценарии (development/stage/production),
   secrets — всё в одном декларативном файле. Сценарные карты заполняются без пропусков (Zero Scalars).
 - Секреты: имена в \`services.<name>.secrets\`; значения — в .env (не коммитится, .gitignore: \`.env*\`, шаблон \`!.env.example\` коммитится) или в CI-хранилище.
@@ -53,7 +53,7 @@ Pegas заменяет собой всю инфраструктурную обв
 
 ## Доктрина доступа к конфигурации
 
-Pegas — не только инструмент деплоя, но и ориентир разработки: сценарий — это флаг запуска (\`pegas deploy -s <scenario>\`, \`pegas connect\` для development), а не ветвление в коде. Код никогда не решает, в какой он среде, — он читает уже готовые значения для текущего сценария.
+Pegas — не только инструмент деплоя, но и ориентир разработки: сценарий — это флаг запуска (\`pegas connect -s <scenario>\` объявляет маршруты, \`pegas deploy -s <scenario>\` поднимает docker-сервисы), а не ветвление в коде. Код никогда не решает, в какой он среде, — он читает уже готовые значения для текущего сценария.
 
 Env — транспорт инъекции, а не источник знания о топологии. Три слоя:
 
@@ -86,9 +86,9 @@ const key = secret("API_KEY");                   // секрет из .env с п
 
 ## Команды
 
-- \`pegas connect\` / \`pegas disconnect\` — подключить/освободить dev-маршруты проекта на шлюзе
-- \`pegas deploy -s <scenario>\` — поднять docker-сервисы сценария (host-сервисы запускает сам разработчик)
-- \`pegas down\` — остановить проект и снять маршруты
+- \`pegas connect -s <scenario>\` / \`pegas disconnect -s <scenario>\` — объявить/снять маршруты сценария в шлюзе
+- \`pegas deploy -s <scenario>\` — поднять docker-сервисы сценария; маршруты не пишет (host-сервисы запускает сам разработчик)
+- \`pegas down -s <scenario>\` — остановить контейнеры; маршруты connect сохраняются
 - \`pegas logs -f [service]\` — логи контейнеров
 - \`pegas status\` — дашборд шлюза: контейнеры, маршруты, домены
 - \`pegas check\` — аудит контракта и секретов (перед коммитом/деплоем)
@@ -99,10 +99,10 @@ const key = secret("API_KEY");                   // секрет из .env с п
 ## Dev-цикл
 
 \`\`\`bash
-pegas check                  # аудит контракта и секретов
-pegas connect                # маршруты *.localhost на шлюзе
-pegas deploy -s development  # docker-контейнеры сценария
-bun run dev                  # host-сервисы (driver: "bun") — когда нужно
+pegas check                     # аудит контракта и секретов
+pegas connect -s development    # маршруты всех сервисов сценария
+pegas deploy -s development     # docker-контейнеры сценария
+bun run dev                     # host-сервисы (driver: "bun") — когда нужно
 \`\`\`
 
 Проект: \`${projectName}\`
@@ -237,7 +237,7 @@ export async function handleInit(options: InitOptions = {}): Promise<void> {
   for (const a of actions) console.log(`  ✓ ${a}`);
   if (actions.length === 0) console.log(`  ℹ️ Всё уже на месте (идемпотентность)`);
   console.log(`\nЧто дальше:`);
-  console.log(`  1. Напишите pegas.json по схеме https://netrunner714.ru/schemas/pegas.json`);
+  console.log(`  1. Напишите pegas.json по схеме https://pegas.netrunner714.ru/schemas/pegas.json`);
   console.log(`     (контекст для агента: bunx pegas llms; эталон — в пакете и на сайте)`);
   console.log(`  2. pegas check — проверьте контракт`);
   console.log(`  3. pegas connect + pegas deploy -s development — начать работу\n`);

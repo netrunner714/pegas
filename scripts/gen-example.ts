@@ -69,7 +69,7 @@ function buildExample(schema: SchemaNode): Record<string, unknown> {
   const out: Record<string, unknown> = {};
 
   // $schema подсказка — первый ключ эталона
-  out.$schema = "https://netrunner714.ru/schemas/pegas.json";
+  out.$schema = "https://pegas.netrunner714.ru/schemas/pegas.json";
 
   for (const key of schema.required ?? []) {
     if (key === "$schema") continue;

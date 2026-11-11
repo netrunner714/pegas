@@ -20,7 +20,7 @@ npx @netrunner714/pegas init
 Команда создаёт `docs/pegas.md` (правила для ИИ-агентов), добавляет блок Pegas
 в `AGENTS.md` и правит `.gitignore` (`.pegas`, `.env*`, `!.env.example`).
 Контракт `pegas.json` инициализация **не создаёт** — в v3 его пишут по
-[схеме](https://netrunner714.ru/schemas/pegas.json) и эталону `example.json`
+[схеме](https://pegas.netrunner714.ru/schemas/pegas.json) и эталону `example.json`
 (разработчик или агент). Предпросмотр без записи:
 
 ```bash
@@ -33,7 +33,7 @@ npx @netrunner714/pegas init --dry-run
 
 ```jsonc
 {
-  "$schema": "https://netrunner714.ru/schemas/pegas.json",
+  "$schema": "https://pegas.netrunner714.ru/schemas/pegas.json",
   "projectName": "my-app",
   "scenarios": ["development", "production"],
   "gateway": {

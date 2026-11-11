@@ -11,7 +11,7 @@ import {
 describe("контрактные хелперы (v3)", () => {
   it("CONTRACT_FILENAME/CONTRACT_SCHEMA_URL стабильны", () => {
     expect(CONTRACT_FILENAME).toBe("pegas.json");
-    expect(CONTRACT_SCHEMA_URL).toBe("https://netrunner714.ru/schemas/pegas.json");
+    expect(CONTRACT_SCHEMA_URL).toBe("https://pegas.netrunner714.ru/schemas/pegas.json");
   });
 
   it("getProjectRuntimeId: детерминизм + различие проектов", () => {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://netrunner714.ru/schemas/pegas.json",
+  "$id": "https://pegas.netrunner714.ru/schemas/pegas.json",
   "title": "Pegas v3 contract",
   "description": "Декларативный контракт окружения Pegas v3. Спецификация — RFC_CONTRACT_V3.md. Единственный источник правды: из этой схемы генерируются эталон (example.json), llms-контекст и reference-документация.",
   "type": "object",
@@ -15,7 +15,7 @@
     "$schema": {
       "type": "string",
       "examples": [
-        "https://netrunner714.ru/schemas/pegas.json"
+        "https://pegas.netrunner714.ru/schemas/pegas.json"
       ]
     },
     "projectName": {

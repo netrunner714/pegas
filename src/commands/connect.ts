@@ -50,7 +50,7 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
   try {
     rawContract = await fs.readFile(contractPath, "utf-8");
   } catch {
-    const msg = `Contract ${CONTRACT_FILENAME} not found in ${projectRoot}. Напишите контракт v3 по схеме https://netrunner714.ru/schemas/pegas.json (контекст: pegas llms).`;
+    const msg = `Contract ${CONTRACT_FILENAME} not found in ${projectRoot}. Напишите контракт v3 по схеме https://pegas.netrunner714.ru/schemas/pegas.json (контекст: pegas llms).`;
     if (isJson) console.log(JSON.stringify({ error: msg }));
     else console.error(`❌ Error: ${msg}`);
     if (!options.noExit) process.exit(1);

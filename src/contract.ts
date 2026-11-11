@@ -13,7 +13,7 @@ import { classifySharedImage } from "./shared-infra.js";
 export const CONTRACT_FILENAME = "pegas.json";
 
 /** Публичный URL JSON Schema контракта: включает IDE-подсказки в pegas.json. */
-export const CONTRACT_SCHEMA_URL = "https://netrunner714.ru/schemas/pegas.json";
+export const CONTRACT_SCHEMA_URL = "https://pegas.netrunner714.ru/schemas/pegas.json";
 
 /** Паттерн имени сценария (столп 2, правило 4). */
 const SCENARIO_NAME_REGEX = /^[a-z0-9-]+$/;
@@ -389,7 +389,7 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
         if (image) add(`${prefix} image`, "image несовместим с driver: \"bun\" (host-сервис не имеет образа).");
         if (build) add(`${prefix} build`, "build несовместим с driver: \"bun\" (host-сервис не собирается).");
         if (command) add(`${prefix} command`, "command — команда контейнера; при driver: \"bun\" неприменима.");
-        if (volumes) add(`${prefix} volumes`, "volumes — тома контейнера; при driver: \"bun\" неприменимы.");
+        if (Array.isArray(volumes) && volumes.length > 0) add(`${prefix} volumes`, "volumes — тома контейнера; при driver: \"bun\" неприменимы.");
       }
 
       // healthcheck: строка-URL для host, объект/null для docker

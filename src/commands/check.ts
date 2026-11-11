@@ -89,7 +89,7 @@ export async function auditRepository(
   } catch {
     contractExists = false;
     errors.push(
-      "pegas.json не найден. Напишите контракт v3 по схеме https://netrunner714.ru/schemas/pegas.json (контекст для агента: pegas llms)."
+      "pegas.json не найден. Напишите контракт v3 по схеме https://pegas.netrunner714.ru/schemas/pegas.json (контекст для агента: pegas llms)."
     );
   }
 
