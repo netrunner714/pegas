@@ -357,6 +357,10 @@ networks:
     if (deployAlphaRes.code !== 0) {
       throw new Error(`Project Alpha deploy failed: ${deployAlphaRes.stderr}`);
     }
+    const connectAlphaRes = await execAsync("node", [BIN_PATH, "connect", "-s", "production", "--gateway-dir", gatewayDir], { cwd: pAlphaDir });
+    if (connectAlphaRes.code !== 0) {
+      throw new Error(`Project Alpha connect failed: ${connectAlphaRes.stderr}`);
+    }
     logSuccess("Project Alpha deployed & Caddy reloaded cleanly");
 
     // Project Beta
@@ -375,6 +379,10 @@ networks:
     });
     if (deployBetaRes.code !== 0) {
       throw new Error(`Project Beta deploy failed: ${deployBetaRes.stderr}`);
+    }
+    const connectBetaRes = await execAsync("node", [BIN_PATH, "connect", "-s", "production", "--gateway-dir", gatewayDir], { cwd: pBetaDir });
+    if (connectBetaRes.code !== 0) {
+      throw new Error(`Project Beta connect failed: ${connectBetaRes.stderr}`);
     }
     logSuccess("Project Beta deployed in parallel without port conflict");
 
@@ -460,6 +468,10 @@ networks:
     });
     if (deployMultiRes.code !== 0) {
       throw new Error(`Project Multi deploy failed: ${deployMultiRes.stderr}`);
+    }
+    const connectMultiRes = await execAsync("node", [BIN_PATH, "connect", "-s", "production", "--gateway-dir", gatewayDir], { cwd: pMultiDir });
+    if (connectMultiRes.code !== 0) {
+      throw new Error(`Project Multi connect failed: ${connectMultiRes.stderr}`);
     }
     logSuccess("Multi-service project deployed with web and api upstreams");
 
