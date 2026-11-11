@@ -141,15 +141,23 @@ describe("runtime-compose v3: манифест сценария", () => {
     const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "0a1b0e24d9", environment: "development" });
     const redis = (manifest.services as any).redis;
     expect(redis.networks["pegas-network"].aliases).toEqual(["0a1b0e24d9-development-redis"]);
+    // В project-сети — каноническое имя сервиса, чтобы приложение могло
+    // ходить по привычному `redis:6379` независимо от соседей.
+    expect(redis.networks["project-network"].aliases).toEqual(["redis"]);
   });
 
   it("все сервисы в shared pegas-network, gateway не в сервисах", () => {
     const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "myapp", environment: "stage" });
     expect(Object.keys(manifest.services).sort()).toEqual(["api", "redis", "web"]);
-    for (const svc of Object.values<any>(manifest.services)) {
-      expect(Object.keys(svc.networks)).toEqual(["pegas-network"]);
+    for (const [name, svc] of Object.entries<any>(manifest.services)) {
+      expect(Object.keys(svc.networks).sort()).toEqual(["pegas-network", "project-network"]);
       expect(svc.networks["pegas-network"].aliases.length).toBe(1);
+      expect(svc.networks["project-network"].aliases).toEqual([name]);
     }
+    expect((manifest.networks as any)["project-network"]).toEqual({
+      external: true,
+      name: "pegas-net-myapp-stage",
+    });
     expect((manifest.services as any).gateway).toBeUndefined();
   });
 });

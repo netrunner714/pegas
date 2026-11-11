@@ -283,8 +283,7 @@ describe("pegas deploy", () => {
     expect(errors.length).toBe(0);
   });
 
-  it("performs full live route configuration and hot-reload in json and text mode", async () => {
-    mockDeployReloadOk = true;
+  it("deploy не пишет маршруты — это зона connect", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-live-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-live-gw-"));
 
@@ -306,7 +305,6 @@ describe("pegas deploy", () => {
     console.log = (...args) => logs.push(args.join(" "));
 
     try {
-      // 1. Live deploy in JSON mode
       await handleDeploy({
         cwd: tmpProj,
         scenario: "production",
@@ -318,32 +316,16 @@ describe("pegas deploy", () => {
       });
 
       const routeFile = path.join(tmpGateway, "conf.d", "live-app.caddy");
-      expect(await fs.access(routeFile).then(() => true).catch(() => false)).toBe(true);
-      const content = await fs.readFile(routeFile, "utf-8");
-      expect(content).toContain("live.example.com");
-
-      // 2. Live deploy in Text mode
-      await handleDeploy({
-        cwd: tmpProj,
-        scenario: "production",
-        gatewayDir: tmpGateway,
-        skipDnsCheck: true,
-        skipUp: true,
-        noExit: true,
-        json: false,
-      });
+      expect(await fs.access(routeFile).then(() => true).catch(() => false)).toBe(false);
+      expect(logs.join("\n")).toContain('"routes":"managed by pegas connect"');
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }
-
-    expect(logs.some((l) => l.includes('"status":"success"') && l.includes("live-app"))).toBe(true);
-    expect(logs.some((l) => l.includes("successfully deployed to Pegas gateway"))).toBe(true);
   });
 
-  it("handles reload failure and rolls back route configuration cleanly", async () => {
-    mockDeployReloadOk = false;
+  it("deploy не трогает существующий route-файл connect", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-fail-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-fail-gw-"));
 
@@ -363,12 +345,8 @@ describe("pegas deploy", () => {
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
-    const errors: string[] = [];
-    const logs: string[] = [];
     const origLog = console.log;
-    const origError = console.error;
-    console.log = (...args) => logs.push(args.join(" "));
-    console.error = (...args) => errors.push(args.join(" "));
+    console.log = () => {};
 
     try {
       await handleDeploy({
@@ -381,13 +359,10 @@ describe("pegas deploy", () => {
         json: false,
       });
 
-      // Verify original content was restored
       const content = await fs.readFile(routeFile, "utf-8");
       expect(content).toBe("original-route-content");
     } finally {
       console.log = origLog;
-      console.error = origError;
-      mockDeployReloadOk = true;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }
@@ -554,7 +529,7 @@ describe("pegas deploy", () => {
     expect(errors.some((e) => e.includes("Scenario is required for deploy"))).toBe(true);
   });
 
-  it("route config uses port-map upstreams and skips host-driver services in the scenario", async () => {
+  it("deploy не генерирует route-файл для сценария", async () => {
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-proj-routes-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-gw-routes-"));
 
@@ -576,15 +551,6 @@ describe("pegas deploy", () => {
     };
     await fs.writeFile(path.join(tmpProj, CONTRACT_FILENAME), JSON.stringify(v3ify(contract), null, 2), "utf-8");
 
-    let successOutput: any = null;
-    const origLog = console.log;
-    console.log = (msg: any) => {
-      try {
-        const parsed = JSON.parse(msg);
-        if (parsed.status === "success") successOutput = parsed;
-      } catch {}
-    };
-
     try {
       await handleDeploy({
         cwd: tmpProj,
@@ -594,12 +560,9 @@ describe("pegas deploy", () => {
         json: true,
         noExit: true,
       });
-      expect(successOutput).not.toBeNull();
-      const upstreams = JSON.stringify(successOutput.routes || []);
-      expect(upstreams).toContain("-production-frontend:3000");
-      expect(upstreams).toContain("-production-backend:8000");
+      const routeFile = path.join(tmpGateway, "conf.d", "route-test.caddy");
+      expect(await fs.access(routeFile).then(() => true).catch(() => false)).toBe(false);
     } finally {
-      console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });
       await fs.rm(tmpGateway, { recursive: true, force: true });
     }

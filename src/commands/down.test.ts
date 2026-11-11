@@ -22,7 +22,12 @@ describe("pegas down", () => {
     // Pre-create project route file in gateway
     const routeFile = getProjectRouteFilePath(tmpGateway, projectName);
     await fs.mkdir(path.dirname(routeFile), { recursive: true });
-    await fs.writeFile(routeFile, "mysite.ru {\n    reverse_proxy app:3000\n}\n", "utf-8");
+    await fs.writeFile(
+      routeFile,
+      "# pegas:project=" + projectName + " | service=app | env=development | driver=docker | owner=deploy\n" +
+        "mysite.ru {\n    reverse_proxy app:3000\n}\n",
+      "utf-8"
+    );
 
     expect(await fs.access(routeFile).then(() => true).catch(() => false)).toBe(true);
 
@@ -100,7 +105,12 @@ describe("pegas down", () => {
 
     const routeFile = getProjectRouteFilePath(tmpGateway, customProjectName);
     await fs.mkdir(path.dirname(routeFile), { recursive: true });
-    await fs.writeFile(routeFile, "custom.local {\n  reverse_proxy :3000\n}\n", "utf-8");
+    await fs.writeFile(
+      routeFile,
+      "# pegas:project=" + customProjectName + " | service=app | env=development | driver=docker | owner=deploy\n" +
+        "custom.local {\n  reverse_proxy :3000\n}\n",
+      "utf-8"
+    );
 
     const logs: string[] = [];
     const origLog = console.log;

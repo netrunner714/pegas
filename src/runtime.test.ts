@@ -68,6 +68,8 @@ describe("runtime compose execution", () => {
     await runRuntimeCompose(contract, projectRoot, "rt-abc123", ["up", "-d"], { ...process.env, PEGAS_ENV: "production" });
     const calls = dockerCalls();
     expect(calls.some((c) => c.startsWith("network inspect") || c.startsWith("network create"))).toBe(true);
+    // project-сеть сценария: канонические alias'ы для приложений (db:5432).
+    expect(calls.some((c) => c.includes("pegas-net-rt-abc123-production"))).toBe(true);
     expect(calls.some((c) => c.startsWith("compose") && c.includes("pegas-rt-production-rt-abc123"))).toBe(true);
   });
 

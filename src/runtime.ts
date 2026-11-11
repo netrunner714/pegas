@@ -2,7 +2,8 @@ import child_process from "node:child_process";
 import { PegasContract } from "./types.js";
 import { createRuntimeCompose } from "./runtime-compose.js";
 import { normalizeEnvironment } from "./contract.js";
-import { ensureDockerNetwork } from "./docker.js";
+import { ensureDockerNetwork, runCommand } from "./docker.js";
+import { projectNetworkName } from "./naming.js";
 
 export interface RuntimeLogOptions {
   service?: string;
@@ -134,6 +135,11 @@ export async function runRuntimeCompose(
     if (!networkReady) {
       throw new Error("Could not create or inspect the shared Docker network 'pegas-network'.");
     }
+    const projectNetwork = projectNetworkName({ runtimeId: projectId, scenario: generated.scenario });
+    const projectNetworkReady = await ensureDockerNetwork(projectNetwork);
+    if (!projectNetworkReady) {
+      throw new Error(`Could not create or inspect project network '${projectNetwork}'.`);
+    }
     // Одноразовая миграция со старой схемы имён: сироты старого compose-проекта
     // снимаются до up, чтобы новый проект занял их место без дублей.
     // Сценарий — из манифеста: при пустом PEGAS_ENV отдельное вычисление
@@ -182,4 +188,26 @@ export async function removeProjectContainers(projectId: string, environment?: s
     encoding: "utf8",
     stdio: ["ignore", "inherit", "inherit"],
   });
+}
+
+/**
+ * Удаляет project-сети выбранного сценария (или все сети этого checkout'а).
+ * Сеть удаляется только если из неё уже вышли все контейнеры; ошибки
+ * игнорируются, чтобы down не падал из-за гонки с Docker.
+ */
+export async function removeProjectNetworks(projectId: string, environment?: string): Promise<string[]> {
+  const prefix = `pegas-net-${projectId}-`;
+  const listed = await runCommand("docker", ["network", "ls", "--format", "{{.Name}}"]);
+  if (!listed.success) return [];
+  const names = listed.stdout
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((name) => name.startsWith(prefix))
+    .filter((name) => environment === undefined || name === `${prefix}${environment}`);
+  const removed: string[] = [];
+  for (const name of names) {
+    const res = await runCommand("docker", ["network", "rm", name]);
+    if (res.success) removed.push(name);
+  }
+  return removed;
 }

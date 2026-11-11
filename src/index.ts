@@ -151,6 +151,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "connect": {
       await dispatch.handleConnect({
         cwd: values.cwd as string | undefined,
+        scenario: (values.scenario as string | undefined) || (values.env as string | undefined),
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,
@@ -162,6 +163,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
     case "disconnect": {
       await dispatch.handleDisconnect({
         cwd: values.cwd as string | undefined,
+        scenario: (values.scenario as string | undefined) || (values.env as string | undefined),
         gatewayDir: values["gateway-dir"] as string | undefined,
         dryRun: values["dry-run"] as boolean | undefined,
         json: values.json as boolean | undefined,

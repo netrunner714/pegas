@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import child_process from "node:child_process";
-import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
+import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir } from "../gateway.js";
 import { CONTRACT_FILENAME, normalizeDomain, getEnvironmentDomains, getProjectRuntimeId, validatePegasContract } from "../contract.js";
 import { PegasContract } from "../types.js";
-import { generateCaddyfileSnippet } from "../generator.js";
 import { parseCaddyProjectFile } from "./status.js";
 import { validateDomains } from "../dns.js";
 import { runRuntimeCompose } from "../runtime.js";
@@ -21,7 +20,6 @@ import {
   waitForSharedPoolReady,
   type SharedInfraDeps,
 } from "../shared-infra.js";
-import { mergeRouteFile, writeRouteFileAtomically, stripOwnerBlocks } from "../route-merge.js";
 
 export interface DeployOptions {
   scenario?: string;
@@ -327,38 +325,6 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
   const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, env);
   const currentProjectFileName = path.basename(projectRouteFile);
 
-  // Canonical name of this project's own route files (for any environment).
-  const ownRouteFilePrefix = `${projectName.toLowerCase().replace(/[^a-z0-9._-]/g, "_")}`;
-
-  // Remove stale route files left by alias environment names of this project
-  // (e.g. `project-dev.caddy` after `pegas deploy development` writes `project-development.caddy`).
-  // They are superseded by the canonical file written below.
-  const aliasEnvironmentRouteFiles: string[] = [];
-  try {
-    const existingFiles = await fs.readdir(confDir);
-    for (const file of existingFiles) {
-      if (!file.endsWith(".caddy") || file === currentProjectFileName) continue;
-      if (!file.startsWith(`${ownRouteFilePrefix}-`) || !file.endsWith(".caddy")) continue;
-      if (file.startsWith(`${ownRouteFilePrefix}-${env}`)) continue;
-      const otherContent = await fs.readFile(path.join(confDir, file), "utf-8");
-      const otherRoutes = parseCaddyProjectFile(otherContent, file);
-      // The project comment carries the authoritative project name.
-      const isOwn = otherRoutes.every((route) => route.projectName === projectName) && otherRoutes.length > 0;
-      if (!isOwn) continue;
-      // Only clean files whose upstreams point at this checkout's scoped aliases.
-      const checkoutPrefix = `${runtimeId}-`;
-      const ownUpstreams = otherRoutes.every((route) => route.upstream.startsWith(checkoutPrefix));
-      if (!ownUpstreams) continue;
-      await fs.unlink(path.join(confDir, file)).catch(() => {});
-      aliasEnvironmentRouteFiles.push(path.join(confDir, file));
-    }
-  } catch (err: any) {
-    if (err.code !== "ENOENT") {}
-  }
-  if (aliasEnvironmentRouteFiles.length > 0 && !isJson) {
-    console.log(`\n🧹 Removed superseded route file(s) of this project (other environments):\n${aliasEnvironmentRouteFiles.map((f) => `   - ${f}`).join("\n")}`);
-  }
-
   try {
     const existingFiles = await fs.readdir(confDir);
     for (const file of existingFiles) {
@@ -540,144 +506,21 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     }
   }
 
-  const snippets: string[] = [];
-  const deployedRoutes: { service: string; domain: string; upstream: string }[] = [];
-
-  // Collect all domains declared in env for this project to configure CORS
-  const allProjectDomains: string[] = [];
-  for (const [_, svc] of Object.entries(contract.services || {})) {
-    const dList = getEnvironmentDomains(svc, env);
-    if (Array.isArray(dList)) {
-      for (const d of dList) {
-        const norm = normalizeDomain(d);
-        if (norm && norm !== "yourdomain.com") {
-          allProjectDomains.push(norm);
-        }
-      }
-    }
-  }
-
-  for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
-    // issue #23: в development маршруты host-сервисов (driver: bun) — зона pegas connect;
-    // deploy не пишет сниппеты на несуществующие контейнеры и не затирает routes connect.
-    if (env === "development" && serviceConfig.runtime?.[env]?.driver === "bun") continue;
-    const envDomains = getEnvironmentDomains(serviceConfig, env);
-    if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
-    // v3: upstream строится из port-карты сценария; services без port валидатор не пропустит
-    const svcPort = serviceConfig.port?.[env];
-    const upstream = `${serviceName}:${svcPort}`;
-    const prefix = `${runtimeId}-${env}`;
-    const scopedUpstream = resolveScopedUpstream(upstream, prefix);
-
-    // v3: cors — сценарная карта (boolean); по умолчанию включён для api-подобных имён
-    const corsScenario = serviceConfig.cors?.[env];
-    const isCorsEnabled =
-      corsScenario !== false &&
-      (Boolean(corsScenario) ||
-        serviceName === "api" ||
-        serviceName.startsWith("api") ||
-        envDomains.some((d) => d.startsWith("api.")));
-
-    for (const domain of envDomains) {
-      const normDomain = normalizeDomain(domain);
-      if (!normDomain || normDomain === "yourdomain.com") continue;
-      snippets.push(generateCaddyfileSnippet({
-        domain: normDomain,
-        upstream: scopedUpstream,
-        cors: isCorsEnabled ? true : false,
-        corsOrigins: allProjectDomains,
-        // issue #30: метаданные маршрута — status определяет сервис/сценарий/драйвер
-        // по ним, а не эвристикой по имени файла и upstream.
-        meta: {
-          project: projectName,
-          service: serviceName,
-          env,
-          driver: "docker",
-          owner: "deploy",
-          ...(typeof svcPort === "number" ? { port: svcPort } : {}),
-        },
-      }));
-      deployedRoutes.push({
-        service: serviceName,
-        domain: normDomain,
-        upstream: scopedUpstream,
-      });
-    }
-  }
-
-  let originalContent: string | null = null;
-  try { originalContent = await fs.readFile(projectRouteFile, "utf-8"); } catch {}
-  // issue #24: merge по доменам. deploy перезаписывает только свои блоки
-  // (scoped-upstream `${runtimeId}-${env}-<service>:<port>`); connect-блоки
-  // (host.docker.internal) и внешние блоки сохраняются дословно.
-  const deployUpstreamPrefix = `${runtimeId}-${env}`;
-  let fileModified = false;
-  if (snippets.length > 0) {
-    const merged = mergeRouteFile(
-      originalContent,
-      [
-        `# Auto-generated by Pegas for project: ${projectName} [${env}]`,
-        `# Do not edit manually; update pegas.json instead.`,
-      ],
-      "deploy",
-      deployUpstreamPrefix,
-      snippets,
-    );
-    if (merged.content !== null) {
-      await writeRouteFileAtomically(projectRouteFile, merged.content);
-      fileModified = true;
-      if (!isJson) {
-        console.log(`\n📄 [2/3] Generated route config: ${projectRouteFile}`);
-        for (const route of deployedRoutes) console.log(`  ✓ Route: https://${route.domain} -> ${route.upstream}`);
-        if (merged.keptOther > 0) {
-          console.log(`  ⚭ Kept ${merged.keptOther} foreign route block(s): owned by pegas connect / external owner (issue #24)`);
-        }
-      }
-    }
-  } else if (originalContent !== null && env !== "development") {
-    // Продакшен-файл без своих маршрутов — легаси-поведение: файл этого сценария удаляется.
-    await fs.unlink(projectRouteFile).catch(() => {});
-    fileModified = true;
-    if (!isJson) console.log(`\n🗑️  [2/3] Removed old project route config: ${projectRouteFile}`);
-  } else if (originalContent !== null) {
-    // issue #23/#24: в development при своих пустых сниппетах deploy не трогает
-    // файл целиком: его блоки мог писать connect (host-сервисы). Свои блоки,
-    // если они есть, снимаются точечно.
-    const stripped = stripOwnerBlocks(originalContent, "deploy", deployUpstreamPrefix);
-    if (stripped.content === null) {
-      await fs.unlink(projectRouteFile).catch(() => {});
-      fileModified = true;
-      if (!isJson) console.log(`\n🗑️  [2/3] Removed own route blocks: ${projectRouteFile}`);
-    } else if (stripped.content !== originalContent) {
-      await writeRouteFileAtomically(projectRouteFile, stripped.content);
-      fileModified = true;
-      if (!isJson) {
-        console.log(`\n🗑️  [2/3] Removed own deploy routes; kept connect/external blocks in ${projectRouteFile}`);
-      }
-    } else if (!isJson) {
-      console.log(`\nℹ️  [2/3] Route config kept: файл принадлежит pegas connect (host-сервисы).`);
-    }
-  } else if (!isJson) console.log(`\nℹ️  [2/3] No active ${env} domains found in 'pegas.json'.`);
-
-  if (fileModified) {
-    if (!isJson) console.log("\n🔄 [3/3] Validating and hot-reloading Caddy gateway...");
-    const reloaded = await reloadGateway({ gatewayDir, json: options.json, silent: isJson, exitOnError: false });
-    if (!reloaded) {
-      if (!isJson) console.error("⚠️  Hot reload failed. Rolling back route configuration...");
-      if (originalContent !== null) await writeRouteFileAtomically(projectRouteFile, originalContent);
-      else await fs.unlink(projectRouteFile).catch(() => {});
-      if (!options.noExit) process.exit(1);
-      return;
-    }
-  }
-
+  // Маршруты — зона pegas connect. Deploy только поднимает docker-сервисы
+  // сценария; файлы conf.d он не пишет и не удаляет.
   if (isJson) {
-    console.log(JSON.stringify({ status: "success", env, project: projectName, routeFile: projectRouteFile, routes: deployedRoutes }));
+    console.log(JSON.stringify({
+      status: "success",
+      env,
+      project: projectName,
+      containers: Object.keys(createRuntimeCompose(contract, { projectRoot, projectId: runtimeId, environment: env }).manifest.services ?? {}),
+      routes: "managed by pegas connect",
+    }));
     return;
   }
-  console.log(`\n🎉 Project '${projectName}' [${env}] successfully deployed to Pegas gateway!\n`);
+  console.log(`\n🎉 Project '${projectName}' [${env}] containers are up.`);
+  console.log(`   Routes are managed by connect: pegas connect -s ${env}\n`);
 }
-
 
 export async function handleDeploy(options: DeployOptions = {}): Promise<void> {
   return withRuntimeLock(() => handleDeployUnlocked(options));

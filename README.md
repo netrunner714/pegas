@@ -53,7 +53,7 @@ flowchart TD
 
 * **Zero Scalars**: каждое поле, зависящее от среды, — строгая карта сценариев (`runtime`, `image`, `port`, `domains` и др.). Корневого `env`, `secrets`, `role`, `deploy` нет.
 * **Сценарии вместо окружений**: `scenarios: ["development", "stage", "production"]` — явный список; сценарий выбирается только флагом `-s` при запуске. Ветвления по средам в коде запрещены.
-* **Единственный деплой-вход**: `pegas deploy -s <scenario>` — сеть, шлюз, контейнеры, маршруты, readiness-пробы.
+* **Разделение команд**: `pegas connect -s <scenario>` объявляет маршруты всех сервисов сценария (host и docker), `pegas deploy -s <scenario>` поднимает только docker-сервисы и не пишет маршруты.
 * **Анти-хайджекинг**: деплой блокируется, если домен уже закреплён за другим проектом.
 * **Zero 502**: шлюз переключает трафик на новый контейнер только после успешных healthcheck-проб.
 * **Zero Dependencies**: чистый TypeScript для Bun/Node 24+, ноль сторонних npm-зависимостей.
@@ -116,18 +116,20 @@ dev-конфигурация Next.js на доменах `*.localhost`).
 
 ```bash
 pegas ca install            # доверенный Root CA (один раз на машину)
-pegas connect               # dev-маршруты *.localhost в шлюзе
-pegas deploy -s development # docker-контейнеры сценария
-bun run dev                 # host-сервисы (driver: "bun") — когда нужно
+pegas connect -s development # объявить маршруты всех сервисов сценария
+pegas deploy -s development  # поднять только docker-сервисы (БД, контейнеры)
+bun run dev                  # host-сервисы (driver: "bun") — когда нужно
 
-`connect` и `deploy` пишут общий файл маршрутов сценария, каждый — только свои
-блоки (правило «владелец маршрута = владелец процесса»): команды можно запускать
-в любом порядке, чужие маршруты не затираются.
+`connect` — единственный владелец route-файлов: он регистрирует и host-, и
+docker-сервисы, не запуская процессы. `deploy` не трогает маршруты. Порты
+внутри project-сети канонические (`db:5432`), поэтому один и тот же порт в
+разных проектах не конфликтует.
 ```
 
 ### 4. Деплой на VPS
 
 ```bash
+pegas connect -s production
 pegas deploy -s production
 ```
 
@@ -139,10 +141,10 @@ pegas deploy -s production
 |---|---|
 | `pegas init` | Сгенерировать/обновить артефакты пегаса в репо (docs/pegas.md, AGENTS-блок, .gitignore) |
 | `pegas check` | Рид-онли аудит: контракт, секреты, git-гигиена, свежесть артефактов |
-| `pegas connect` | Подключить dev-маршруты проекта к шлюзу |
-| `pegas disconnect` | Освободить dev-маршруты |
-| `pegas deploy -s <scenario>` | Поднять сервисы сценария: сеть, контейнеры, маршруты, readiness |
-| `pegas down` | Остановить проект и снять маршруты |
+| `pegas connect -s <scenario>` | Объявить маршруты всех сервисов сценария в шлюзе |
+| `pegas disconnect -s <scenario>` | Снять маршруты сценария |
+| `pegas deploy -s <scenario>` | Поднять docker-сервисы сценария (без маршрутов) |
+| `pegas down -s <scenario>` | Остановить контейнеры; маршруты connect сохраняются |
 | `pegas logs -f [service]` | Логи контейнеров (Ctrl+C только отвязывает вывод) |
 | `pegas status` | Дашборд шлюза: контейнеры, маршруты, домены |
 | `pegas ca <install\|remove>` | Доверенный локальный HTTPS: Root CA |

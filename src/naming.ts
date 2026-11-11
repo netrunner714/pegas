@@ -155,3 +155,15 @@ export function containerName(parts: ContainerNameParts): string {
 export function runtimeVolumeName(parts: { runtimeId: string; scenario: string; volume: string }): string {
   return `${parts.runtimeId}-${parts.scenario}_${parts.volume}`;
 }
+
+/**
+ * Имя project-сети сценария: `pegas-net-<runtimeId>-<scenario>`.
+ *
+ * Сеть даёт сервисам проекта канонические алиасы (`db`, `api`, …), поэтому
+ * приложение может ходить по привычному `db:5432`, даже если на машине
+ * несколько проектов и у всех одинаковый внутренний порт. Общая
+ * `pegas-network` остаётся для шлюза и scoped-алиасов (`pegas://`).
+ */
+export function projectNetworkName(parts: { runtimeId: string; scenario: string }): string {
+  return fitToDnsLabel(["pegas", "net", parts.runtimeId, parts.scenario], [3]);
+}

@@ -63,24 +63,18 @@ const silence = () => {
   };
 };
 
-describe("issue #24: merge маршрутов в общем development-файле", () => {
-  it("connect не сносит docker-блоки, записанные deploy", async () => {
+describe("маршруты: connect объявляет, deploy только поднимает", () => {
+  it("connect регистрирует и host-, и docker-сервисы", async () => {
     const { proj, gw, routeFile } = await setup("mixed-app");
     const restore = silence();
     try {
-      await handleDeploy({ cwd: proj, scenario: "development", gatewayDir: gw, skipUp: true, skipDnsCheck: true, noExit: true, json: true });
-      const afterDeploy = await fs.readFile(routeFile, "utf-8");
-      expect(afterDeploy).toContain("worker.mixed-app.localhost");
-      expect(afterDeploy).toMatch(/-development-worker:3200/);
-
       await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
-
       const content = await fs.readFile(routeFile, "utf-8");
       expect(content).toContain("web.mixed-app.localhost");
       expect(content).toContain("host.docker.internal:3100");
-      // Блок deploy пережил connect:
       expect(content).toContain("worker.mixed-app.localhost");
       expect(content).toMatch(/-development-worker:3200/);
+      expect(content).toContain("owner=connect");
     } finally {
       restore();
       await fs.rm(proj, { recursive: true, force: true });
@@ -88,22 +82,17 @@ describe("issue #24: merge маршрутов в общем development-файл
     }
   });
 
-  it("deploy не сносит connect-блоки (host-маршруты)", async () => {
+  it("deploy не создаёт маршруты и не меняет файл connect", async () => {
     const { proj, gw, routeFile } = await setup("mixed-app");
     const restore = silence();
     try {
-      await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
-      const afterConnect = await fs.readFile(routeFile, "utf-8");
-      expect(afterConnect).toContain("host.docker.internal:3100");
-
       await handleDeploy({ cwd: proj, scenario: "development", gatewayDir: gw, skipUp: true, skipDnsCheck: true, noExit: true, json: true });
+      expect(await fs.access(routeFile).then(() => true, () => false)).toBe(false);
 
-      const content = await fs.readFile(routeFile, "utf-8");
-      expect(content).toContain("worker.mixed-app.localhost");
-      expect(content).toMatch(/-development-worker:3200/);
-      // Блок connect пережил deploy:
-      expect(content).toContain("web.mixed-app.localhost");
-      expect(content).toContain("host.docker.internal:3100");
+      await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
+      const before = await fs.readFile(routeFile, "utf-8");
+      await handleDeploy({ cwd: proj, scenario: "development", gatewayDir: gw, skipUp: true, skipDnsCheck: true, noExit: true, json: true });
+      expect(await fs.readFile(routeFile, "utf-8")).toBe(before);
     } finally {
       restore();
       await fs.rm(proj, { recursive: true, force: true });
@@ -111,14 +100,12 @@ describe("issue #24: merge маршрутов в общем development-файл
     }
   });
 
-  it("повторный connect не дублирует свои блоки", async () => {
+  it("повторный connect не дублирует блоки", async () => {
     const { proj, gw, routeFile } = await setup("mixed-app");
     const restore = silence();
     try {
       await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
-      await handleDeploy({ cwd: proj, scenario: "development", gatewayDir: gw, skipUp: true, skipDnsCheck: true, noExit: true, json: true });
       await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
-
       const content = await fs.readFile(routeFile, "utf-8");
       expect(content.split("web.mixed-app.localhost {").length - 1).toBe(1);
       expect(content.split("worker.mixed-app.localhost {").length - 1).toBe(1);
@@ -129,53 +116,29 @@ describe("issue #24: merge маршрутов в общем development-файл
     }
   });
 
-  it("disconnect снимает только connect-блоки; deploy-блоки остаются", async () => {
-    const { proj, gw, routeFile } = await setup("mixed-app");
-    const restore = silence();
-    try {
-      await handleDeploy({ cwd: proj, scenario: "development", gatewayDir: gw, skipUp: true, skipDnsCheck: true, noExit: true, json: true });
-      await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
-
-      await handleDisconnect({ cwd: proj, gatewayDir: gw, noExit: true, json: true });
-
-      const content = await fs.readFile(routeFile, "utf-8");
-      expect(content).not.toContain("host.docker.internal");
-      expect(content).toContain("worker.mixed-app.localhost");
-      expect(content).toMatch(/-development-worker:3200/);
-    } finally {
-      restore();
-      await fs.rm(proj, { recursive: true, force: true });
-      await fs.rm(gw, { recursive: true, force: true });
-    }
-  });
-
-  it("down снимает только deploy-блоки; connect-блоки остаются", async () => {
-    const { proj, gw, routeFile } = await setup("mixed-app");
-    const restore = silence();
-    try {
-      await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
-      await handleDeploy({ cwd: proj, scenario: "development", gatewayDir: gw, skipUp: true, skipDnsCheck: true, noExit: true, json: true });
-
-      await handleDown({ cwd: proj, gatewayDir: gw, skipComposeDown: true, noExit: true, json: true, env: "development" });
-
-      const content = await fs.readFile(routeFile, "utf-8");
-      expect(content).toContain("web.mixed-app.localhost");
-      expect(content).toContain("host.docker.internal:3100");
-      expect(content).not.toContain("worker.mixed-app.localhost");
-    } finally {
-      restore();
-      await fs.rm(proj, { recursive: true, force: true });
-      await fs.rm(gw, { recursive: true, force: true });
-    }
-  });
-
-  it("disconnect при чистом connect-файле удаляет файл целиком", async () => {
+  it("disconnect снимает маршруты сценария", async () => {
     const { proj, gw, routeFile } = await setup("mixed-app");
     const restore = silence();
     try {
       await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
       await handleDisconnect({ cwd: proj, gatewayDir: gw, noExit: true, json: true });
       expect(await fs.access(routeFile).then(() => true, () => false)).toBe(false);
+    } finally {
+      restore();
+      await fs.rm(proj, { recursive: true, force: true });
+      await fs.rm(gw, { recursive: true, force: true });
+    }
+  });
+
+  it("down не трогает connect-маршруты", async () => {
+    const { proj, gw, routeFile } = await setup("mixed-app");
+    const restore = silence();
+    try {
+      await handleConnect({ cwd: proj, gatewayDir: gw, skipGatewayEnsure: true, skipReload: true, noExit: true, json: true });
+      await handleDown({ cwd: proj, gatewayDir: gw, skipComposeDown: true, noExit: true, json: true, env: "development" });
+      const content = await fs.readFile(routeFile, "utf-8");
+      expect(content).toContain("web.mixed-app.localhost");
+      expect(content).toContain("worker.mixed-app.localhost");
     } finally {
       restore();
       await fs.rm(proj, { recursive: true, force: true });

@@ -6,8 +6,9 @@
 ## Проблема
 
 Pegas публикует локальные сервисы на доменах зоны `.localhost` через общий
-шлюз (Caddy): `pegas connect` и `pegas deploy -s development` строят маршруты из
-поля `services.<name>.domains` сценария `development`.
+шлюз (Caddy): `pegas connect -s development` регистрирует маршруты из поля
+`services.<name>.domains` сценария `development`, а `pegas deploy -s development`
+поднимает docker-сервисы. Host-сервисы запускаются отдельно.
 
 Next.js, начиная с версии 15.3 (и в backport-ветке 14.2.30), по умолчанию
 защищает собственные dev-ресурсы (`/_next/*`, `/__nextjs*`) от обращений с

@@ -61,38 +61,42 @@ pegas upgrade
 pegas upgrade --latest
 ```
 
-### `pegas connect [options]`
+### `pegas connect -s <scenario> [options]`
 
-Пробрасывает сервисы разработки через общий шлюз: host-сервисы через host.docker.internal, маршруты [service].[project].localhost
+Регистрирует все сервисы сценария в общем шлюзе: host-сервисы через host.docker.internal, docker-сервисы — на scoped-алиас; маршруты [service].[project].localhost
 
 Флаги:
 
 ```text
---cwd <path>          Целевой каталог проекта
---dry-run             Показать план изменений без записи на диск
+-s, --scenario <name>  Целевой сценарий из pegas.json (например, development, production, stage)
+--cwd <path>           Целевой каталог проекта
+--dry-run              Показать план изменений без записи на диск
 ```
 
 Примеры:
 
 ```bash
 pegas connect
-pegas connect --dry-run
+pegas connect -s stage
+pegas connect -s production --dry-run
 ```
 
-### `pegas disconnect [options]`
+### `pegas disconnect -s <scenario> [options]`
 
 Удаляет route-файл разработки из шлюза и останавливает шлюз, если он больше никем не используется
 
 Флаги:
 
 ```text
---cwd <path>          Целевой каталог проекта
+-s, --scenario <name>  Целевой сценарий из pegas.json (например, development, production, stage)
+--cwd <path>           Целевой каталог проекта
 ```
 
 Примеры:
 
 ```bash
 pegas disconnect
+pegas disconnect -s stage
 ```
 
 ### `pegas logs [env] [service] [options]`
@@ -130,7 +134,7 @@ pegas logs -n 50
 --cwd <path>           Целевой каталог проекта
 --skip-dns-check       Skip DNS pre-flight verification
 --strict-dns           Abort deployment if DNS does not resolve to this host
---skip-up              Configure routes without bringing up containers
+--skip-up              Do not start containers; validate the scenario only
 --dry-run              Показать план изменений без записи на диск
 ```
 

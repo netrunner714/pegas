@@ -31,12 +31,12 @@
 - `npx @netrunner714/pegas init [options]` (--force, --dry-run, --cwd) — Scaffold Pegas files: AGENTS.md marker block, docs/pegas.md, .pegas/, .gitignore entries (pegas.json is NOT created).
 - `npx @netrunner714/pegas update [options]` (--latest, --cwd) — Update local @netrunner714/pegas dependency in the current project.
 - `npx pegas upgrade [options]` (--latest) — Upgrade the global pegas installation on this machine (bun add -g / npm install -g).
-- `npx pegas connect` (--cwd, --dry-run) — Expose development services via shared gateway (routes host services through host.docker.internal).
-- `npx pegas disconnect` (--cwd) — Remove development route file from the gateway and stop the gateway if unused.
+- `npx pegas connect` (-s, --cwd, --dry-run) — Register all services of a scenario in the shared gateway (host and docker drivers).
+- `npx pegas disconnect` (-s, --cwd) — Remove the route file of a scenario and stop the gateway if unused.
 - `npx pegas logs -f` (-e, -f, -n, --cwd) — Stream or view container logs for development, stage, and production environments.
 - `npx pegas logs production` (-e, -f, -n, --cwd) — Stream or view container logs for development, stage, and production environments.
 - `npx pegas logs api -f` (-e, -f, -n, --cwd) — Stream or view container logs for development, stage, and production environments.
-- `npx pegas deploy -s <scenario> [options]` (-s, --cwd, --skip-dns-check, --strict-dns, --skip-up, --dry-run) — Deploy a scenario from pegas.json: network, shared Gateway, containers, routes.
+- `npx pegas deploy -s <scenario> [options]` (-s, --cwd, --skip-dns-check, --strict-dns, --skip-up, --dry-run) — Start docker services of a scenario: network, shared Gateway, containers (routes are declared by connect).
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).

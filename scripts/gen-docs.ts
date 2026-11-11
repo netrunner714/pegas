@@ -27,7 +27,7 @@ const LLMS_PATH = path.join(REPO_ROOT, "llms.txt");
 const RU_COMMANDS: Record<string, string> = {
   init: "Скаффолдер Pegas: маркерный блок AGENTS.md, docs/pegas.md, .pegas/ и записи .gitignore. Контракт pegas.json НЕ создаётся — его пишут руками рядом с проектом",
   update: "Обновляет @netrunner714/pegas до актуальной версии (без --latest — только внутри мажора)",
-  connect: "Пробрасывает сервисы разработки через общий шлюз: host-сервисы через host.docker.internal, маршруты [service].[project].localhost",
+  connect: "Регистрирует все сервисы сценария в общем шлюзе: host-сервисы через host.docker.internal, docker-сервисы — на scoped-алиас; маршруты [service].[project].localhost",
   disconnect: "Удаляет route-файл разработки из шлюза и останавливает шлюз, если он больше никем не используется",
   logs: "Просмотр и стриминг логов контейнеров любого сценария (development, stage, production)",
   deploy: "Разворачивает проект по сценарию из pegas.json: сеть, общий Gateway, контейнеры, маршруты",

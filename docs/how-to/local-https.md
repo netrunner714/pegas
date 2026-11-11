@@ -93,10 +93,10 @@ flowchart TD
 ### Как это работает:
 1. `pegas connect` считывает маршруты сценария `development` из файла `pegas.json`.
 2. Если общий Gateway ещё не запущен, Pegas поднимает его в Docker.
-3. Маршруты текущего проекта транслируются на `host.docker.internal:<порт>` и динамически регистрируются в Gateway через Caddy Admin API.
-4. Разработчик запускает dev-сервер любимым нативным инструментом (`bun run dev`, `npm run dev`, `cargo run` и т.д.).
+3. `connect` регистрирует маршруты всех сервисов сценария: host-сервисы — на `host.docker.internal:<порт>`, docker-сервисы — на scoped-алиас в `pegas-network`. Контейнеры он не запускает.
+4. Docker-сервисы сценария поднимает `pegas deploy -s development`; разработчик запускает host-сервисы любимым нативным инструментом (`bun run dev`, `npm run dev`, `cargo run` и т.д.).
 5. Браузер открывает `https://web.my-app.localhost` с валидным сертификатом без указания портов.
-6. `pegas disconnect` удаляет маршруты проекта из Gateway при завершении работы.
+6. `pegas disconnect -s development` удаляет маршруты сценария из Gateway при завершении работы; `down` останавливает контейнеры, но маршруты не снимает.
 
 ---
 

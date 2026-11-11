@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { PegasContract, ScenarioMap, ServiceDriver } from "./types.js";
 import { validatePegasContract, getEnvironmentDomains, getProjectRuntimeId } from "./contract.js";
-import { composeProjectName, containerName, runtimeVolumeName } from "./naming.js";
+import { composeProjectName, containerName, projectNetworkName, runtimeVolumeName } from "./naming.js";
 import { classifySharedImage, sharedPoolName } from "./shared-infra.js";
 
 /**
@@ -293,6 +293,9 @@ export function createRuntimeCompose(
         "pegas-network": {
           aliases: [`${options.projectId}-${scenario}-${serviceName}`],
         },
+        "project-network": {
+          aliases: [serviceName],
+        },
       },
     };
 
@@ -393,6 +396,12 @@ export function createRuntimeCompose(
     services,
     networks: {
       "pegas-network": { external: true, name: "pegas-network" },
+      // Канонические имена сервисов внутри проекта (`db:5432`), независимо от
+      // того, сколько проектов и сценариев живёт на машине.
+      "project-network": {
+        external: true,
+        name: projectNetworkName({ runtimeId: options.projectId, scenario }),
+      },
     },
     // issue #27: имена томов закреплены явно. Без `name:` compose префиксует их
     // именем проекта, и переименование проекта осиротило бы существующие тома

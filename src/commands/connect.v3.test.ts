@@ -77,7 +77,7 @@ describe("pegas connect v3", () => {
     expect(out.join("\n")).toContain("Домены требуют port");
   });
 
-  it("issue #23: docker-сервис с dev-доменами не маршрутизируется — connect пишет только bun", async () => {
+  it("docker-сервис с dev-доменами маршрутизируется на scoped-алиас, а не на host", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-connect-driver-"));
     const mixed = JSON.parse(JSON.stringify(contract)) as any;
     // redis становится docker-сервисом С доменами — раньше connect направил бы его на host.
@@ -90,10 +90,12 @@ describe("pegas connect v3", () => {
     const content = await fs.readFile(routePath, "utf-8");
     expect(content).toContain("web.smoke-app.localhost");
     expect(content).toContain("host.docker.internal:3000");
-    expect(content).not.toContain("redis.smoke-app.localhost");
+    expect(content).toContain("redis.smoke-app.localhost");
+    expect(content).toContain("-development-redis:6379");
+    expect(content).not.toContain("host.docker.internal:6379");
   });
 
-  it("issue #23: connect без единого bun-сервиса с доменами — файл маршрутов не пишется, выводится предупреждение", async () => {
+  it("connect без bun-сервисов всё равно регистрирует docker-домены", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-connect-nobun-"));
     const dockerOnly = {
       ...JSON.parse(JSON.stringify(contract)),
@@ -121,8 +123,10 @@ describe("pegas connect v3", () => {
       console.error = origErr;
     }
     const routePath = path.join(gwDir, "conf.d", "smoke-app-development.caddy");
-    expect(await fs.access(routePath).then(() => true, () => false)).toBe(false);
-    expect(out.join("\n")).toContain("регистрировать нечего");
+    expect(await fs.access(routePath).then(() => true, () => false)).toBe(true);
+    const content = await fs.readFile(routePath, "utf-8");
+    expect(content).toContain("web.smoke-app.localhost");
+    expect(out.join("\n")).not.toContain("регистрировать нечего");
   });
 
   it("json-режим: urls для каждого dev-домена", async () => {

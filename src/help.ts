@@ -108,9 +108,16 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "connect",
-    summary: "Expose development services via shared gateway (routes host services through host.docker.internal)",
-    usage: "connect [options]",
+    summary: "Register all services of a scenario in the shared gateway (host and docker drivers)",
+    usage: "connect -s <scenario> [options]",
     options: [
+      {
+        name: "scenario",
+        type: "string",
+        short: "s",
+        placeholder: "<name>",
+        description: "Target scenario from pegas.json (default: development)",
+      },
       {
         name: "cwd",
         type: "string",
@@ -124,13 +131,20 @@ export const COMMANDS: CliCommandDef[] = [
         description: "Print the route file without writing to disk",
       },
     ],
-    examples: ["$ pegas connect", "$ pegas connect --dry-run"],
+    examples: ["$ pegas connect", "$ pegas connect -s stage", "$ pegas connect -s production --dry-run"],
   },
   {
     name: "disconnect",
-    summary: "Remove development route file from the gateway and stop the gateway if unused",
-    usage: "disconnect [options]",
+    summary: "Remove the route file of a scenario and stop the gateway if unused",
+    usage: "disconnect -s <scenario> [options]",
     options: [
+      {
+        name: "scenario",
+        type: "string",
+        short: "s",
+        placeholder: "<name>",
+        description: "Target scenario from pegas.json (default: development)",
+      },
       {
         name: "cwd",
         type: "string",
@@ -138,7 +152,7 @@ export const COMMANDS: CliCommandDef[] = [
         description: "Target project directory",
       },
     ],
-    examples: ["$ pegas disconnect"],
+    examples: ["$ pegas disconnect", "$ pegas disconnect -s stage"],
   },
   {
     name: "logs",
@@ -184,7 +198,7 @@ export const COMMANDS: CliCommandDef[] = [
   },
   {
     name: "deploy",
-    summary: "Deploy a scenario from pegas.json: network, shared Gateway, containers, routes",
+    summary: "Start docker services of a scenario: network, shared Gateway, containers (routes are declared by connect)",
     usage: "deploy -s <scenario> [options]",
     options: [
       {
@@ -216,7 +230,7 @@ export const COMMANDS: CliCommandDef[] = [
         name: "skip-up",
         type: "boolean",
         default: false,
-        description: "Configure routes without bringing up containers",
+        description: "Do not start containers; validate the scenario only",
       },
       {
         name: "dry-run",

@@ -1,16 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, reloadGateway } from "../gateway.js";
+import fsPromises from "node:fs/promises";
+import { findProjectRoot, findGatewayDir, getProjectRouteFilePath, getConfDir, reloadGateway } from "../gateway.js";
 import {
   CONTRACT_FILENAME,
   validatePegasContract,
   getEnvironmentDomains,
+  getProjectRuntimeId,
   normalizeDomain,
 } from "../contract.js";
 import { ensureGatewayContainer } from "../docker.js";
 import { generateCaddyfileSnippet } from "../generator.js";
 import { mergeRouteFile, writeRouteFileAtomically } from "../route-merge.js";
 import { buildSdkContext } from "../runtime-compose.js";
+import { classifySharedImage, sharedPoolName } from "../shared-infra.js";
+import { parseCaddyProjectFile } from "./status.js";
 import { isCaTrusted, getCaPaths, readGatewayRootCert } from "../ca.js";
 import crypto from "node:crypto";
 
@@ -27,6 +31,7 @@ import { PegasContract } from "../types.js";
 
 export interface ConnectOptions {
   cwd?: string;
+  scenario?: string;
   gatewayDir?: string;
   json?: boolean;
   dryRun?: boolean;
@@ -79,6 +84,16 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
   }
 
   const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const scenario = options.scenario || "development";
+  const scenarioNames = (contract as any).scenarios;
+  if (Array.isArray(scenarioNames) && !scenarioNames.includes(scenario)) {
+    const msg = `Scenario "${scenario}" is not declared in ${CONTRACT_FILENAME}. Available: ${scenarioNames.join(", ")}.`;
+    if (isJson) console.log(JSON.stringify({ error: msg }));
+    else console.error(`❌ Error: ${msg}`);
+    if (!options.noExit) process.exit(1);
+    return;
+  }
+  const runtimeId = getProjectRuntimeId(projectRoot, projectName);
   const gatewayDir = await findGatewayDir(options.gatewayDir);
 
   // 1. Ensure Caddy Gateway is running (starts Caddy if not already running — first project)
@@ -101,7 +116,7 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
   // Collect all domains declared in development for this project to configure CORS
   const allProjectDomains: string[] = [];
   for (const [_, svc] of Object.entries(contract.services || {})) {
-    const dList = getEnvironmentDomains(svc, "development");
+    const dList = getEnvironmentDomains(svc, scenario);
     if (Array.isArray(dList)) {
       for (const d of dList) {
         const norm = normalizeDomain(d);
@@ -113,25 +128,33 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
   }
 
   for (const [serviceName, serviceConfig] of Object.entries(contract.services || {})) {
-    // issue #23: владелец маршрута = владелец процесса. connect пишет маршруты только
-    // для host-сервисов (driver: bun) — домены docker-сервисов принадлежат deploy.
-    if ((serviceConfig.runtime?.["development"]?.driver ?? "docker") !== "bun") continue;
-    const envDomains = getEnvironmentDomains(serviceConfig, "development");
+    // connect — это объявление проекта в сети, а не запуск процессов.
+    // Регистрируем все сервисы сценария: host-сервисы идут на host.docker.internal,
+    // docker-сервисы — на scoped-алиас, который создаст deploy.
+    const driver = serviceConfig.runtime?.[scenario]?.driver ?? "docker";
+    const envDomains = getEnvironmentDomains(serviceConfig, scenario);
     if (!Array.isArray(envDomains) || envDomains.length === 0) continue;
 
     // v3: порт — сценарная карта; дефолтов нет (Zero Scalars), domains без port ловит check
-    const servicePort = serviceConfig.port?.["development"];
+    const servicePort = serviceConfig.port?.[scenario];
     if (!servicePort) {
-      const msg = `services.${serviceName}: domains требуют port.development (см. pegas check)`;
+      const msg = `services.${serviceName}: domains требуют port.${scenario} (см. pegas check)`;
       if (isJson) console.log(JSON.stringify({ error: msg }));
       else console.error(`❌ Error: ${msg}`);
       if (!options.noExit) process.exit(1);
       return;
     }
-    const upstream = `host.docker.internal:${servicePort}`;
+    const sharedProfile = serviceConfig.scope?.[scenario] === "shared"
+      ? classifySharedImage(serviceConfig.image?.[scenario])
+      : null;
+    const upstream = driver === "bun"
+      ? `host.docker.internal:${servicePort}`
+      : sharedProfile
+        ? `${sharedPoolName(sharedProfile, scenario)}:${servicePort}`
+        : `${runtimeId}-${scenario}-${serviceName}:${servicePort}`;
 
     // v3: cors — сценарная карта boolean
-    const corsDev = serviceConfig.cors?.["development"];
+    const corsDev = serviceConfig.cors?.[scenario];
     const isCorsEnabled =
       corsDev !== false &&
       (Boolean(corsDev) ||
@@ -150,13 +173,13 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
           upstream,
           cors: isCorsEnabled ? true : false,
           corsOrigins: allProjectDomains,
-          // issue #30: метаданные маршрута. connect владеет только host-сервисами,
-          // поэтому driver всегда "bun", а owner — "connect".
+          // issue #30: метаданные маршрута. Владелец — connect для всех драйверов:
+          // connect объявляет маршрут, deploy только запускает контейнер.
           meta: {
             project: projectName,
             service: serviceName,
-            env: "development",
-            driver: "bun",
+            env: scenario,
+            driver,
             owner: "connect",
             port: servicePort,
           },
@@ -165,25 +188,49 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
       registeredUrls.push({
         service: serviceName,
         url: `https://${normDomain}`,
-        upstream: `127.0.0.1:${servicePort}`,
+        upstream: driver === "bun" ? `127.0.0.1:${servicePort}` : upstream,
       });
     }
   }
 
-  // issue #23: connect без единого bun-сервиса в development — «регистрировать нечего».
-  // Предупреждение, не ошибка: connect продолжает писать .pegas/context.json и проверять TLS.
-  if (snippets.length === 0) {
-    const anyDevDomains = Object.values(contract.services || {}).some((svc) => {
-      const d = getEnvironmentDomains(svc, "development");
-      return Array.isArray(d) && d.length > 0;
-    });
-    if (anyDevDomains) {
-      if (isJson) console.log(JSON.stringify({ warning: "No host-driver (bun) services with development domains — routes belong to pegas deploy (docker driver). Nothing to connect." }));
-      else console.log(`   \x1b[33m⚠ В development нет host-сервисов (driver: bun) с доменами: маршруты этих доменов пишет 'pegas deploy' — connect регистрировать нечего.\x1b[0m`);
+  // Анти-хайджекинг: connect объявляет домен раньше deploy, поэтому проверяем
+  // владельцев в остальных route-файлах до записи.
+  {
+    const confDir = getConfDir(gatewayDir);
+    const currentFile = path.basename(getProjectRouteFilePath(gatewayDir, projectName, scenario));
+    const declared = new Set(allProjectDomains);
+    try {
+      for (const file of await fsPromises.readdir(confDir)) {
+        if (!file.endsWith(".caddy") || file === currentFile) continue;
+        const content = await fsPromises.readFile(path.join(confDir, file), "utf-8");
+        for (const route of parseCaddyProjectFile(content, file)) {
+          if (route.projectName === projectName) continue;
+          const conflict = route.domains.find((d) => declared.has(d));
+          if (!conflict) continue;
+          const msg = `Domain '${conflict}' is already owned by project '${route.projectName}' (in ${file}).`;
+          if (isJson) console.log(JSON.stringify({ error: "Domain collision", domain: conflict, ownerProject: route.projectName, ownerFile: file }));
+          else console.error(`\n❌ Error: ${msg}\n   Connect aborted to prevent route hijacking.`);
+          if (!options.noExit) process.exit(1);
+          return;
+        }
+      }
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") throw err;
     }
   }
 
-  const routeFilePath = getProjectRouteFilePath(gatewayDir, projectName, "development");
+  if (snippets.length === 0) {
+    const anyDomains = Object.values(contract.services || {}).some((svc) => {
+      const d = getEnvironmentDomains(svc, scenario);
+      return Array.isArray(d) && d.length > 0;
+    });
+    if (anyDomains) {
+      if (isJson) console.log(JSON.stringify({ warning: `No services with ${scenario} domains — nothing to connect.` }));
+      else console.log(`   \x1b[33m⚠ В сценарии ${scenario} нет сервисов с доменами — регистрировать нечего.\x1b[0m`);
+    }
+  }
+
+  const routeFilePath = getProjectRouteFilePath(gatewayDir, projectName, scenario);
 
   // issue #24: merge по доменам. connect перезаписывает только свои блоки
   // (upstream host.docker.internal); deploy-блоки (scoped-upstream) и внешние
@@ -193,12 +240,11 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
     const merged = mergeRouteFile(
       existingContent,
       [
-        `# Auto-generated by Pegas for project: ${projectName} [development]`,
-        `# Proxies to native dev servers on the host via host.docker.internal`,
+        `# Auto-generated by Pegas for project: ${projectName} [${scenario}]`,
+        `# Routes are declared by pegas connect; deploy only starts containers.`,
       ],
       "connect",
-      "", // scoped-префикс deploy connect'у не нужен: любые чужие блоки
-          // (deploy/внешние) классифицируются как «unknown» и сохраняются дословно.
+      `${runtimeId}-${scenario}`,
       snippets,
     );
     if (merged.content !== null) {
@@ -215,11 +261,11 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
   let contextFile: string | null = null;
   {
     const hostServices = Object.entries(contract.services || {})
-      .filter(([_, svc]) => (svc.runtime?.["development"]?.driver ?? "docker") === "bun")
+      .filter(([_, svc]) => (svc.runtime?.[scenario]?.driver ?? "docker") === "bun")
       .map(([name]) => name);
     const contextService = hostServices[0] || Object.keys(contract.services || {})[0];
     if (contextService) {
-      const ctxJson = buildSdkContext(contract, "development", projectName, contextService);
+      const ctxJson = buildSdkContext(contract, scenario, runtimeId, contextService);
       contextFile = path.join(projectRoot, ".pegas", "context.json");
       if (!options.dryRun) {
         await fs.mkdir(path.dirname(contextFile), { recursive: true });
@@ -255,6 +301,7 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
       JSON.stringify({
         status: "connected",
         project: projectName,
+        scenario,
         routeFile: routeFilePath,
         contextFile: contextFile,
         tlsTrusted: tlsTrusted,

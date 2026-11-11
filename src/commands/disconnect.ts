@@ -8,6 +8,7 @@ import { stripOwnerBlocks, writeRouteFileAtomically } from "../route-merge.js";
 
 export interface DisconnectOptions {
   cwd?: string;
+  scenario?: string;
   gatewayDir?: string;
   json?: boolean;
   dryRun?: boolean;
@@ -28,10 +29,11 @@ export async function handleDisconnect(options: DisconnectOptions = {}): Promise
     if (contract.projectName) projectName = contract.projectName;
   } catch {}
 
+  const scenario = options.scenario || "development";
   const gatewayDir = await findGatewayDir(options.gatewayDir);
-  const routeFilePath = getProjectRouteFilePath(gatewayDir, projectName, "development");
+  const routeFilePath = getProjectRouteFilePath(gatewayDir, projectName, scenario);
   const runtimeId = getProjectRuntimeId(projectRoot, projectName);
-  const deployUpstreamPrefix = `${runtimeId}-development`;
+  const deployUpstreamPrefix = `${runtimeId}-${scenario}`;
 
   let removed = false;
   let removedDomains: string[] = [];
@@ -60,8 +62,8 @@ export async function handleDisconnect(options: DisconnectOptions = {}): Promise
     removedDomains = stripped.removedDomains;
   }
 
-  // Host-контекст SDK больше не актуален: сессия завершена.
-  if (!options.dryRun) {
+  // Host-контекст SDK актуален только для development (host-запуски).
+  if (!options.dryRun && scenario === "development") {
     try {
       const ctxPath = path.join(projectRoot, ".pegas", "context.json");
       await fs.access(ctxPath);
@@ -86,6 +88,7 @@ export async function handleDisconnect(options: DisconnectOptions = {}): Promise
       JSON.stringify({
         status: "disconnected",
         project: projectName,
+        scenario,
         removedRouteFile: removed ? routeFilePath : null,
         removedDomains,
         keptRouteFile,

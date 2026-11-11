@@ -3,7 +3,7 @@ import path from "node:path";
 import { findProjectRoot, findGatewayDir, getConfDir, reloadGateway } from "../gateway.js";
 import { CONTRACT_FILENAME } from "../contract.js";
 import { getProjectRuntimeId } from "../contract.js";
-import { removeProjectContainers } from "../runtime.js";
+import { removeProjectContainers, removeProjectNetworks } from "../runtime.js";
 import { runCommand, stopGatewayIfUnused } from "../docker.js";
 import { PegasContract } from "../types.js";
 import { withRuntimeLock } from "../runtime-lock.js";
@@ -89,7 +89,10 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       if (!isOwnRouteFile || !isRequestedEnvironmentFile) continue;
       const fullPath = path.join(confDir, f);
       const content = await fs.readFile(fullPath, "utf-8");
-      if (runtimeId && f === `${sanitizedProject}-development.caddy`) {
+      if (runtimeId) {
+        // down останавливает контейнеры, но не отменяет объявление connect:
+        // снимаем только deploy-блоки (легаси). Connect-маршруты остаются,
+        // пока пользователь явно не выполнит `pegas disconnect -s`.
         const stripped = stripOwnerBlocks(content, "deploy", deployUpstreamPrefix);
         if (stripped.content === null) {
           previousRouteFiles.set(fullPath, content);
@@ -101,7 +104,6 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
           removedFiles.push(fullPath);
           keptFiles.push(fullPath);
         } else {
-          // deploy-блоков в файле нет — это чистый connect-файл, down его не трогает.
           keptFiles.push(fullPath);
         }
       } else {
@@ -172,6 +174,7 @@ async function handleDownUnlocked(options: DownOptions = {}): Promise<void> {
       {
         runtimeId ||= getProjectRuntimeId(projectRoot, projectName);
         await removeProjectContainers(runtimeId, requestedEnvironment);
+        await removeProjectNetworks(runtimeId, requestedEnvironment);
         // issue #29: освобождаем аренды проекта в разделяемых пулах и
         // останавливаем опустевшие инстансы. Данные арендаторов не удаляются:
         // том пула сохраняется, из реестра уходит только ссылка на проект.

@@ -84,6 +84,11 @@ function bodyReverseProxy(body: string): string | null {
  * - прочее (внешние/легаси-маршруты, редиректы) → unknown, сохраняется как есть.
  */
 export function detectRouteOwner(block: RouteBlock, deployUpstreamPrefix: string): RouteOwner {
+  // Метаданные — источник истины: connect теперь пишет и docker-маршруты
+  // (scoped-upstream), поэтому эвристика по upstream больше не различает владельца.
+  if (block.meta?.owner === "connect" || block.meta?.owner === "deploy") {
+    return block.meta.owner;
+  }
   const host = block.upstream?.split(":")[0] || "";
   if (host === "host.docker.internal") return "connect";
   if (deployUpstreamPrefix && host.startsWith(`${deployUpstreamPrefix}-`)) return "deploy";
@@ -122,11 +127,29 @@ export function mergeRouteFile(
   const removedDomains: string[] = [];
   const otherBlocks: RouteBlock[] = [];
 
+  // Домены, которые команда объявляет в этом вызове. Блок с тем же доменом
+  // заменяется независимо от прежнего владельца: после перехода на модель
+  // «connect владеет всеми маршрутами» старые deploy-блоки не должны дублироваться.
+  const ownDomains = new Set<string>();
+  for (const snippet of ownSnippets) {
+    const header = snippet.match(/^(?!#)([^\n{]+)\{/m)?.[1];
+    if (!header) continue;
+    for (const d of header.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)) {
+      ownDomains.add(d);
+    }
+  }
+
   if (existingContent) {
     for (const block of splitRouteBlocks(existingContent)) {
       const blockOwner = detectRouteOwner(block, deployUpstreamPrefix);
       if (blockOwner === owner) {
         // Свои старые блоки уйдут: на их место встают fresh-сниппеты.
+        continue;
+      }
+      if (block.domains.some((d) => ownDomains.has(d))) {
+        // Домен перерегистрируется этой командой — старый блок (в т.ч. deploy)
+        // заменяется, иначе Caddy получил бы два одинаковых site-блока.
+        removedDomains.push(...block.domains);
         continue;
       }
       if (blockOwner === "unknown") {
