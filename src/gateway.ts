@@ -51,8 +51,13 @@ export async function findGatewayDir(explicitDir?: string): Promise<string> {
   } catch {}
 
   // Единый корень всего, чем владеет Pegas на машине.
-  // Отсутствие каталога — не ошибка: он создаётся автоматически при первом deploy.
-  return path.join(os.homedir(), ".pegas", "gateway");
+  // PEGAS_HOME позволяет вынести состояние из домашнего каталога пользователя
+  // (например, /var/lib/pegas для systemd-службы). Отсутствие каталога —
+  // не ошибка: он создаётся автоматически при первом deploy.
+  const pegasHome = process.env.PEGAS_HOME
+    ? path.resolve(process.env.PEGAS_HOME)
+    : path.join(os.homedir(), ".pegas");
+  return path.join(pegasHome, "gateway");
 }
 
 export function getConfDir(gatewayDir: string): string {

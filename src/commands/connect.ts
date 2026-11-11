@@ -277,11 +277,15 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
     }
   }
 
-  // TLS-готовность: серты шлюза подписаны CA из docker-volume PKI. Если системный
-  // стор не доверяет этому CA — браузер покажет красный замок. Проверяем и предупреждаем
-  // ДО того, как пользователь столкнётся (после пересоздания volume CA меняется).
+  // TLS-готовность localhost. Для публичных доменов Caddy сам берёт Let's Encrypt:
+  // локальный CA и его установка в системный стор не нужны. Проверяем только
+  // сценарии с *.localhost, иначе прод получал бы ложное "CA not trusted".
+  const needsLocalCa = registeredUrls.some((r) => {
+    const host = new URL(r.url).hostname;
+    return host === "localhost" || host.endsWith(".localhost");
+  });
   let tlsTrusted: boolean | null = null;
-  if (!options.dryRun) {
+  if (!options.dryRun && needsLocalCa) {
     const paths = getCaPaths();
     const gatewayRoot = await readGatewayRootCert();
     if (gatewayRoot !== null) {

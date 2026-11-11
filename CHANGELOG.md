@@ -5,6 +5,16 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [4.0.4] — 2026-11-11
+
+### Added
+
+- **`PEGAS_HOME`** — системный корень состояния (`/var/lib/pegas`), не привязанный к домашнему каталогу пользователя. Влияет на gateway (`<PEGAS_HOME>/gateway`) и CA/Caddy (`<PEGAS_HOME>/ca`, `<PEGAS_HOME>/caddy`). Без переменной поведение прежнее: `~/.pegas`.
+
+### Fixed
+
+- **Публичные домены больше не требуют локального CA.** `connect` и `status` проверяют доверие CA только при наличии `*.localhost`; для production/stage Caddy сам получает Let's Encrypt, `pegas ca install` не нужен.
+
 ## [4.0.3] — 2026-11-11
 
 ### Fixed

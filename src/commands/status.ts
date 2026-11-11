@@ -950,19 +950,26 @@ export async function handleStatus(options: StatusOptions = {}): Promise<void> {
   console.log(`  Docker Network:     ${networkOk ? "✓ 'pegas-network' exists" : "✗ 'pegas-network' missing"}`);
   console.log(`  Caddy Container:    ${isRunning ? "✓ Running" : "✗ Stopped or not found"}`);
   console.log(`  Gateway Location:   ${gatewayDir}`);
-  // TLS-доверие: CA шлюза (PKI в volume) vs системный стор. Индикатор раннего
-  // предупреждения о красном замке (расхождение возникает при пересоздании volume).
-  let tlsLine = "  Local CA Trust:     ⚠ unknown (gateway PKI not reachable)";
-  try {
-    const { readGatewayRootCert, isCaTrusted } = await import("../ca.js");
-    const gwRoot = await readGatewayRootCert();
-    if (gwRoot !== null) {
-      const trusted = await isCaTrusted(process.platform, undefined, { gatewayRoot: gwRoot });
-      tlsLine = trusted
-        ? "  Local CA Trust:     ✓ trusted (https — зелёный замок)"
-        : "  Local CA Trust:     ✗ NOT trusted — браузер покажет красный замок; лечение: pegas ca install";
-    }
-  } catch {}
+  // Локальный CA нужен только для *.localhost. Публичные домены обслуживает
+  // Let's Encrypt через Caddy — на проде ручной ca install не требуется.
+  const hasLocalRoutes = routes.some((r) =>
+    r.domains.some((d) => d === "localhost" || d.endsWith(".localhost"))
+  );
+  let tlsLine = hasLocalRoutes
+    ? "  Local CA Trust:     ⚠ unknown (gateway PKI not reachable)"
+    : "  Local CA Trust:     — public ACME (Let's Encrypt)";
+  if (hasLocalRoutes) {
+    try {
+      const { readGatewayRootCert, isCaTrusted } = await import("../ca.js");
+      const gwRoot = await readGatewayRootCert();
+      if (gwRoot !== null) {
+        const trusted = await isCaTrusted(process.platform, undefined, { gatewayRoot: gwRoot });
+        tlsLine = trusted
+          ? "  Local CA Trust:     ✓ trusted (https — зелёный замок)"
+          : "  Local CA Trust:     ✗ NOT trusted — браузер покажет красный замок; лечение: pegas ca install";
+      }
+    } catch {}
+  }
   console.log(tlsLine);
   console.log(`  Active Routes:      ${routes.length} domain(s)\n`);
 

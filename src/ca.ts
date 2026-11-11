@@ -48,7 +48,11 @@ export interface CaPaths {
 }
 
 export function getCaPaths(home: string = os.homedir()): CaPaths {
-  const pegasHome = path.join(home, PEGAS_CA_DIRNAME);
+  // PEGAS_HOME — системный корень (например /var/lib/pegas) для службы,
+  // не привязанный к пользователю. Без него — прежний ~/.pegas.
+  const pegasHome = process.env.PEGAS_HOME
+    ? path.resolve(process.env.PEGAS_HOME)
+    : path.join(home, PEGAS_CA_DIRNAME);
   const caDir = path.join(pegasHome, "ca");
   const caddyHome = path.join(pegasHome, "caddy");
   return {
