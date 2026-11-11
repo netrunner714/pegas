@@ -171,6 +171,9 @@ export async function handleConnect(options: ConnectOptions = {}): Promise<void>
         generateCaddyfileSnippet({
           domain: normDomain,
           upstream,
+          // Если www уже объявлен отдельным доменом, не генерируем второй
+          // www-блок с redir: иначе Caddy падает на ambiguous site definition.
+          noWww: envDomains.some((d) => normalizeDomain(d) === `www.${normDomain}`),
           cors: isCorsEnabled ? true : false,
           corsOrigins: allProjectDomains,
           // issue #30: метаданные маршрута. Владелец — connect для всех драйверов:

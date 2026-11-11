@@ -5,6 +5,12 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [4.0.3] — 2026-11-11
+
+### Fixed
+
+- **Дублирующийся `www`-блок.** Если `www.<domain>` уже объявлен в контракте отдельным доменом, `connect` больше не добавляет автоматический `www`-редирект. Два `site`-блока на одно имя роняли Caddy с `ambiguous site definition`.
+
 ## [4.0.2] — 2026-11-11
 
 ### Changed
