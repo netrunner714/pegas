@@ -819,21 +819,18 @@ export async function handleStatus(options: StatusOptions = {}): Promise<void> {
       const probePort = row.port ?? (Number(row.target.split(":")[1]) || undefined);
       if (row.driver === "bun" && probePort && !options.skipProbes) {
         const listening = await probeTcpPort(probePort);
-        row.state = listening ? "listening" : "offline";
-        row.health = listening ? "🟢 Listening" : "🔴 Offline";
-        if (!listening) {
-          row.issue = `маршрут шлюза активен, но на 127.0.0.1:${probePort} ничего не слушает (шлюз ответит 502)`;
-        }
+        // «Маршрут объявлен, процесс не запущен» — штатное состояние connect,
+        // а не проблема: разработчик поднимает host-сервис сам.
+        row.state = listening ? "listening" : "not_started";
+        row.health = listening ? "🟢 Listening" : "⚪ Not started";
       } else if (row.driver === "bun") {
         row.state = "unknown";
         row.health = "⚪ Unknown";
       } else {
         const { state, statusText } = formatDockerStatus(undefined, row.target);
-        row.state = state;
+        // Контейнер ещё не создан (connect без deploy) — тоже штатное состояние.
+        row.state = container ? state : "not_started";
         row.health = container ? statusText : state === "host" ? "💻 Host" : "⚪ Not started";
-        if (!container && state === "stopped") {
-          row.issue = "контейнер не найден: сервис не запущен или принадлежит другому checkout";
-        }
       }
       return;
     }
@@ -850,7 +847,8 @@ export async function handleStatus(options: StatusOptions = {}): Promise<void> {
     if (state === "running" && statusText.includes("unhealthy")) {
       row.issue = "healthcheck контейнера не проходит";
     } else if (state !== "running") {
-      row.issue = `контейнер в состоянии "${state}"`;
+      // Остановленный контейнер — не ошибка: это может быть осознанный down.
+      row.health = `⚪ Not running (${statusText})`;
     }
   });
   await Promise.all(probes);
@@ -970,7 +968,7 @@ export async function handleStatus(options: StatusOptions = {}): Promise<void> {
 
   if (rows.length > 0) {
     console.log(`🚀 \x1b[1mPegas Services Dashboard\x1b[0m\n`);
-    const headers = ["", "PROJECT", "SERVICE", "ENV", "DRIVER", "ENDPOINT", "TARGET", "GATEWAY", "HEALTH", "MEM / UP"];
+    const headers = ["PROJECT", "SERVICE", "ENV", "DRIVER", "ENDPOINT", "TARGET", "GATEWAY", "HEALTH", "MEM / UP"];
     const gatewayLabel: Record<ServiceRow["gateway"], string> = {
       linked: "🔗 Linked",
       routed: "📦 Routed",
@@ -978,7 +976,6 @@ export async function handleStatus(options: StatusOptions = {}): Promise<void> {
       none: "—",
     };
     const tableRows = rows.map((r) => [
-      r.current ? "★" : "",
       r.project,
       r.service,
       shortEnv(r.env),
