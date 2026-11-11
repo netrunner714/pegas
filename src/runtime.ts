@@ -127,9 +127,10 @@ export async function runRuntimeCompose(
   projectRoot: string,
   projectId: string,
   composeArgs: string[],
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  secretValues?: Record<string, string>
 ): Promise<void> {
-  const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: env.PEGAS_ENV });
+  const generated = createRuntimeCompose(contract, { projectRoot, projectId, environment: env.PEGAS_ENV, secretValues });
   if (composeArgs[0] === "up") {
     const networkReady = await ensureDockerNetwork("pegas-network");
     if (!networkReady) {

@@ -5,6 +5,12 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [4.0.5] — 2026-11-11
+
+### Fixed
+
+- **Секреты из `.env` теперь попадают в контейнеры.** Раньше в манифест уходили только имена (`PEGAS_SECRETS`), а значения терялись: API падал с «PG_ADMIN_USER + PG_ADMIN_PASSWORD обязательны», Postgres — с «POSTGRES_PASSWORD is not specified». Теперь `deploy` читает `.env` и инжектит значения объявленных секретов, а также раскрывает `${KEY}` в env-картах.
+
 ## [4.0.4] — 2026-11-11
 
 ### Added

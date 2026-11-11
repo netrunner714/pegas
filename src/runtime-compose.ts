@@ -18,6 +18,8 @@ export interface RuntimeComposeOptions {
   projectRoot: string;
   projectId: string;
   environment?: string;
+  /** Значения из .env: инжектятся в environment и раскрывают ${PLACEHOLDER}. */
+  secretValues?: Record<string, string>;
 }
 
 export interface RuntimeComposeResult {
@@ -345,6 +347,17 @@ export function createRuntimeCompose(
     environment.PEGAS_CONTEXT = buildSdkContext(contract, scenario, options.projectId, serviceName);
     if (service.secrets && service.secrets.length > 0) {
       environment.PEGAS_SECRETS = service.secrets.join(",");
+      // Значения секретов не должны теряться: Compose-интерполяция ${VAR}
+      // и SDK secret() читают process.env контейнера.
+      for (const name of service.secrets) {
+        const value = options.secretValues?.[name];
+        if (value !== undefined && value !== "") environment[name] = value;
+      }
+    }
+    // Разворачиваем точные плейсхолдеры ${KEY} из .env (например POSTGRES_PASSWORD).
+    for (const [key, value] of Object.entries(environment)) {
+      const m = /^\$\{([A-Z0-9_]+)\}$/.exec(value);
+      if (m && options.secretValues?.[m[1]] !== undefined) environment[key] = options.secretValues[m[1]];
     }
     if (Object.keys(environment).length > 0) generated.environment = environment;
 

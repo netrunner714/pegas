@@ -286,6 +286,10 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
 
   const projectName = contract.projectName || path.basename(projectRoot).toLowerCase().replace(/[^a-z0-9._-]/g, "_");
   const runtimeId = getProjectRuntimeId(projectRoot, projectName);
+  let secretValues: Record<string, string> = {};
+  try {
+    secretValues = Object.fromEntries(parseEnvContent(await fs.readFile(path.join(projectRoot, ".env"), "utf-8")));
+  } catch {}
   const gatewayDir = await findGatewayDir(options.gatewayDir);
   const confDir = getConfDir(gatewayDir);
   await fs.mkdir(confDir, { recursive: true });
@@ -370,6 +374,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       projectRoot,
       projectId: runtimeId,
       environment: env,
+      secretValues,
     });
     // issue #27: имя compose-проекта — из генератора манифеста (единый источник
     // истины; отдельное вычисление `${runtimeId}-${env}` расходилось с ним).
@@ -457,7 +462,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       // v3: манифест содержит только driver:"docker"-сервисы сценария; host-сервисы не поднимаем
       await runRuntimeCompose(contract, projectRoot, runtimeId, [
         "up", "-d", "--remove-orphans",
-      ], { ...deployEnv, PEGAS_ENV: rawScenario });
+      ], { ...deployEnv, PEGAS_ENV: rawScenario }, secretValues);
     } catch (err: any) {
       if (gatewayPrepared) {
         // Do not leave an otherwise unused shared Gateway running after a failed first deploy.
@@ -513,7 +518,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       status: "success",
       env,
       project: projectName,
-      containers: Object.keys(createRuntimeCompose(contract, { projectRoot, projectId: runtimeId, environment: env }).manifest.services ?? {}),
+      containers: Object.keys(createRuntimeCompose(contract, { projectRoot, projectId: runtimeId, environment: env, secretValues }).manifest.services ?? {}),
       routes: "managed by pegas connect",
     }));
     return;
