@@ -126,6 +126,12 @@ export interface ServiceContract {
   dependsOn?: ScenarioMap<ScenarioDependencies>;
   /** Healthcheck (сценарная карта). */
   healthcheck?: ScenarioMap<ServiceHealthcheck>;
+  /**
+   * Дополнительные DNS-имена сервиса в общей pegas-network (сценарная карта).
+   * Позволяют соседним проектам обращаться по стабильному имени, а не к
+   * scoped-алиасу `<runtimeId>-<scenario>-<service>`.
+   */
+  networkAliases?: ScenarioMap<string[]>;
   /** Несекретные значения конфигурации (Zero Scalars: карта сценариев на каждый ключ). */
   env?: Record<string, ScenarioMap<string>>;
   /** CORS-сервисов; false/undefined — без заголовков. */

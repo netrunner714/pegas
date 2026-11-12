@@ -451,3 +451,43 @@ describe("v3 валидатор: scope/shared — разделяемый пул 
     expect(validatePegasContract(ok)).toEqual([]);
   });
 });
+
+describe("v3 валидатор: networkAliases", () => {
+  it("валидная DNS-метка принимается", () => {
+    const c = validContract();
+    (c.services.redis as any).networkAliases = {
+      development: ["egress-proxy"],
+      stage: ["egress-proxy"],
+      production: ["egress-proxy"],
+    };
+    expect(validatePegasContract(c)).toEqual([]);
+  });
+
+  it("некорректная DNS-метка — ошибка", () => {
+    for (const bad of ["Egress", "egress_proxy", "-egress", "egress-", "a".repeat(64)]) {
+      const c = validContract();
+      (c.services.redis as any).networkAliases = { development: [bad], stage: [], production: [] };
+      expect(validatePegasContract(c).some((i) => i.message.includes("Некорректный алиас"))).toBe(true);
+    }
+  });
+
+  it("дубликат алиаса внутри сценария — ошибка", () => {
+    const c = validContract();
+    (c.services.redis as any).networkAliases = { development: [], stage: ["egress-proxy"], production: [] };
+    (c.services.web as any).networkAliases = { development: [], stage: ["egress-proxy"], production: [] };
+    expect(validatePegasContract(c).some((i) => i.message.includes("уже занят сервисом"))).toBe(true);
+  });
+
+  it("один алиас в разных сценариях — не конфликт", () => {
+    const c = validContract();
+    (c.services.redis as any).networkAliases = { development: [], stage: ["egress-proxy"], production: [] };
+    (c.services.web as any).networkAliases = { development: [], stage: [], production: ["egress-proxy"] };
+    expect(validatePegasContract(c)).toEqual([]);
+  });
+
+  it("host-сервису алиас в сети не нужен — ошибка", () => {
+    const c = validContract();
+    (c.services.web as any).networkAliases = { development: ["egress-proxy-dev"], stage: [], production: [] };
+    expect(validatePegasContract(c).some((i) => i.message.includes('несовместимы с driver: "bun"'))).toBe(true);
+  });
+});

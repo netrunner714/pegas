@@ -33,8 +33,14 @@ const SHARED_TENANT_NAME_REGEX = /^[a-z_][a-z0-9_]*$/;
 const SCENARIO_FIELDS = [
   "runtime", "image", "build", "command", "port", "ports", "domains",
   "publicHost", "volumes", "dependsOn", "healthcheck", "cors",
-  "scope", "shared",
+  "scope", "shared", "networkAliases",
 ] as const;
+
+/**
+ * Паттерн сетевого алиаса — DNS-метка. Дополнительное имя сервиса в общей
+ * `pegas-network`, по которому к нему ходят соседние проекты (issue #31).
+ */
+const NETWORK_ALIAS_REGEX = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export interface ContractValidationIssue {
   path: string;
@@ -216,6 +222,8 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
 
   const knownServiceKeys = new Set([...SCENARIO_FIELDS, "env", "secrets"]);
   const conditions = new Set(["service_started", "service_healthy"]);
+  // Алиасы живут в общей сети, поэтому имя обязано быть уникальным в сценарии.
+  const usedNetworkAliases = new Map<string, string>();
 
   for (const [name, svc] of Object.entries(services)) {
     if (!SERVICE_NAME_REGEX.test(name)) {
@@ -351,6 +359,30 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
       if (isHost && portsNonEmpty) {
         // host-процесс и так на хосте: проброс портов Docker не применим
         add(`${prefix} ports`, "ports несовместим с driver: \"bun\" (host-процесс уже на хосте).");
+      }
+
+      // networkAliases: дополнительные имена в общей сети для соседних проектов
+      const networkAliases = (svc.networkAliases as ScenarioMap<string[]> | undefined)?.[sc];
+      if (networkAliases !== undefined) {
+        if (!Array.isArray(networkAliases)) {
+          add(`${prefix} networkAliases`, "networkAliases — массив DNS-имён.");
+        } else if (isHost && networkAliases.length > 0) {
+          add(`${prefix} networkAliases`, 'networkAliases несовместимы с driver: "bun" — у host-процесса нет контейнера в pegas-network.');
+        } else {
+          for (const alias of networkAliases) {
+            if (typeof alias !== "string" || !NETWORK_ALIAS_REGEX.test(alias)) {
+              add(`${prefix} networkAliases`, `Некорректный алиас "${String(alias)}": DNS-метка [a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?.`);
+              continue;
+            }
+            const key = `${sc}:${alias}`;
+            const owner = usedNetworkAliases.get(key);
+            if (owner !== undefined && owner !== name) {
+              add(`${prefix} networkAliases`, `Алиас "${alias}" уже занят сервисом "${owner}" в сценарии "${sc}".`);
+              continue;
+            }
+            usedNetworkAliases.set(key, name);
+          }
+        }
       }
 
       // dependsOn: при host-драйвере только {}

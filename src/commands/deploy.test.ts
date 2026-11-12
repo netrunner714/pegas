@@ -368,17 +368,17 @@ describe("pegas deploy", () => {
     }
   });
 
-  it("rejects deployment when requested environment has no domains configured", async () => {
+  it("deploys internal-only project without domains (no gateway routes needed)", async () => {
     mockDeployReloadOk = true;
     const tmpProj = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-del-proj-"));
     const tmpGateway = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-del-gw-"));
 
-    // Contract has only dev domain, no prod
+    // Внутренний сервис: доменов нет ни в одном сценарии.
     const contract = {
-      projectName: "dev-only-app",
+      projectName: "internal-only-app",
       services: {
-        web: {
-          domains: { development: ["dev.localhost"], production: [] },
+        worker: {
+          domains: { development: [], production: [] },
         },
       },
     };
@@ -391,14 +391,14 @@ describe("pegas deploy", () => {
       await handleDeploy({
         cwd: tmpProj,
         gatewayDir: tmpGateway,
-        scenario: "stage",
+        scenario: "production",
         skipUp: true,
         noExit: true,
         json: true,
       });
 
-      const errLog = logs.find((l) => l.includes("has no domains defined"));
-      expect(errLog).toBeDefined();
+      expect(logs.find((l) => l.includes("has no domains defined"))).toBeUndefined();
+      expect(logs.find((l) => l.includes('"status":"success"'))).toBeDefined();
     } finally {
       console.log = origLog;
       await fs.rm(tmpProj, { recursive: true, force: true });

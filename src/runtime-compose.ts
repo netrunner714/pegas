@@ -265,6 +265,7 @@ export function createRuntimeCompose(
       volumes,
       healthcheck,
       dependsOn,
+      networkAliases: at(service.networkAliases as ScenarioMap<string[]> | undefined, scenario) ?? [],
     });
     serviceHashes[serviceName] = serviceHash;
 
@@ -293,7 +294,12 @@ export function createRuntimeCompose(
       },
       networks: {
         "pegas-network": {
-          aliases: [`${options.projectId}-${scenario}-${serviceName}`],
+          aliases: Array.from(
+            new Set([
+              `${options.projectId}-${scenario}-${serviceName}`,
+              ...(at(service.networkAliases as ScenarioMap<string[]> | undefined, scenario) ?? []),
+            ])
+          ),
         },
         "project-network": {
           aliases: [serviceName],

@@ -312,18 +312,11 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
     }
   }
 
-  if (requestedDomains.length === 0) {
-    const available = contract.scenarios;
-    const envHint = available.length > 0
-      ? `Available environments: ${available.join(", ")}`
-      : `No environments with active domains defined in '${CONTRACT_FILENAME}'.`;
-    if (isJson) console.log(JSON.stringify({ error: `Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`, availableEnvironments: available }));
-    else {
-      console.error(`\n❌ Error: Environment '${env}' has no domains defined in '${CONTRACT_FILENAME}'.`);
-      console.error(`   ${envHint}`);
-    }
-    if (!options.noExit) process.exit(1);
-    return;
+  // Проект может не иметь HTTP-доменов вовсе: внутренние сервисы (egress-прокси,
+  // очереди) живут только в pegas-network. Маршруты шлюза им не нужны.
+  const hasDomains = requestedDomains.length > 0;
+  if (!hasDomains && !isJson) {
+    console.log(`\nℹ️  Сценарий '${env}' без HTTP-доменов: только внутренние сервисы, маршруты шлюза не нужны.`);
   }
 
   const projectRouteFile = getProjectRouteFilePath(gatewayDir, projectName, env);

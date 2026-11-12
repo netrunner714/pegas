@@ -46,6 +46,7 @@
 | `volumes` | map | Named-тома по сценариям (compose short syntax). Для `postgres:18+` том монтируется в `/var/lib/postgresql`: образы 18+ хранят данные в каталогах по мажорным версиям, монтирование в `/var/lib/postgresql/data` приводит к рестарт-лупу контейнера |
 | `dependsOn` | map | Зависимости: `{ "<имя>": { "condition": "service_healthy" \| "service_started" } }`; в host-сценариях — только пустой объект |
 | `healthcheck` | map | Проба: `{ test, interval, timeout, retries }` (compose-формат) |
+| `networkAliases` | map | Дополнительные DNS-имена сервиса в общей `pegas-network` (например `egress-proxy`), чтобы соседние проекты обращались по стабильному имени, а не к scoped-алиасу `<runtimeId>-<scenario>-<service>`. Имя обязано быть уникальным в сценарии; scoped-алиас сохраняется рядом. Внутри проекта сервис по-прежнему доступен по своему имени |
 
 ## Сценарные карты (Zero Scalars)
 

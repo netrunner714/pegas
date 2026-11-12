@@ -321,3 +321,24 @@ describe("runtime-compose v3: платформенная инъекция PORT",
     expect(api.environment.PORT).toBe("4000"); // port-карта контракта — источник истины
   });
 });
+
+describe("runtime-compose v3: networkAliases", () => {
+  it("дополнительные алиасы добавляются к scoped-алиасу в pegas-network", () => {
+    const c = contract();
+    (c.services.redis as any).networkAliases = {
+      development: ["egress-proxy-dev"],
+      stage: ["egress-proxy-stage"],
+      production: ["egress-proxy"],
+    };
+    const { manifest } = createRuntimeCompose(c, { projectRoot, projectId: "myapp", environment: "stage" });
+    const redis = (manifest.services as any).redis;
+    expect(redis.networks["pegas-network"].aliases).toEqual(["myapp-stage-redis", "egress-proxy-stage"]);
+    // Каноническое имя в project-сети не меняется.
+    expect(redis.networks["project-network"].aliases).toEqual(["redis"]);
+  });
+
+  it("без networkAliases остаётся только scoped-алиас", () => {
+    const { manifest } = createRuntimeCompose(contract(), { projectRoot, projectId: "myapp", environment: "stage" });
+    expect((manifest.services as any).redis.networks["pegas-network"].aliases).toEqual(["myapp-stage-redis"]);
+  });
+});
