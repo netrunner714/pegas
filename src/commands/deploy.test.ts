@@ -17,7 +17,7 @@ mock.module("../docker.js", () => ({
   stopGatewayIfUnused: async () => ({ success: true, stdout: "", stderr: "" }),
 }));
 
-import { handleDeploy, resolveScopedUpstream, waitForContainerReadiness } from "./deploy.js";
+import { DEPLOY_COMPOSE_ARGS, handleDeploy, resolveScopedUpstream, waitForContainerReadiness } from "./deploy.js";
 
 /** Дописывает v3-обязательные поля контракта (scenarios/gateway/runtime-карты). */
 function v3ify(contract: any): any {
@@ -841,5 +841,13 @@ describe("pegas deploy --dry-run (рид-онли валидация)", () => {
     const json = JSON.parse(logs.find((l) => l.startsWith("{")) ?? "{}");
     expect(json.status).toBe("invalid");
     expect(json.details).toContain("Additional property");
+  });
+});
+
+
+describe("deploy build (источники важнее контракта)", () => {
+  it("compose up проходит с --build, иначе правка кода не попадает в контейнер", () => {
+    expect(DEPLOY_COMPOSE_ARGS).toContain("--build");
+    expect(DEPLOY_COMPOSE_ARGS[0]).toBe("up");
   });
 });

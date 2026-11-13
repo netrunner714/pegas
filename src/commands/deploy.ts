@@ -10,6 +10,9 @@ import { runRuntimeCompose } from "../runtime.js";
 import { createRuntimeCompose } from "../runtime-compose.js";
 import { ensureGatewayContainer, stopGatewayIfUnused } from "../docker.js";
 import { withRuntimeLock } from "../runtime-lock.js";
+
+/** Аргументы compose up для деплоя: --build обязателен — исходники меняются чаще контракта. */
+export const DEPLOY_COMPOSE_ARGS = ["up", "-d", "--build", "--remove-orphans"] as const;
 import { parseEnvContent, verifySecrets } from "../secrets.js";
 import {
   classifySharedImage,
@@ -453,9 +456,7 @@ async function handleDeployUnlocked(options: DeployOptions = {}): Promise<void> 
       // готовы до up — потребители резолвят pegas:// на алиас пула.
       await ensureSharedPoolsForDeploy({ contract, projectRoot, projectName, runtimeId, env });
       // v3: манифест содержит только driver:"docker"-сервисы сценария; host-сервисы не поднимаем
-      await runRuntimeCompose(contract, projectRoot, runtimeId, [
-        "up", "-d", "--remove-orphans",
-      ], { ...deployEnv, PEGAS_ENV: rawScenario }, secretValues);
+      await runRuntimeCompose(contract, projectRoot, runtimeId, [...DEPLOY_COMPOSE_ARGS], { ...deployEnv, PEGAS_ENV: rawScenario }, secretValues);
     } catch (err: any) {
       if (gatewayPrepared) {
         // Do not leave an otherwise unused shared Gateway running after a failed first deploy.
