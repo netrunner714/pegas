@@ -56,6 +56,7 @@ flowchart TD
 * **Разделение команд**: `pegas connect -s <scenario>` объявляет маршруты всех сервисов сценария (host и docker), `pegas deploy -s <scenario>` поднимает только docker-сервисы и не пишет маршруты.
 * **Анти-хайджекинг**: деплой блокируется, если домен уже закреплён за другим проектом.
 * **Zero 502**: шлюз переключает трафик на новый контейнер только после успешных healthcheck-проб.
+* **Автобэкап PostgreSQL**: поле `backup` в контракте добавляет сайдкар с `pg_dump -Fc` и named-volume — без cron и systemd на хосте. Политика задаётся в `pegas.json`, см. [справочник контракта](docs/reference/contract.md#автобэкап-postgresql).
 * **Zero Dependencies**: чистый TypeScript для Bun/Node 24+, ноль сторонних npm-зависимостей.
 
 ---

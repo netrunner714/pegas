@@ -1,10 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { PegasContract, ScenarioMap, ServiceDriver } from "./types.js";
+import { PegasContract, ScenarioMap, ServiceBackup, ServiceDriver } from "./types.js";
 import { validatePegasContract, getEnvironmentDomains, getProjectRuntimeId } from "./contract.js";
 import { composeProjectName, containerName, projectNetworkName, runtimeVolumeName } from "./naming.js";
 import { classifySharedImage, sharedPoolName } from "./shared-infra.js";
+import {
+  BACKUP_DIR,
+  backupPasswordSecret,
+  backupServiceName,
+  backupTarget,
+  backupVolumeName,
+  buildBackupHealthcheck,
+  buildBackupScript,
+  parseBackupInterval,
+} from "./backup.js";
 
 /**
  * Генерация эфемерного compose-манифеста из v3-контракта (docs/internal/rfc/RFC_CONTRACT_V3.md, столп 3):
@@ -253,9 +263,11 @@ export function createRuntimeCompose(
     const healthcheck = at(service.healthcheck, scenario);
     const dependsOn = at(service.dependsOn, scenario);
 
-    // Хэш эффективной конфигурации сервиса для манифеста
+    // Хэш эффективной конфигурации сервиса для манифеста.
+    // backup исключён: включение бэкапа не должно менять label/hash самой БД
+    // и пересоздавать её контейнер — политика живёт в отдельном сайдкаре.
     const serviceHash = hashValue({
-      service: stableValue({ ...service, runtime: service.runtime }),
+      service: stableValue({ ...service, backup: undefined, runtime: service.runtime }),
       scenario,
       image,
       build: build ? { ...build } : null,
@@ -400,6 +412,89 @@ export function createRuntimeCompose(
     if (volumeList.length > 0) generated.volumes = volumeList;
 
     services[serviceName] = generated;
+
+    // Автобэкап PostgreSQL: Pegas добавляет сайдкар в тот же compose-проект.
+    // Политика — в контракте; cron/systemd на хосте не нужны.
+    const backup = at(service.backup as ScenarioMap<ServiceBackup | null> | undefined, scenario);
+    if (backup) {
+      if (!image) {
+        throw new Error(`services.${serviceName}.backup: нужен готовый образ PostgreSQL (build не поддерживается).`);
+      }
+      const intervalSeconds = parseBackupInterval(backup.every);
+      if (intervalSeconds === null) {
+        throw new Error(`services.${serviceName}.backup.every: неверный интервал "${backup.every}".`);
+      }
+      const passwordSecret = backupPasswordSecret(backup);
+      const password = options.secretValues?.[passwordSecret];
+      if (password === undefined || password === "") {
+        throw new Error(`services.${serviceName}.backup: секрет ${passwordSecret} не найден в .env.`);
+      }
+      const backupName = backupServiceName(serviceName);
+      if (services[backupName]) {
+        throw new Error(`services.${serviceName}.backup: имя ${backupName} уже занято сервисом.`);
+      }
+
+      const envMap: Record<string, string> = {};
+      for (const [key, valueMap] of Object.entries(service.env ?? {})) {
+        const value = valueMap[scenario];
+        if (typeof value === "string") envMap[key] = value;
+      }
+      const target = backupTarget(backup, envMap);
+      const dbPort = service.port?.[scenario] ?? 5432;
+      const backupVolume = backupVolumeName(serviceName);
+      namedVolumes.add(backupVolume);
+      const backupHash = hashValue({
+        service: serviceName,
+        scenario,
+        backup: stableValue(backup),
+      });
+      serviceHashes[backupName] = backupHash;
+
+      services[backupName] = {
+        restart: "unless-stopped",
+        container_name: containerName({
+          projectName: contract.projectName,
+          scenario,
+          service: backupName,
+          runtimeId: options.projectId,
+        }),
+        labels: {
+          "pegas.project": options.projectId,
+          "pegas.scenario": scenario,
+          "pegas.project-name": contract.projectName,
+          "pegas.service": backupName,
+          "pegas.backup-for": serviceName,
+          "pegas.manifest-hash": backupHash,
+        },
+        networks: {
+          "pegas-network": {
+            aliases: [`${options.projectId}-${scenario}-${backupName}`],
+          },
+          "project-network": {
+            aliases: [backupName],
+          },
+        },
+        image,
+        environment: {
+          PGHOST: serviceName,
+          PGPORT: String(dbPort),
+          PGUSER: target.user,
+          PGDATABASE: target.database,
+          PGPASSWORD: password,
+          BACKUP_EVERY_SECONDS: String(intervalSeconds),
+          BACKUP_KEEP: String(backup.keep),
+          PEGAS_SCENARIO: scenario,
+        },
+        command: ["sh", "-c", buildBackupScript()],
+        healthcheck: buildBackupHealthcheck(intervalSeconds),
+        depends_on: {
+          [serviceName]: {
+            condition: healthcheck && typeof healthcheck === "object" ? "service_healthy" : "service_started",
+          },
+        },
+        volumes: [`${backupVolume}:${BACKUP_DIR}`],
+      };
+    }
   }
 
   const composeProject = composeProjectName({

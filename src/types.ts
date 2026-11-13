@@ -32,6 +32,27 @@ export type ServiceScope = "isolated" | "shared";
 export type SharedPoolKind = "postgres" | "redis";
 
 /**
+ * Политика автоматического бэкапа PostgreSQL-сервиса (сценарная карта).
+ *
+ * Pegas сам добавляет в compose сайдкар: тот делает `pg_dump -Fc` в
+ * named-volume и хранит последние `keep` копий. Значения подключения
+ * берутся из env сервиса (`POSTGRES_USER`, `POSTGRES_DB`), пароль —
+ * из секрета `passwordSecret` (по умолчанию `POSTGRES_PASSWORD`).
+ */
+export interface ServiceBackup {
+  /** Интервал между дампами: `1h`, `30m`, `7d`. Минимум 1 минута. */
+  every: string;
+  /** Сколько последних дампов хранить. */
+  keep: number;
+  /** Пользователь БД; по умолчанию POSTGRES_USER из env сервиса. */
+  user?: string;
+  /** Имя БД; по умолчанию POSTGRES_DB из env сервиса. */
+  database?: string;
+  /** Имя секрета с паролем; по умолчанию POSTGRES_PASSWORD. */
+  passwordSecret?: string;
+}
+
+/**
  * Параметры аренды в разделяемом пуле (сценарная карта).
  *
  * Имя базы/пользователя или префикс ключей должно различать проекты внутри
@@ -122,6 +143,11 @@ export interface ServiceContract {
   publicHost?: ScenarioMap<string>;
   /** Named-тома (сценарная карта). */
   volumes?: ScenarioMap<string[]>;
+  /**
+   * Автобэкап PostgreSQL по сценариям; null — выключен.
+   * Только для docker-сервисов с образом postgres/pgvector и без build.
+   */
+  backup?: ScenarioMap<ServiceBackup | null>;
   /** Зависимости запуска (сценарная карта; при host-драйвере сценария — {}). */
   dependsOn?: ScenarioMap<ScenarioDependencies>;
   /** Healthcheck (сценарная карта). */

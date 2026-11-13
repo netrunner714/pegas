@@ -461,6 +461,56 @@
         }
       }
     },
+    "serviceBackup": {
+      "description": "Политика автоматического бэкапа PostgreSQL: Pegas добавляет в compose сайдкар с pg_dump и named-volume. Значения подключения — из env сервиса (POSTGRES_USER/POSTGRES_DB), пароль — из секрета passwordSecret.",
+      "type": "object",
+      "required": [
+        "every",
+        "keep"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "every": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*[mhd]$",
+          "description": "Интервал между дампами: 30m, 1h, 7d (минимум 1 минута).",
+          "examples": [
+            "1h"
+          ]
+        },
+        "keep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Сколько последних дампов хранить; после успешного нового старые удаляются.",
+          "examples": [
+            24
+          ]
+        },
+        "user": {
+          "type": "string",
+          "description": "Пользователь БД; по умолчанию POSTGRES_USER из env сервиса.",
+          "examples": [
+            "postgres"
+          ]
+        },
+        "database": {
+          "type": "string",
+          "description": "Имя БД; по умолчанию POSTGRES_DB из env сервиса.",
+          "examples": [
+            "app"
+          ]
+        },
+        "passwordSecret": {
+          "type": "string",
+          "pattern": "^[A-Z0-9_]+$",
+          "description": "Имя секрета с паролем; по умолчанию POSTGRES_PASSWORD. Секрет обязан быть в services.<name>.secrets.",
+          "examples": [
+            "POSTGRES_PASSWORD"
+          ]
+        }
+      }
+    },
     "service": {
       "type": "object",
       "required": [
@@ -689,6 +739,33 @@
               }
             ]
           }
+        },
+        "backup": {
+          "type": "object",
+          "description": "Автобэкап PostgreSQL по сценариям: { every: \"1h\", keep: 24 } или null (выключено). Pegas сам добавляет сайдкар с pg_dump и named-volume; cron на хосте не нужен.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/serviceBackup"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "examples": [
+            {
+              "development": null,
+              "stage": {
+                "every": "1h",
+                "keep": 24
+              },
+              "production": {
+                "every": "1h",
+                "keep": 24
+              }
+            }
+          ]
         }
       },
       "examples": [

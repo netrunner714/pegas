@@ -5,6 +5,14 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [4.2.0] — 2026-11-13
+
+### Added
+
+- **Автобэкап PostgreSQL в контракте.** Поле `services.<name>.backup` — сценарная карта `{ every: "1h", keep: 24 } | null`. При `pegas deploy` Pegas добавляет к PostgreSQL-сервису сайдкар `<service>-backup`: тот делает `pg_dump -Fc` в named-volume `backup-<service>`, хранит последние `keep` дампов и имеет healthcheck «последний успешный дамп не старше двух интервалов». Cron/systemd на хосте не нужны.
+- Пароль берётся из секрета `passwordSecret` (по умолчанию `POSTGRES_PASSWORD`, обязан быть объявлен в `services.<name>.secrets`), пользователь и база — из `POSTGRES_USER`/`POSTGRES_DB` env сервиса (или явных `user`/`database`).
+- Ограничения: только docker-сервис с образом postgres/pgvector, без `build` и `scope: "shared"`; `every` — `1m`…`7d`, `keep` — 1…1000.
+
 ## [4.1.0] — 2026-11-12
 
 ### Added

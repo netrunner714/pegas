@@ -9,6 +9,12 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { PegasContract, ServiceContract, ScenarioMap } from "./types.js";
 import { classifySharedImage } from "./shared-infra.js";
+import {
+  BACKUP_DEFAULT_PASSWORD_SECRET,
+  BACKUP_MAX_KEEP,
+  backupServiceName,
+  parseBackupInterval,
+} from "./backup.js";
 
 export const CONTRACT_FILENAME = "pegas.json";
 
@@ -33,7 +39,7 @@ const SHARED_TENANT_NAME_REGEX = /^[a-z_][a-z0-9_]*$/;
 const SCENARIO_FIELDS = [
   "runtime", "image", "build", "command", "port", "ports", "domains",
   "publicHost", "volumes", "dependsOn", "healthcheck", "cors",
-  "scope", "shared", "networkAliases",
+  "scope", "shared", "networkAliases", "backup",
 ] as const;
 
 /**
@@ -493,6 +499,53 @@ export function validatePegasContract(value: unknown): ContractValidationIssue[]
         }
       } else if (shared !== undefined && shared !== null) {
         add(`${prefix} shared`, `shared без scope: "shared" в этом сценарии — уберите поле или объявите scope: "shared".`);
+      }
+
+      // backup: автобэкап PostgreSQL-сервиса. Политика в контракте,
+      // сайдкар в compose генерирует Pegas; cron на хосте не нужен.
+      const backup = (svc.backup as ScenarioMap<unknown> | undefined)?.[sc];
+      if (backup !== undefined && backup !== null) {
+        if (typeof backup !== "object" || Array.isArray(backup)) {
+          add(`${prefix} backup`, "backup — объект { every, keep } или null (выключено).");
+        } else {
+          const b = backup as Record<string, unknown>;
+          const image = (svc.image as ScenarioMap<string> | undefined)?.[sc];
+          const build = (svc.build as ScenarioMap<unknown> | undefined)?.[sc];
+          if (!isDocker) add(`${prefix} backup`, 'backup доступен только docker-сервису PostgreSQL (driver: "docker").');
+          if (build) add(`${prefix} backup`, "backup несовместим с build: нужен готовый образ PostgreSQL.");
+          if (scope === "shared") add(`${prefix} backup`, 'backup несовместим со scope: "shared" — пока поддерживается только isolated PostgreSQL.');
+          if (image && classifySharedImage(image)?.kind !== "postgres") {
+            add(`${prefix} backup`, `backup поддерживается только для образов PostgreSQL (сейчас "${image}").`);
+          }
+          if (typeof b.every !== "string" || parseBackupInterval(b.every) === null) {
+            add(`${prefix} backup.every`, 'every — интервал вида "1h", "30m", "7d" (минимум 1 минута).');
+          }
+          const keep = b.keep;
+          if (typeof keep !== "number" || !Number.isInteger(keep) || keep < 1 || keep > BACKUP_MAX_KEEP) {
+            add(`${prefix} backup.keep`, `keep — целое число от 1 до ${BACKUP_MAX_KEEP} (сколько последних дампов хранить).`);
+          }
+          const allowed = new Set(["every", "keep", "user", "database", "passwordSecret"]);
+          for (const key of Object.keys(b)) {
+            if (!allowed.has(key)) add(`${prefix} backup.${key}`, "Неизвестное поле backup (допустимы every, keep, user, database, passwordSecret).");
+          }
+          for (const key of ["user", "database"] as const) {
+            if (b[key] !== undefined && (typeof b[key] !== "string" || !String(b[key]).trim())) {
+              add(`${prefix} backup.${key}`, `${key} — непустая строка.`);
+            }
+          }
+          if (b.passwordSecret !== undefined && (typeof b.passwordSecret !== "string" || !/^[A-Z0-9_]+$/.test(b.passwordSecret))) {
+            add(`${prefix} backup.passwordSecret`, "passwordSecret — имя секретного ключа [A-Z0-9_]+.");
+          }
+          const passwordSecret = typeof b.passwordSecret === "string" && b.passwordSecret
+            ? b.passwordSecret
+            : BACKUP_DEFAULT_PASSWORD_SECRET;
+          if (!Array.isArray(svc.secrets) || !svc.secrets.includes(passwordSecret)) {
+            add(`${prefix} backup`, `Секрет ${passwordSecret} не объявлен в services.${name}.secrets: пароль для pg_dump недоступен.`);
+          }
+          if (services[backupServiceName(name)]) {
+            add(`${prefix} backup`, `Имя сервиса ${backupServiceName(name)} уже занято: backup создаёт его автоматически.`);
+          }
+        }
       }
     }
   }

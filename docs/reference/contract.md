@@ -47,6 +47,7 @@
 | `dependsOn` | map | Зависимости: `{ "<имя>": { "condition": "service_healthy" \| "service_started" } }`; в host-сценариях — только пустой объект |
 | `healthcheck` | map | Проба: `{ test, interval, timeout, retries }` (compose-формат) |
 | `networkAliases` | map | Дополнительные DNS-имена сервиса в общей `pegas-network` (например `egress-proxy`), чтобы соседние проекты обращались по стабильному имени, а не к scoped-алиасу `<runtimeId>-<scenario>-<service>`. Имя обязано быть уникальным в сценарии; scoped-алиас сохраняется рядом. Внутри проекта сервис по-прежнему доступен по своему имени |
+| `backup` | map | Автобэкап PostgreSQL: `{ "every": "1h", "keep": 24 }` или `null` (выключено). Pegas сам добавляет в compose сайдкар `db-backup` с `pg_dump -Fc` и named-volume. Только docker-сервис с образом postgres/pgvector, без `build` и `scope: "shared"`. Пароль — из секрета `passwordSecret` (по умолчанию `POSTGRES_PASSWORD`), пользователь/база — из env `POSTGRES_USER`/`POSTGRES_DB` |
 
 ## Сценарные карты (Zero Scalars)
 
@@ -66,6 +67,40 @@
 `<scheme>://<projectId>-<scenario>-<service>:<port>`.
 Схема определяется по образу целевого сервиса (redis, postgres, http).
 Ссылка на host-сервис (`driver: "bun"`) — ошибка: внутренний адрес контейнерам недоступен.
+
+## Автобэкап PostgreSQL
+
+`backup` — политика, а не ручной cron. Pegas добавляет к PostgreSQL-сервису сайдкар
+`<service>-backup` в тот же compose-проект:
+
+```jsonc
+"db": {
+  "runtime": { "development": { "driver": "docker" }, "production": { "driver": "docker" } },
+  "image":   { "development": "postgres:18-alpine", "production": "postgres:18-alpine" },
+  "port":    { "development": 5432, "production": 5432 },
+  "volumes": { "development": ["pgdata:/var/lib/postgresql"], "production": ["pgdata:/var/lib/postgresql"] },
+  "env": {
+    "POSTGRES_USER": { "development": "app", "production": "app" },
+    "POSTGRES_DB":   { "development": "app", "production": "app" }
+  },
+  "secrets": ["POSTGRES_PASSWORD"],
+  "backup": {
+    "development": null,
+    "production": { "every": "1h", "keep": 24 }
+  }
+}
+```
+
+Сайдкар:
+
+- использует тот же образ, что и БД (версия `pg_dump` совпадает);
+- делает `pg_dump -Fc` в named-volume `backup-<service>`, файлы вида `<db>-YYYYmmddTHHMMSSZ.dump`;
+- хранит последние `keep` дампов, старые удаляет только после успешного нового;
+- ждёт здоровую БД, имеет healthcheck «последний успешный дамп не старше двух интервалов»;
+- запускается и обновляется обычным `pegas deploy -s <scenario>`, без cron/systemd;
+- `pegas down` удаляет контейнер, но том с дампами остаётся.
+
+Восстановление пока ручное: взять файл из тома и выполнить `pg_restore -Fc`.
 
 ## Доктрина env в коде
 
