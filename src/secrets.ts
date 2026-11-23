@@ -9,6 +9,7 @@ export interface SecretsCheckResult {
   envFile: string;
   envExists: boolean;
   isGitIgnored: boolean;
+  isCi?: boolean;
   expectedSecrets: string[];
   source: "contract" | "example" | "none";
   missingKeys: string[];
@@ -316,9 +317,10 @@ export async function syncEnvExample(
 export async function verifySecrets(
   projectRoot: string,
   contract?: PegasContract,
-  options?: { envFile?: string }
+  options?: { envFile?: string; ci?: boolean }
 ): Promise<SecretsCheckResult> {
   const envFileName = options?.envFile || ".env";
+  const isCi = Boolean(options?.ci);
   const resolvedEnv = path.resolve(projectRoot, envFileName);
   const relativeEnv = path.relative(projectRoot, resolvedEnv);
 
@@ -413,7 +415,7 @@ export async function verifySecrets(
   }
 
   // 3. Validate .env parity with expectedSecrets
-  if (expectedSecrets.length > 0) {
+  if ((envExists || !isCi) && expectedSecrets.length > 0) {
     for (const key of expectedSecrets) {
       if (!parsedEnv.has(key)) {
         missingKeys.push(key);
@@ -426,7 +428,7 @@ export async function verifySecrets(
     }
   }
 
-  if (source !== "none") {
+  if (envExists && source !== "none") {
     const expectedSet = new Set(expectedSecrets);
     for (const key of loadedKeys) {
       if (!expectedSet.has(key)) {
@@ -435,24 +437,35 @@ export async function verifySecrets(
     }
   }
 
-  if (!envExists && expectedSecrets.length > 0) {
-    errors.push(`Secret file "${envFileName}" not found. Required by ${source === "contract" ? "pegas.json (secrets)" : ".env.example"}.`);
-  }
+  if (!envExists) {
+    if (!isCi) {
+      if (expectedSecrets.length > 0) {
+        errors.push(`Secret file "${envFileName}" not found. Required by ${source === "contract" ? "pegas.json (secrets)" : ".env.example"}.`);
+      }
+      if (missingKeys.length > 0) {
+        errors.push(`Missing required secrets in ${envFileName}: ${missingKeys.join(", ")}`);
+      }
+    } else {
+      if (!isGitIgnored) {
+        errors.push(`Security risk: "${envFileName}" is NOT gitignored! Secrets must never be committed to Git.`);
+      }
+    }
+  } else {
+    if (!isGitIgnored) {
+      errors.push(`Security risk: "${envFileName}" is NOT gitignored! Secrets must never be committed to Git.`);
+    }
 
-  if (envExists && !isGitIgnored) {
-    errors.push(`Security risk: "${envFileName}" is NOT gitignored! Secrets must never be committed to Git.`);
-  }
+    if (missingKeys.length > 0) {
+      errors.push(`Missing required secrets in ${envFileName}: ${missingKeys.join(", ")}`);
+    }
 
-  if (missingKeys.length > 0) {
-    errors.push(`Missing required secrets in ${envFileName}: ${missingKeys.join(", ")}`);
-  }
+    if (emptyKeys.length > 0) {
+      errors.push(`Empty secret values in ${envFileName}: ${emptyKeys.join(", ")}`);
+    }
 
-  if (emptyKeys.length > 0) {
-    errors.push(`Empty secret values in ${envFileName}: ${emptyKeys.join(", ")}`);
-  }
-
-  if (extraKeys.length > 0) {
-    errors.push(`Undocumented secrets in ${envFileName} (not listed in ${source === "contract" ? "pegas.json secrets" : ".env.example"}): ${extraKeys.join(", ")}. Strict 1:1 match with secrets is required.`);
+    if (extraKeys.length > 0) {
+      errors.push(`Undocumented secrets in ${envFileName} (not listed in ${source === "contract" ? "pegas.json secrets" : ".env.example"}): ${extraKeys.join(", ")}. Strict 1:1 match with secrets is required.`);
+    }
   }
 
   const valid = errors.length === 0;
@@ -462,6 +475,7 @@ export async function verifySecrets(
     envFile: envFileName,
     envExists,
     isGitIgnored,
+    isCi,
     expectedSecrets,
     source,
     missingKeys,
@@ -494,7 +508,16 @@ export function formatSecretsDiagnostic(result: SecretsCheckResult): string {
   lines.push(`   Expected: ${result.expectedSecrets.length} variable(s)`);
 
   if (!result.envExists) {
-    lines.push(`   ❌ ${result.envFile} is missing`);
+    if (result.isCi) {
+      lines.push(`   ✔ CI mode: physical ${result.envFile} not required (contract ↔ .env.example parity verified)`);
+      if (result.isGitIgnored) {
+        lines.push(`   ✔ ${result.envFile} is protected by .gitignore`);
+      } else {
+        lines.push(`   ❌ ${result.envFile} is NOT gitignored!`);
+      }
+    } else {
+      lines.push(`   ❌ ${result.envFile} is missing`);
+    }
   } else {
     lines.push(`   ✔ ${result.envFile} exists`);
     if (result.isGitIgnored) {
@@ -534,7 +557,11 @@ export function formatSecretsDiagnostic(result: SecretsCheckResult): string {
   }
 
   if (result.valid) {
-    lines.push(`   ✨ Strict 1:1 secrets parity verified across contract, .env, and .env.example.`);
+    if (result.isCi && !result.envExists) {
+      lines.push(`   ✨ Strict 1:1 secrets parity verified across contract and .env.example (CI mode).`);
+    } else {
+      lines.push(`   ✨ Strict 1:1 secrets parity verified across contract, .env, and .env.example.`);
+    }
   }
 
   return lines.join("\n");

@@ -189,12 +189,14 @@ Read-only аудит v3-контракта: валидатор, паритет �
 
 ```text
 --cwd <path>          Целевой каталог проекта
+--ci                  Режим CI: валидация контракта, паритета .env.example и git-гигиены без требования физического .env
 ```
 
 Примеры:
 
 ```bash
 pegas check
+pegas check --ci
 pegas check --json
 ```
 

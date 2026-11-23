@@ -208,6 +208,7 @@ export interface CheckOptions {
   cwd?: string;
   json?: boolean;
   noExit?: boolean;
+  ci?: boolean;
 }
 
 export interface CaOptions {

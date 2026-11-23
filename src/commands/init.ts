@@ -267,7 +267,10 @@ export async function auditProjectArtifacts(
       issues.push("AGENTS.md: блок правил Pegas устарел — pegas init обновит (зависимость обновлялась без init).");
     }
   } catch {
-    issues.push("AGENTS.md: файла нет — pegas init создаст с блоком правил Pegas.");
+    const { isIgnoredByGit } = await import("../secrets.js");
+    if (!isIgnoredByGit(projectDir, "AGENTS.md")) {
+      issues.push("AGENTS.md: файла нет — pegas init создаст с блоком правил Pegas.");
+    }
   }
 
   const docsPath = path.join(projectDir, "docs", "pegas.md");

@@ -125,6 +125,41 @@ describe("pegas check command (v3)", () => {
       await fs.rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it("auditRepository: режим CI (ci=true) проходит успешно без физического .env при валидном .env.example", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "pegas-chk-ci-"));
+    try {
+      await fs.writeFile(path.join(tmp, "pegas.json"), JSON.stringify(validContract, null, 2));
+      await fs.writeFile(path.join(tmp, ".gitignore"), ".env\n.pegas\n", "utf-8");
+      await fs.writeFile(path.join(tmp, ".env.example"), "DB_URL=\nAPP_KEY=\n", "utf-8");
+
+      // Без ci: падает, так как нет .env
+      const resNormal = await auditRepository(tmp);
+      expect(resNormal.valid).toBe(false);
+      expect(resNormal.errors.some((e) => e.includes("not found"))).toBe(true);
+
+      // С ci: проходит чисто
+      const resCi = await auditRepository(tmp, { ci: true });
+      expect(resCi.valid).toBe(true);
+      expect(resCi.hasErrors).toBe(false);
+      expect(resCi.secretsCheck?.isCi).toBe(true);
+      expect(resCi.secretsCheck?.envExists).toBe(false);
+
+      // handleCheck в режиме CI
+      const logs: string[] = [];
+      const spyLog = spyOn(console, "log").mockImplementation((msg) => logs.push(String(msg)));
+      try {
+        await handleCheck({ cwd: tmp, ci: true, noExit: true });
+      } finally {
+        spyLog.mockRestore();
+      }
+      const out = logs.join("\n");
+      expect(out).toContain("CI mode: physical .env not required");
+      expect(out).toContain("Strict 1:1 secrets parity verified across contract and .env.example (CI mode)");
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("check: git-гигиена .env.example (шаблон секретов коммитится)", () => {

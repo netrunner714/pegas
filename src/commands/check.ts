@@ -60,7 +60,7 @@ function collectDevelopmentDomains(contract: PegasContract | undefined): string[
 
 export async function auditRepository(
   cwd = process.cwd(),
-  options?: { envFile?: string }
+  options?: { envFile?: string; ci?: boolean }
 ): Promise<RepoAuditResult> {
   const projectRoot = path.resolve(cwd);
   const errors: string[] = [];
@@ -93,8 +93,11 @@ export async function auditRepository(
     );
   }
 
-  // 2. Secrets-паритет: services.*.secrets ↔ .env (если существует)
-  const secretsCheck = await verifySecrets(projectRoot, contract, { envFile: options?.envFile });
+  // 2. Secrets-паритет: services.*.secrets ↔ .env (если существует, в CI опционален)
+  const secretsCheck = await verifySecrets(projectRoot, contract, {
+    envFile: options?.envFile,
+    ci: options?.ci,
+  });
   if (!secretsCheck.valid) {
     errors.push(...secretsCheck.errors);
   }
@@ -239,7 +242,7 @@ export async function handleCheck(options: CheckOptions = {}): Promise<void> {
   const cwd = options.cwd || process.cwd();
   const isJson = options.json ?? false;
 
-  const result = await auditRepository(cwd);
+  const result = await auditRepository(cwd, { ci: options.ci });
 
   if (isJson) {
     console.log(JSON.stringify(result, null, 2));

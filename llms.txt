@@ -41,7 +41,7 @@
 - `npx pegas down [options]` (--cwd, --env) — Remove project containers and Caddy routes (all environments, or one with --env).
 - `npx pegas ca install` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
 - `npx pegas ca remove` (--dry-run) — Manage local Root CA for trusted dev HTTPS (install/remove).
-- `npx pegas check [options]` (--cwd) — Read-only audit: validate the v3 contract, secrets parity, and .gitignore hygiene (no --fix, never mutates).
+- `npx pegas check [options]` (--cwd, --ci) — Read-only audit: validate the v3 contract, secrets parity, and .gitignore hygiene (no --fix, never mutates).
 - `npx pegas status [options]` (--cwd) — Unified dashboard: gateway health plus every Pegas service with real process health.
 - `npx pegas llms [options]` — Print machine-readable LLM context.
 

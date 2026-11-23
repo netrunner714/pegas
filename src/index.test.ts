@@ -399,6 +399,14 @@ describe("main CLI command routing", () => {
       json: true,
       noExit: true,
     });
+
+    await main(["check", "--ci"], { dispatchers, noExit: true });
+    expect(calls.check).toEqual({
+      cwd: undefined,
+      json: false,
+      ci: true,
+      noExit: true,
+    });
   });
 });
 

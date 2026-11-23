@@ -290,8 +290,14 @@ export const COMMANDS: CliCommandDef[] = [
         placeholder: "<path>",
         description: "Target project directory",
       },
+      {
+        name: "ci",
+        type: "boolean",
+        default: false,
+        description: "CI mode: validate contract, .env.example parity and git hygiene without requiring physical .env",
+      },
     ],
-    examples: ["$ pegas check", "$ pegas check --json"],
+    examples: ["$ pegas check", "$ pegas check --ci", "$ pegas check --json"],
   },
   {
     name: "status",
