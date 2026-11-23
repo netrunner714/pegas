@@ -300,7 +300,7 @@ export async function main(argv = process.argv.slice(2), options: MainOptions = 
       await dispatch.handleCheck({
         cwd: values.cwd as string | undefined,
         json: values.json as boolean | undefined,
-        ...(Boolean(values.ci) || Boolean(process.env.CI) ? { ci: true } : {}),
+        ...(values.ci ? { ci: true } : {}),
         noExit: options.noExit,
       });
       break;

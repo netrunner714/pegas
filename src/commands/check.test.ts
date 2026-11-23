@@ -134,7 +134,7 @@ describe("pegas check command (v3)", () => {
       await fs.writeFile(path.join(tmp, ".env.example"), "DB_URL=\nAPP_KEY=\n", "utf-8");
 
       // Без ci: падает, так как нет .env
-      const resNormal = await auditRepository(tmp);
+      const resNormal = await auditRepository(tmp, { ci: false });
       expect(resNormal.valid).toBe(false);
       expect(resNormal.errors.some((e) => e.includes("not found"))).toBe(true);
 
