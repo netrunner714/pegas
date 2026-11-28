@@ -1,0 +1,63 @@
+# Dependencies & package locks
+node_modules/
+.bun/
+bun.lock
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Build artifacts & caches
+.next/
+dist/
+build/
+out/
+*.tsbuildinfo
+.cache/
+.turbo/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+config.json
+!config.example.json
+*.pem
+*.key
+*.cert
+*.crt
+
+# Runtime state & local tools
+.pegas/
+*.bak
+
+# Databases & dumps
+*.dump
+*.sql
+*.sqlite
+*.db
+
+# Logs & temp
+*.log
+.tmp/
+tmp/
+
+# Media & binaries (save context tokens)
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.ico
+*.mp3
+*.wav
+*.mp4
+*.tar
+*.zip
+*.gz
+
+# System & coverage
+.git/
+.DS_Store
+Thumbs.db
+coverage/
+.nyc_output/
